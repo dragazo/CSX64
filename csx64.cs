@@ -2336,7 +2336,6 @@ namespace csx64
 
             public OPs OP = OPs.None;
 
-            public Hole Parent = null;
             public Hole Left = null, Right = null;
 
             private string _Value = null;
@@ -2360,7 +2359,7 @@ namespace csx64
 
                 UInt64 L, R; // parsing locations for left and right subtrees
                 bool LF, RF;
-
+                
                 // switch through op
                 switch (OP)
                 {
@@ -2625,6 +2624,24 @@ namespace csx64
             {
                 if(OP == OPs.None) return Value == value ? this : null;
                 else return Left.Find(value) ?? Right?.Find(value);
+            }
+
+            private void _ToString(StringBuilder b)
+            {
+                if (OP == 0) b.Append($"({(_Evaluated ? (_Floating ? _Result.ToString("e17") : _Result.MakeSigned().ToString()) : Value)})");
+                else
+                {
+                    Left._ToString(b);
+                    if (Right != null) Right._ToString(b);
+
+                    b.Append(OP);
+                }
+            }
+            public override string ToString()
+            {
+                StringBuilder b = new StringBuilder();
+                _ToString(b);
+                return b.ToString();
             }
 
             public static void Swap(Hole a, Hole b)
@@ -2903,8 +2920,9 @@ namespace csx64
         }
         private static bool TryParseImm(AssembleArgs args, string token, out Hole hole)
         {
-            // hole and current begin null
-            Hole current = hole = null, temp;
+            hole = null; // initially-nulled result
+
+            Hole temp; // temporary for node creation
             
             int pos = 0, end;     // position in token
             int depth;            // parenthesis depth
@@ -2916,6 +2934,11 @@ namespace csx64
             string err = null; // error location for hole evaluation
 
             Stack<char> unaryOps = new Stack<char>(8); // holds unary ops for processing
+            Stack<Hole> stack = new Stack<Hole>();     // the stack used to manage operator precedence rules
+
+            // top of stack shall be refered to as current
+
+            stack.Push(null); // stack will always have a null at its base (simplifies code tremendously)
 
             if (token.Length == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Empty expression encountered"); return false; }
 
@@ -2995,7 +3018,7 @@ namespace csx64
                     // otherwise append to current (guaranteed to be defined by second pass)
                     else
                     {
-                        if (current.Left == null) current.Left = temp; else current.Right = temp;
+                        if (stack.Peek().Left == null) stack.Peek().Left = temp; else stack.Peek().Right = temp;
                     }
 
                     // flag as a valid binary pair
@@ -3006,19 +3029,19 @@ namespace csx64
                 if (end < token.Length)
                 {
                     // wind current up to correct precedence (left-to-right evaluation, so also skip equal precedence)
-                    for (; current != null && Precedence[current.OP] <= Precedence[op]; current = current.Parent) ;
+                    for (; stack.Peek() != null && Precedence[stack.Peek().OP] <= Precedence[op]; stack.Pop()) ;
 
                     // if we have a valid current
-                    if (current != null)
+                    if (stack.Peek() != null)
                     {
                         // splice in the new operator, moving current's right sub-tree to left of new node
-                        current = current.Right = new Hole() { OP = op, Parent = current, Left = current.Right };
+                        stack.Push(stack.Peek().Right = new Hole() { OP = op, Left = stack.Peek().Right });
                     }
                     // otherwise we'll have to move the root
                     else
                     {
                         // splice in the new operator, moving entire tree to left of new node
-                        current = hole = new Hole() { OP = op, Left = hole };
+                        stack.Push(hole = new Hole() { OP = op, Left = hole });
                     }
 
                     // flag as invalid binary pair
@@ -3542,23 +3565,6 @@ namespace csx64
             return true;
         }
 
-        private /* REMOVE THIS LATER */ static void printimmnew(Hole hole, StringBuilder b)
-        {
-            if (hole.OP == 0) b.Append($"({hole.Value})");
-            else
-            {
-                printimmnew(hole.Left, b);
-                if(hole.Right != null) printimmnew(hole.Right, b);
-
-                b.Append(hole.OP);
-            }
-        }
-        private /* REMOVE THIS LATER */ static string print(Hole hole)
-        {
-            StringBuilder b = new StringBuilder();
-            printimmnew(hole, b);
-            return b.ToString();
-        }
         public static Tuple<AssembleError, string> Assemble(string code, out ObjectFile file)
         {
             file = new ObjectFile();
