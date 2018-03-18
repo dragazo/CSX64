@@ -38,7 +38,7 @@ namespace csx64
             InitializeComponent();
 
             CInitialized = false;
-            CodeBox.Font = new Font(FontFamily.GenericMonospace, 14);
+            CodeBox.Font = new Font(FontFamily.GenericMonospace, 12);
         }
 
         protected override void OnPaint(PaintEventArgs e)

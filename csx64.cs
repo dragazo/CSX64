@@ -53,7 +53,7 @@ namespace csx64
 
             Cmp, Test,
 
-            Inc, Dec, Neg, Not, Abs, Cmp0,
+            Inc, Dec, Neg, Not, Abs, Cmpz,
 
             La,
 
@@ -62,7 +62,7 @@ namespace csx64
             Jz, Jnz, Js, Jns, Jp, Jnp, Jo, Jno, Jc, Jnc,
 
             Fadd, Fsub, Fmul, Fdiv, Fmod,
-            Fpow, Fsqrt, Fexp, Fln, Fneg, Fabs, Fcmp0,
+            Fpow, Fsqrt, Fexp, Fln, Fneg, Fabs, Fcmpz,
 
             Fsin, Fcos, Ftan,
             Fsinh, Fcosh, Ftanh,
@@ -1585,7 +1585,7 @@ namespace csx64
                 case OPCode.Neg: return ProcessNeg();
                 case OPCode.Not: return ProcessNot();
                 case OPCode.Abs: return ProcessAbs();
-                case OPCode.Cmp0: return ProcessCmp0();
+                case OPCode.Cmpz: return ProcessCmp0();
                 
                 case OPCode.La:
                     if (!GetMem(1, ref a) || !GetAddress(ref b)) return false;
@@ -1627,7 +1627,7 @@ namespace csx64
                 case OPCode.Fln: return ProcessFln();
                 case OPCode.Fneg: return ProcessFneg();
                 case OPCode.Fabs: return ProcessFabs();
-                case OPCode.Fcmp0: return ProcessFcmp0();
+                case OPCode.Fcmpz: return ProcessFcmp0();
 
                 case OPCode.Fsin: return ProcessFsin();
                 case OPCode.Fcos: return ProcessFcos();
@@ -1774,7 +1774,11 @@ namespace csx64
             public ObjectFile file;
             public int line;
 
-            public string[] tokens;
+            public string rawline;
+            public string label_def;
+            public string op;
+            public UInt64 sizecode;
+            public string[] args;
 
             public string last_static_label;
             public Tuple<AssembleError, string> err;
@@ -1842,6 +1846,95 @@ namespace csx64
             Append(file, 1, a);
             if ((a & 0x77) != 0) Append(file, 1, b);
             if ((a & 0x80) != 0) Append(file, 8, hole);
+        }
+
+        private static bool SplitLine(AssembleArgs args)
+        {
+            // (label:) op:size (, arg, arg, arg, ...)
+            int pos, end; // position in line parsing
+            string token;
+            string[] subs;
+
+            // skip leading white space
+            for (pos = 0; pos < args.rawline.Length && char.IsWhiteSpace(args.rawline[pos]); ++pos) ;
+            // get a space-delimited token (label or op)
+            for (end = pos; end < args.rawline.Length && !char.IsWhiteSpace(args.rawline[end]); ++end) ;
+            token = args.rawline.Substring(pos, end - pos);
+
+            // if this denotes a label
+            if (token.Length > 0 && token[token.Length - 1] == ':')
+            {
+                // store this as token def
+                args.label_def = token;
+
+                // get another white-space delimited token
+
+                // skip leading white space
+                for (pos = end; pos < args.rawline.Length && char.IsWhiteSpace(args.rawline[pos]); ++pos) ;
+                // get a space-delimited token (op)
+                for (end = pos; end < args.rawline.Length && !char.IsWhiteSpace(args.rawline[end]); ++end) ;
+                token = args.rawline.Substring(pos, end - pos);
+
+                // set as op
+                args.op = token;
+            }
+            else
+            {
+                // no label defined for this line
+                args.label_def = null;
+
+                // token is op
+                args.op = token;
+            }
+
+            // split the op:size token
+            subs = args.op.Split(':');
+            if (subs.Length == 2)
+            {
+                // op is first arg
+                args.op = subs[0];
+                // explicit size is second arg
+                if (!TryParseSizecode(args, subs[1], out args.sizecode))
+                { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to parse register size code \"{subs[1]}\"\n-> {args.err.Item2}"); return false; }
+            }
+            else if (subs.Length == 1)
+            {
+                // op is first arg
+                args.op = subs[0];
+                // use default size
+                args.sizecode = 3;
+            }
+
+            // parse the rest of the line as comma-separated tokens
+            List<string> tokens = new List<string>();
+            int quote;
+            while (true)
+            {
+                // skip leading white space
+                for (pos = end + 1; pos < args.rawline.Length && char.IsWhiteSpace(args.rawline[pos]); ++pos) ;
+                // when pos reaches end of token, we're done parsing
+                if (pos >= args.rawline.Length) break;
+
+                StringBuilder b = new StringBuilder();
+
+                // find the next terminator (comma-separated)
+                for (quote = -1, end = pos; end < args.rawline.Length && (args.rawline[end] != ',' || quote >= 0); ++end)
+                {
+                    if (args.rawline[end] == '"' || args.rawline[end] == '\'')
+                        quote = quote < 0 ? end : (args.rawline[end] == args.rawline[quote] ? -1 : quote);
+
+                    // omit white space unless in a quote
+                    if(quote >= 0 || !char.IsWhiteSpace(args.rawline[end])) b.Append(args.rawline[end]);
+                }
+
+                // add this token
+                tokens.Add(b.ToString());
+            }
+            // output tokens to assemble args
+            args.args = tokens.ToArray();
+
+            // successfully parsed line
+            return true;
         }
 
         private static bool TryParseInstantImm(AssembleArgs args, string token, out UInt64 res, out bool floating)
@@ -1942,10 +2035,10 @@ namespace csx64
             // convert to size code
             switch (res)
             {
-                case 1: res = 0; return true;
-                case 2: res = 1; return true;
-                case 4: res = 2; return true;
-                case 8: res = 3; return true;
+                case 8: res = 0; return true;
+                case 16: res = 1; return true;
+                case 32: res = 2; return true;
+                case 64: res = 3; return true;
 
                 default: args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Invalid register size {res}"); return false;
             }
@@ -2126,55 +2219,49 @@ namespace csx64
         
         private static bool TryProcessBinaryOp(AssembleArgs args, OPCode op)
         {
-            UInt64 a, b, c, d; // parsing temporaries
+            UInt64 a, b, c; // parsing temporaries
             Hole hole1, hole2;
-            int off = 0; // token offset (for default size code)
 
-            // 4 args specifies explicit size
-            if (args.tokens.Length == 4) { if (!TryParseSizecode(args, args.tokens[1], out a)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: {op} expected size parameter as first arg\n-> {args.err.Item2}"); return false; } }
-            // 3 args uses default size
-            else if (args.tokens.Length == 3) { a = 3; off = -1; }
-            // otherwise, error
-            else { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: {op} expected 2 args (3 for explicit size)"); return false; }
+            if (args.args.Length != 2) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: {op} expected 2 args"); return false; }
 
             Append(args.file, 1, (UInt64)op);
 
-            if (TryParseRegister(args, args.tokens[2 + off], out b))
+            if (TryParseRegister(args, args.args[0], out a))
             {
-                if (TryParseImm(args, args.tokens[3 + off], out hole1))
+                if (TryParseImm(args, args.args[1], out hole1))
                 {
-                    Append(args.file, 1, (b << 4) | (a << 2) | 0);
-                    Append(args.file, Size(a), hole1);
+                    Append(args.file, 1, (a << 4) | (args.sizecode << 2) | 0);
+                    Append(args.file, Size(args.sizecode), hole1);
                 }
-                else if (TryParseAddress(args, args.tokens[3 + off], out c, out d, out hole1))
+                else if (TryParseAddress(args, args.args[1], out b, out c, out hole1))
                 {
-                    Append(args.file, 1, (b << 4) | (a << 2) | 1);
-                    AppendAddress(args.file, c, d, hole1);
-                }
-                else if (TryParseRegister(args, args.tokens[3 + off], out c))
-                {
-                    Append(args.file, 1, (b << 4) | (a << 2) | 2);
-                    Append(args.file, 1, c);
-                }
-                else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Couldn't parse \"{args.tokens[3 + off]}\" as an imm, address, or register"); return false; }
-            }
-            else if (TryParseAddress(args, args.tokens[2 + off], out b, out c, out hole1))
-            {
-                if (TryParseRegister(args, args.tokens[3 + off], out d))
-                {
-                    Append(args.file, 1, (a << 2) | 2);
-                    Append(args.file, 1, 16 | d);
+                    Append(args.file, 1, (a << 4) | (args.sizecode << 2) | 1);
                     AppendAddress(args.file, b, c, hole1);
                 }
-                else if (TryParseImm(args, args.tokens[3 + off], out hole2))
+                else if (TryParseRegister(args, args.args[1], out b))
                 {
-                    Append(args.file, 1, (a << 2) | 3);
-                    Append(args.file, Size(a), hole2);
-                    AppendAddress(args.file, b, c, hole1);
+                    Append(args.file, 1, (a << 4) | (args.sizecode << 2) | 2);
+                    Append(args.file, 1, b);
                 }
-                else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Couldn't parse \"{args.tokens[3 + off]}\" as a register or imm"); return false; }
+                else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Couldn't parse \"{args.args[1]}\" as an imm, address, or register"); return false; }
             }
-            else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Couldn't parse \"{args.tokens[2 + off]}\" as a register or address"); return false; }
+            else if (TryParseAddress(args, args.args[0], out a, out b, out hole1))
+            {
+                if (TryParseRegister(args, args.args[1], out c))
+                {
+                    Append(args.file, 1, (args.sizecode << 2) | 2);
+                    Append(args.file, 1, 16 | c);
+                    AppendAddress(args.file, a, b, hole1);
+                }
+                else if (TryParseImm(args, args.args[1], out hole2))
+                {
+                    Append(args.file, 1, (args.sizecode << 2) | 3);
+                    Append(args.file, Size(args.sizecode), hole2);
+                    AppendAddress(args.file, a, b, hole1);
+                }
+                else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Couldn't parse \"{args.args[1]}\" as a register or imm"); return false; }
+            }
+            else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Couldn't parse \"{args.args[0]}\" as a register or address"); return false; }
 
             return true;
         }
@@ -2182,82 +2269,79 @@ namespace csx64
         {
             UInt64 a, b;
             Hole hole;
-            int off = 0; // token offset (for default size code)
 
-            // 3 args specifies explicit size
-            if (args.tokens.Length == 3) { if (!TryParseSizecode(args, args.tokens[1], out a)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: {op} expected size parameter as first arg\n-> {args.err.Item2}"); return false; } }
-            // 2 args uses default size
-            else if (args.tokens.Length == 2) { a = 3; off = -1; }
-            // otherwise, error
-            else { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: {op} expected 1 arg (2 for explicit size)"); return false; }
+            if (args.args.Length != 1) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: {op} expected 1 arg"); return false; }
 
             Append(args.file, 1, (UInt64)op);
 
-            if (TryParseRegister(args, args.tokens[2 + off], out b))
+            if (TryParseRegister(args, args.args[0], out b))
             {
-                Append(args.file, 1, (b << 4) | (a << 2) | 0);
+                Append(args.file, 1, (b << 4) | (args.sizecode << 2) | 0);
             }
-            else if (TryParseAddress(args, args.tokens[2 + off], out a, out b, out hole))
+            else if (TryParseAddress(args, args.args[0], out a, out b, out hole))
             {
-                Append(args.file, 1, (a << 2) | 1);
+                Append(args.file, 1, (args.sizecode << 2) | 1);
                 AppendAddress(args.file, a, b, hole);
             }
-            else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Couldn't parse {args.tokens[2 + off]} as a register or address"); return false; }
+            else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Couldn't parse \"{args.args[0]}\" as a register or address"); return false; }
 
             return true;
         }
         private static bool TryProcessJump(AssembleArgs args, OPCode op)
         {
-            if (args.tokens.Length != 2) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: Jump expected 1 arg"); return false; }
-            if (!TryParseAddress(args, args.tokens[1], out UInt64 a, out UInt64 b, out Hole hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Jump expected address as first arg\n-> {args.err.Item2}"); return false; }
+            if (args.args.Length != 1) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: {op} expected 1 arg"); return false; }
+
+            if (!TryParseAddress(args, args.args[0], out UInt64 a, out UInt64 b, out Hole hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Jump expected address as first arg\n-> {args.err.Item2}"); return false; }
 
             Append(args.file, 1, (UInt64)op);
             AppendAddress(args.file, a, b, hole);
 
             return true;
         }
-        private static bool TryProcessEmission(AssembleArgs args, UInt64 size)
+        private static bool TryProcessEmission(AssembleArgs args)
         {
-            if (args.tokens.Length < 2) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: Emission expected at least one value"); return false; }
+            if (args.args.Length == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: Emission expected at least one value"); return false; }
             
             Hole hole = new Hole(); // initially empty hole (to allow for buffer shorthand e.x. "emit x32")
             UInt64 mult;
             bool floating;
 
-            for (int i = 1; i < args.tokens.Length; ++i)
+            for (int i = 0; i < args.args.Length; ++i)
             {
+                if (args.args[i].Length == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Emission encountered empty argument"); return false; }
+
                 // if a multiplier
-                if (args.tokens[i][0] == 'x')
+                if (args.args[i][0] == 'x')
                 {
                     // get the multiplier and ensure is valid
-                    if (!TryParseInstantImm(args, args.tokens[i].Substring(1), out mult, out floating)) return false;
+                    if (!TryParseInstantImm(args, args.args[i].Substring(1), out mult, out floating)) return false;
                     if (floating) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Emission multiplier cannot be floating point"); return false; }
                     if (mult > EmissionMaxMultiplier) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Emission multiplier cannot exceed {EmissionMaxMultiplier}"); return false; }
                     if (mult == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Emission multiplier cannot be zero"); return false; }
 
                     // account for first written value
-                    if (args.tokens[i - 1][0] != 'x') --mult;
+                    if (i > 0 && args.args[i - 1][0] != 'x') --mult;
 
                     for (UInt64 j = 0; j < mult; ++j)
-                        Append(args.file, size, hole);
+                        Append(args.file, Size(args.sizecode), hole);
                 }
                 // if a string
-                if (args.tokens[i][0] == '"')
+                if (args.args[i][0] == '"' || args.args[i][0] == '\'')
                 {
-                    if (args.tokens[i][args.tokens[i].Length - 1] != '"') { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: String literal must be enclosed in quotes"); return false; }
+                    if (args.args[i][0] != args.args[i][args.args[i].Length - 1]) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: String literal must be enclosed in single or double quotes"); return false; }
 
                     // dump the contents into memory
-                    for (int j = 1; j < args.tokens[i].Length; ++j)
-                        Append(args.file, size, args.tokens[i][j]);
+                    for (int j = 1; j < args.args[i].Length - 1; ++j)
+                        Append(args.file, Size(args.sizecode), args.args[i][j]);
                 }
                 // otherwise is a value
                 else
                 {
                     // get the value
-                    if (!TryParseImm(args, args.tokens[i], out hole)) return false;
+                    if (!TryParseImm(args, args.args[i], out hole)) return false;
 
                     // make one of them
-                    Append(args.file, size, hole);
+                    Append(args.file, Size(args.sizecode), hole);
                 }
             }
 
@@ -2265,28 +2349,28 @@ namespace csx64
         }
         private static bool TryProcessXMULXDIV(AssembleArgs args, OPCode op)
         {
-            UInt64 sizecode, a, b;
+            UInt64 a, b;
             Hole hole;
 
-            if (args.tokens.Length != 3) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: {op} expected 2 args"); return false; }
-            if (!TryParseSizecode(args, args.tokens[1], out sizecode)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: {op} expected size parameter as first arg\n-> {args.err.Item2}"); return false; }
+            if (args.args.Length != 1) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: {op} expected 1 arg"); return false; }
 
             Append(args.file, 1, (UInt64)op);
-            if (TryParseImm(args, args.tokens[2], out hole))
+
+            if (TryParseImm(args, args.args[0], out hole))
             {
-                Append(args.file, 1, (sizecode << 2) | 0);
-                Append(args.file, Size(sizecode), hole);
+                Append(args.file, 1, (args.sizecode << 2) | 0);
+                Append(args.file, Size(args.sizecode), hole);
             }
-            else if (TryParseRegister(args, args.tokens[2], out a))
+            else if (TryParseRegister(args, args.args[0], out a))
             {
-                Append(args.file, 1, (a << 4) | (sizecode << 2) | 1);
+                Append(args.file, 1, (a << 4) | (args.sizecode << 2) | 1);
             }
-            else if (TryParseAddress(args, args.tokens[2], out a, out b, out hole))
+            else if (TryParseAddress(args, args.args[0], out a, out b, out hole))
             {
-                Append(args.file, 1, (sizecode << 2) | 2);
+                Append(args.file, 1, (args.sizecode << 2) | 2);
                 AppendAddress(args.file, a, b, hole);
             }
-            else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Unknown usage of {op}"); return false; }
+            else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Couldn't parse \"{args.args[0]}\" as an imm, register, or address"); return false; }
 
             return true;
         }
@@ -2323,10 +2407,9 @@ namespace csx64
             int pos = 0, end = 0; // position in code
 
             // potential parsing args for an instruction
-            UInt64 a = 0, b = 0, c = 0, d = 0;
+            UInt64 a = 0, b = 0, c = 0;
             Hole hole;
             bool floating;
-            int off; // offset token (for default size code)
 
             if (code.Length == 0) return new Tuple<AssembleError, string>(AssembleError.EmptyFile, "The file was empty");
 
@@ -2334,20 +2417,20 @@ namespace csx64
             {
                 // find the next separator
                 for (end = pos; end < code.Length && code[end] != '\n' && code[end] != '#'; ++end) ;
-
-                // split line into tokens
-                args.tokens = code.Substring(pos, end - pos).Split(new char[] { ' ', '\t', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                
                 ++args.line; // advance line counter
-
+                // split the line
+                args.rawline = code.Substring(pos, end - pos);
+                if (!SplitLine(args)) return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse line\n-> {args.err.Item2}");
                 // if the separator was a comment character, consume the rest of the line as well as noop
                 if (end < code.Length && code[end] == '#')
                     for (; end < code.Length && code[end] != '\n'; ++end) ;
 
-                // if this marks a label
-                while (args.tokens.Length > 0 && args.tokens[0][args.tokens[0].Length - 1] == ':')
+                // if we marked a label
+                if (args.label_def != null)
                 {
                     // take off the colon
-                    string label = args.tokens[0].Substring(0, args.tokens[0].Length - 1);
+                    string label = args.label_def.Substring(0, args.label_def.Length - 1);
 
                     // handle local mutation
                     if (label.Length > 0 && label[0] != '.') args.last_static_label = label;
@@ -2358,41 +2441,32 @@ namespace csx64
 
                     // add the symbol as an address
                     file.Symbols.Add(label, new Symbol() { Value = (UInt64)file.Data.LongCount(), IsAddress = true, IsFloating = false });
-
-                    // remove the first token
-                    string[] _tokens = new string[args.tokens.Length - 1];
-                    for (int i = 1; i < args.tokens.Length; ++i)
-                        _tokens[i - 1] = args.tokens[i];
-                    args.tokens = _tokens;
                 }
 
                 // empty lines are ignored
-                if (args.tokens.Length > 0)
+                if (args.op != string.Empty)
                 {
                     // update compile-time symbols (for modifications, also update TryParseImm())
                     file.Symbols["__line__"] = new Symbol() { Value = (UInt64)args.line, IsAddress = false, IsFloating = false };
                     file.Symbols["__pos__"] = new Symbol() { Value = (UInt64)file.Data.LongCount(), IsAddress = true, IsFloating = false };
 
-                    switch (args.tokens[0].ToUpper())
+                    switch (args.op.ToUpper())
                     {
                         case "GLOBAL":
-                            if (args.tokens.Length != 2) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: GLOBAL expected 1 arg");
-                            if (!IsValidLabel(args.tokens[1])) return new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Invalid label name \"{args.tokens[1]}\"");
-                            file.GlobalSymbols.Add(args.tokens[1]);
+                            if (args.args.Length != 1) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: GLOBAL expected 1 arg");
+                            if (!IsValidLabel(args.args[0])) return new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Invalid label name \"{args.args[0]}\"");
+                            file.GlobalSymbols.Add(args.args[0]);
                             break;
                         case "DEF":
-                            if (args.tokens.Length != 3) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: DEF expected 2 args");
-                            if (!MutateLabel(args, ref args.tokens[1])) return args.err;
-                            if (!IsValidLabel(args.tokens[1])) return new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Invalid label name \"{args.tokens[1]}\"");
-                            if (!TryParseInstantImm(args, args.tokens[2], out a, out floating)) return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: DEF expected a number as third arg\n-> {args.err.Item2}");
-                            if (file.Symbols.ContainsKey(args.tokens[1])) return new Tuple<AssembleError, string>(AssembleError.SymbolRedefinition, $"line {args.line}: Symbol \"{args.tokens[1]}\" was already defined");
-                            file.Symbols.Add(args.tokens[1], new Symbol() { Value = a, IsAddress = false, IsFloating = floating });
+                            if (args.args.Length != 2) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: DEF expected 2 args");
+                            if (!MutateLabel(args, ref args.args[0])) return args.err;
+                            if (!IsValidLabel(args.args[0])) return new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Invalid label name \"{args.args[0]}\"");
+                            if (!TryParseInstantImm(args, args.args[1], out a, out floating)) return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: DEF expected a number as third arg\n-> {args.err.Item2}");
+                            if (file.Symbols.ContainsKey(args.args[0])) return new Tuple<AssembleError, string>(AssembleError.SymbolRedefinition, $"line {args.line}: Symbol \"{args.args[0]}\" was already defined");
+                            file.Symbols.Add(args.args[0], new Symbol() { Value = a, IsAddress = false, IsFloating = floating });
                             break;
 
-                        case "BYTE": if (!TryProcessEmission(args, 1)) return args.err; break;
-                        case "WORD": if (!TryProcessEmission(args, 2)) return args.err; break;
-                        case "DWORD": if (!TryProcessEmission(args, 4)) return args.err; break;
-                        case "QWORD": if (!TryProcessEmission(args, 8)) return args.err; break;
+                        case "EMIT": if (!TryProcessEmission(args)) return args.err; break;
 
                         // --------------------------
                         // -- OPCode assembly impl --
@@ -2400,13 +2474,13 @@ namespace csx64
 
                         // [8: op]
                         case "NOP":
-                            if (args.tokens.Length != 1) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: NOP expected 0 args");
+                            if (args.args.Length != 0) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: NOP expected 0 args");
                             Append(file, 1, (UInt64)OPCode.Nop); break;
                         case "STOP":
-                            if (args.tokens.Length != 1) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: STOP expected 0 args");
+                            if (args.args.Length != 0) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: STOP expected 0 args");
                             Append(file, 1, (UInt64)OPCode.Stop); break;
                         case "SYSCALL":
-                            if (args.tokens.Length != 1) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: SYSCALL expected 0 args");
+                            if (args.args.Length != 0) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: SYSCALL expected 0 args");
                             Append(file, 1, (UInt64)OPCode.Syscall); break;
 
                         // [8: MOVcc]   [4: source/dest][2: size][2: mode]   (mode = 0: load imm [size: imm]   mode = 1: load register [4:][4: source]   mode = 2: load memory [address]   mode = 3: store register [address])
@@ -2434,35 +2508,30 @@ namespace csx64
                         case "MOVNC": if (!TryProcessBinaryOp(args, OPCode.MOVnc)) return args.err; break;
 
                         case "SWAP":
-                            if (args.tokens.Length == 4)
-                            {
-                                if (!TryParseSizecode(args, args.tokens[1], out a)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: SWAP expected a size paramter as first arg\n-> {args.err.Item2}");
-                                off = 0;
-                            }
-                            else if (args.tokens.Length == 3) { a = 3; off = -1; }
-                            else return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: SWAP expected 2 args (3 for explicit size)");
+                            if (args.args.Length != 2) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: SWAP expected 2 args");
 
                             Append(file, 1, (UInt64)OPCode.Swap);
-                            if (TryParseRegister(args, args.tokens[2 + off], out b))
+
+                            if (TryParseRegister(args, args.args[0], out a))
                             {
-                                if (TryParseRegister(args, args.tokens[3 + off], out c))
+                                if (TryParseRegister(args, args.args[1], out b))
                                 {
-                                    Append(file, 1, (b << 4) | (a << 2) | 0);
-                                    Append(file, 1, c);
+                                    Append(file, 1, (a << 4) | (args.sizecode << 2) | 0);
+                                    Append(file, 1, b);
                                 }
-                                else if (TryParseAddress(args, args.tokens[3 + off], out c, out d, out hole))
+                                else if (TryParseAddress(args, args.args[1], out b, out c, out hole))
                                 {
-                                    Append(file, 1, (b << 4) | (a << 2) | 1);
-                                    AppendAddress(file, c, d, hole);
+                                    Append(file, 1, (a << 4) | (args.sizecode << 2) | 1);
+                                    AppendAddress(file, b, c, hole);
                                 }
                                 else return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Unknown usage of SWAP");
                             }
-                            else if (TryParseAddress(args, args.tokens[2 + off], out b, out c, out hole))
+                            else if (TryParseAddress(args, args.args[0], out a, out b, out hole))
                             {
-                                if (TryParseRegister(args, args.tokens[3 + off], out d))
+                                if (TryParseRegister(args, args.args[1], out c))
                                 {
-                                    Append(file, 1, (d << 4) | (a << 2) | 1);
-                                    AppendAddress(file, b, c, hole);
+                                    Append(file, 1, (c << 4) | (args.sizecode << 2) | 1);
+                                    AppendAddress(file, a, b, hole);
                                 }
                                 else return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Unknown usage of SWAP");
                             }
@@ -2470,22 +2539,16 @@ namespace csx64
 
                             break;
 
-                        case "UEXTEND": d = (UInt64)OPCode.UExtend; goto XEXTEND;
-                        case "SEXTEND": d = (UInt64)OPCode.SExtend;
+                        case "UEXTEND": a = (UInt64)OPCode.UExtend; goto XEXTEND;
+                        case "SEXTEND": a = (UInt64)OPCode.SExtend;
                             XEXTEND:
-                            if (args.tokens.Length == 4)
-                            {
-                                if (!TryParseSizecode(args, args.tokens[1], out a)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: XEXTEND expected size code as first arg\n-> {args.err.Item2}");
-                                off = 0;
-                            }
-                            else if (args.tokens.Length == 3) { a = 3; off = -1; }
-                            else return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: XEXTEND expected 2 args (3 for explicit size)");
+                            if (args.args.Length != 2) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: XEXTEND expected 2 args");
 
-                            if (!TryParseSizecode(args, args.tokens[2 + off], out b)) return new Tuple<AssembleError, string>(AssembleError.MissingSize, $"line {args.line}: UEXTEND expected size parameter as second arg\n-> {args.err.Item2}");
-                            if (!TryParseRegister(args, args.tokens[3 + off], out c)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: UEXTEND expected register parameter as third arg\n-> {args.err.Item2}");
+                            if (!TryParseSizecode(args, args.args[0], out b)) return new Tuple<AssembleError, string>(AssembleError.MissingSize, $"line {args.line}: UEXTEND expected size parameter as second arg\n-> {args.err.Item2}");
+                            if (!TryParseRegister(args, args.args[1], out c)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: UEXTEND expected register parameter as third arg\n-> {args.err.Item2}");
 
-                            Append(file, 1, d);
-                            Append(file, 1, (c << 4) | (b << 2) | a);
+                            Append(file, 1, a);
+                            Append(file, 1, (c << 4) | (b << 2) | args.sizecode);
 
                             break;
 
@@ -2522,13 +2585,14 @@ namespace csx64
                         case "NEG": if (!TryProcessUnaryOp(args, OPCode.Neg)) return args.err; break;
                         case "NOT": if (!TryProcessUnaryOp(args, OPCode.Not)) return args.err; break;
                         case "ABS": if (!TryProcessUnaryOp(args, OPCode.Abs)) return args.err; break;
-                        case "CMP0": if (!TryProcessUnaryOp(args, OPCode.Cmp0)) return args.err; break;
+                        case "CMPZ": if (!TryProcessUnaryOp(args, OPCode.Cmpz)) return args.err; break;
 
                         // [8: la]   [4:][4: dest]   [address]
                         case "LA":
-                            if (args.tokens.Length != 3) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: LA expected 2 args");
-                            if (!TryParseRegister(args, args.tokens[1], out a)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: LA expecetd register as first arg\n-> {args.err.Item2}");
-                            if (!TryParseAddress(args, args.tokens[2], out b, out c, out hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: LA expected address as second arg\n-> {args.err.Item2}");
+                            if (args.args.Length != 2) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: LA expected 2 args");
+
+                            if (!TryParseRegister(args, args.args[0], out a)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: LA expecetd register as first arg\n-> {args.err.Item2}");
+                            if (!TryParseAddress(args, args.args[1], out b, out c, out hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: LA expected address as second arg\n-> {args.err.Item2}");
 
                             Append(file, 1, (UInt64)OPCode.La);
                             Append(file, 1, a);
@@ -2572,7 +2636,7 @@ namespace csx64
                         case "FLN": if (!TryProcessUnaryOp(args, OPCode.Fln)) return args.err; break;
                         case "FNEG": if (!TryProcessUnaryOp(args, OPCode.Fneg)) return args.err; break;
                         case "FABS": if (!TryProcessUnaryOp(args, OPCode.Fabs)) return args.err; break;
-                        case "FCMP0": if (!TryProcessUnaryOp(args, OPCode.Fcmp0)) return args.err; break;
+                        case "FCMPZ": if (!TryProcessUnaryOp(args, OPCode.Fcmpz)) return args.err; break;
 
                         case "FSIN": if (!TryProcessUnaryOp(args, OPCode.Fsin)) return args.err; break;
                         case "FCOS": if (!TryProcessUnaryOp(args, OPCode.Fcos)) return args.err; break;
@@ -2598,54 +2662,43 @@ namespace csx64
                         case "ITOF": if (!TryProcessUnaryOp(args, OPCode.ITOF)) return args.err; break;
 
                         case "PUSH":
-                            if (args.tokens.Length == 3)
-                            {
-                                if (!TryParseSizecode(args, args.tokens[1], out a)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: PUSH expected size as first arg\n-> {args.err.Item2}");
-                                off = 0;
-                            }
-                            else if (args.tokens.Length == 2) { a = 3; off = -1; }
-                            else return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: PUSH expected 1 arg (2 for explicit size)");
+                            if (args.args.Length != 1) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: PUSH expected 1 arg");
 
                             Append(file, 1, (UInt64)OPCode.Push);
-                            if (TryParseImm(args, args.tokens[2 + off], out hole))
+
+                            if (TryParseImm(args, args.args[0], out hole))
                             {
-                                Append(file, 1, (a << 2) | 0);
-                                Append(file, Size(a), hole);
+                                Append(file, 1, (args.sizecode << 2) | 0);
+                                Append(file, Size(args.sizecode), hole);
                             }
-                            else if (TryParseRegister(args, args.tokens[2 + off], out b))
+                            else if (TryParseRegister(args, args.args[0], out a))
                             {
-                                Append(file, 1, (b << 4) | (a << 2) | 1);
+                                Append(file, 1, (a << 4) | (args.sizecode << 2) | 1);
                             }
-                            else return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Unknown usage of PUSH");
+                            else return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Couldn't parse \"{args.args[0]}\" as an imm or register");
 
                             break;
                         case "POP":
-                            if (args.tokens.Length == 3)
-                            {
-                                if (!TryParseSizecode(args, args.tokens[1], out a)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: POP expected size as first argument\n-> {args.err.Item2}");
-                                off = 0;
-                            }
-                            else if (args.tokens.Length == 2) { a = 3; off = -1; }
-                            else return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: POP expected 1 arg (2 for explicit size)");
+                            if (args.args.Length != 1) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: POP expected 1 arg");
 
-                            if (!TryParseRegister(args, args.tokens[2 + off], out b)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: POP expected register as second arg\n-> {args.err.Item2}");
+                            if (!TryParseRegister(args, args.args[0], out a)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: POP expected register as second arg\n-> {args.err.Item2}");
 
                             Append(file, 1, (UInt64)OPCode.Pop);
-                            Append(file, 1, (b << 4) | (a << 2));
+                            Append(file, 1, (a << 4) | (args.sizecode << 2));
 
                             break;
                         case "CALL":
-                            if (args.tokens.Length != 2) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: CALL expected one arg");
-                            if (!TryParseAddress(args, args.tokens[1], out a, out b, out hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: CALLexpected address as first arg\n-> {args.err.Item2}");
+                            if (args.args.Length != 1) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: CALL expected 1 arg");
+                            if (!TryParseAddress(args, args.args[0], out a, out b, out hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: CALLexpected address as first arg\n-> {args.err.Item2}");
                             Append(file, 1, (UInt64)OPCode.Call);
                             AppendAddress(file, a, b, hole);
                             break;
                         case "RET":
-                            if (args.tokens.Length != 1) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: CALL expected one arg");
+                            if (args.args.Length != 0) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: CALL expected 0 args");
                             Append(file, 1, (UInt64)OPCode.Ret);
                             break;
 
-                        default: return new Tuple<AssembleError, string>(AssembleError.UnknownOp, $"line {args.line}: Couldn't process operator \"{args.tokens[0]}\"");
+                        default: return new Tuple<AssembleError, string>(AssembleError.UnknownOp, $"line {args.line}: Unknown operation \"{args.op}\"");
                     }
                 }
 
