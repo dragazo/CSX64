@@ -43,7 +43,7 @@
             // TickButton
             // 
             this.TickButton.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
-            this.TickButton.Location = new System.Drawing.Point(12, 439);
+            this.TickButton.Location = new System.Drawing.Point(12, 658);
             this.TickButton.Name = "TickButton";
             this.TickButton.Size = new System.Drawing.Size(75, 23);
             this.TickButton.TabIndex = 0;
@@ -54,7 +54,7 @@
             // Tick10Button
             // 
             this.Tick10Button.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
-            this.Tick10Button.Location = new System.Drawing.Point(93, 439);
+            this.Tick10Button.Location = new System.Drawing.Point(93, 658);
             this.Tick10Button.Name = "Tick10Button";
             this.Tick10Button.Size = new System.Drawing.Size(75, 23);
             this.Tick10Button.TabIndex = 1;
@@ -65,7 +65,7 @@
             // Tick100Button
             // 
             this.Tick100Button.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
-            this.Tick100Button.Location = new System.Drawing.Point(174, 439);
+            this.Tick100Button.Location = new System.Drawing.Point(174, 658);
             this.Tick100Button.Name = "Tick100Button";
             this.Tick100Button.Size = new System.Drawing.Size(75, 23);
             this.Tick100Button.TabIndex = 2;
@@ -76,7 +76,7 @@
             // Tick1000Button
             // 
             this.Tick1000Button.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
-            this.Tick1000Button.Location = new System.Drawing.Point(255, 439);
+            this.Tick1000Button.Location = new System.Drawing.Point(255, 658);
             this.Tick1000Button.Name = "Tick1000Button";
             this.Tick1000Button.Size = new System.Drawing.Size(75, 23);
             this.Tick1000Button.TabIndex = 3;
@@ -87,7 +87,7 @@
             // CompileButton
             // 
             this.CompileButton.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
-            this.CompileButton.Location = new System.Drawing.Point(12, 410);
+            this.CompileButton.Location = new System.Drawing.Point(12, 629);
             this.CompileButton.Name = "CompileButton";
             this.CompileButton.Size = new System.Drawing.Size(75, 23);
             this.CompileButton.TabIndex = 4;
@@ -98,7 +98,7 @@
             // RunButton
             // 
             this.RunButton.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
-            this.RunButton.Location = new System.Drawing.Point(174, 410);
+            this.RunButton.Location = new System.Drawing.Point(174, 629);
             this.RunButton.Name = "RunButton";
             this.RunButton.Size = new System.Drawing.Size(75, 23);
             this.RunButton.TabIndex = 5;
@@ -109,7 +109,7 @@
             // StopButton
             // 
             this.StopButton.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
-            this.StopButton.Location = new System.Drawing.Point(93, 410);
+            this.StopButton.Location = new System.Drawing.Point(93, 629);
             this.StopButton.Name = "StopButton";
             this.StopButton.Size = new System.Drawing.Size(75, 23);
             this.StopButton.TabIndex = 6;
@@ -129,7 +129,7 @@
             this.CodeBox.Multiline = true;
             this.CodeBox.Name = "CodeBox";
             this.CodeBox.ScrollBars = System.Windows.Forms.ScrollBars.Both;
-            this.CodeBox.Size = new System.Drawing.Size(528, 291);
+            this.CodeBox.Size = new System.Drawing.Size(528, 510);
             this.CodeBox.TabIndex = 7;
             this.CodeBox.WordWrap = false;
             this.CodeBox.KeyDown += new System.Windows.Forms.KeyEventHandler(this.CodeBox_KeyDown);
@@ -137,7 +137,7 @@
             // PauseButton
             // 
             this.PauseButton.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
-            this.PauseButton.Location = new System.Drawing.Point(255, 410);
+            this.PauseButton.Location = new System.Drawing.Point(255, 629);
             this.PauseButton.Name = "PauseButton";
             this.PauseButton.Size = new System.Drawing.Size(75, 23);
             this.PauseButton.TabIndex = 8;
@@ -148,7 +148,7 @@
             // button1
             // 
             this.button1.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
-            this.button1.Location = new System.Drawing.Point(284, 381);
+            this.button1.Location = new System.Drawing.Point(284, 600);
             this.button1.Name = "button1";
             this.button1.Size = new System.Drawing.Size(75, 23);
             this.button1.TabIndex = 9;
@@ -161,7 +161,7 @@
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.Color.Black;
-            this.ClientSize = new System.Drawing.Size(915, 474);
+            this.ClientSize = new System.Drawing.Size(915, 693);
             this.Controls.Add(this.button1);
             this.Controls.Add(this.PauseButton);
             this.Controls.Add(this.CodeBox);

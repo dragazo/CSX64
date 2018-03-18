@@ -29,7 +29,7 @@ namespace csx64
 
                 TickButton.Enabled = Tick10Button.Enabled = Tick100Button.Enabled = Tick1000Button.Enabled = value;
 
-                CodeBox.Enabled = !value;
+                CodeBox.ReadOnly = value;
             }
         }
 
