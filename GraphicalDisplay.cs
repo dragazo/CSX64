@@ -76,7 +76,7 @@ namespace csx64
         }
     }
 
-    public class GraphicalComputer : Computer
+    public class GraphicalComputer : CSX64
     {
         // the surface to render
         public Bitmap GraphicSurface = null;

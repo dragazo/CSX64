@@ -23,7 +23,7 @@ namespace csx64
     /// <summary>
     /// Represents a computer executing a binary program (little-endian)
     /// </summary>
-    public class Computer
+    public class CSX64
     {
         /// <summary>
         /// Version number
@@ -81,7 +81,11 @@ namespace csx64
 
             PUSH, POP, CALL, RET,
 
-            BSWAP, BEXTR, BLSI, BLSMSK, BLSR, ANDN
+            BSWAP, BEXTR, BLSI, BLSMSK, BLSR, ANDN,
+
+            GETF, SETF,
+
+            LOOP
         }
 
         /// <summary>
@@ -164,7 +168,7 @@ namespace csx64
             /// <summary>
             /// Contains the actual flag data
             /// </summary>
-            public uint Flags;
+            public UInt64 Flags;
 
             /// <summary>
             /// The Zero flag
@@ -172,7 +176,7 @@ namespace csx64
             public bool Z
             {
                 get { return (Flags & 0x01) != 0; }
-                set { Flags = (Flags & 0xfe) | (value ? 0x01 : 0u); }
+                set { Flags = (Flags & 0xfe) | (value ? 0x01 : 0ul); }
             }
             /// <summary>
             /// The Sign flag
@@ -180,7 +184,7 @@ namespace csx64
             public bool S
             {
                 get { return (Flags & 0x02) != 0; }
-                set { Flags = (Flags & 0xfd) | (value ? 0x02 : 0u); }
+                set { Flags = (Flags & 0xfd) | (value ? 0x02 : 0ul); }
             }
             /// <summary>
             /// The Parity flag
@@ -188,7 +192,7 @@ namespace csx64
             public bool P
             {
                 get { return (Flags & 0x04) != 0; }
-                set { Flags = (Flags & 0xfb) | (value ? 0x04 : 0u); }
+                set { Flags = (Flags & 0xfb) | (value ? 0x04 : 0ul); }
             }
             /// <summary>
             /// The Overflow flag
@@ -196,7 +200,7 @@ namespace csx64
             public bool O
             {
                 get { return (Flags & 0x08) != 0; }
-                set { Flags = (Flags & 0xf7) | (value ? 0x08 : 0u); }
+                set { Flags = (Flags & 0xf7) | (value ? 0x08 : 0ul); }
             }
             /// <summary>
             /// The Carry flag
@@ -204,7 +208,7 @@ namespace csx64
             public bool C
             {
                 get { return (Flags & 0x10) != 0; }
-                set { Flags = (Flags & 0xef) | (value ? 0x10 : 0u); }
+                set { Flags = (Flags & 0xef) | (value ? 0x10 : 0ul); }
             }
 
             public bool a { get => !C && !Z; }
@@ -1941,7 +1945,7 @@ namespace csx64
         /// <summary>
         /// Validates the machine for operation, but does not prepare it for execute (see Initialize)
         /// </summary>
-        public Computer()
+        public CSX64()
         {
             // allocate registers
             for (int i = 0; i < Registers.Length; ++i) Registers[i] = new Register();
@@ -2264,6 +2268,17 @@ namespace csx64
                 case OPCode.BLSMSK: return ProcessBLSMSK();
                 case OPCode.BLSR: return ProcessBLSR();
                 case OPCode.ANDN: return ProcessANDN();
+
+                case OPCode.GETF: if (!GetMemAdv(1, ref a)) return false; Registers[a & 15].x64 = Flags.Flags; return true;
+                case OPCode.SETF: if (!GetMemAdv(1, ref a)) return false; Flags.Flags = Registers[a & 15].x64; return true;
+
+                case OPCode.LOOP:
+                    if (!GetMemAdv(1, ref a) || !GetAddressAdv(ref b)) return false;
+                    c = Registers[a >> 4].Get((a >> 2) & 3);
+                    c = c - Size(a & 3); // since we know we're subtracting a positive value and only comparing to zero, no need to truncate
+                    Registers[a >> 4].Set((a >> 2) & 3, c);
+                    if (c != 0) Pos = b;
+                    return true;
 
                 // otherwise, unknown opcode
                 default: Fail(ErrorCode.UndefinedBehavior); return false;
@@ -3005,7 +3020,7 @@ namespace csx64
             int pos = 0, end = 0; // position in code
 
             // potential parsing args for an instruction
-            UInt64 a = 0, b = 0, c = 0;
+            UInt64 a = 0, b = 0, c = 0, d = 0;
             Hole hole;
             bool floating;
 
@@ -3083,7 +3098,6 @@ namespace csx64
                             AppendVal(args, 1, (UInt64)OPCode.SYSCALL);
                             break;
 
-                        // [8: MOVcc]   [4: source/dest][2: size][2: mode]   (mode = 0: load imm [size: imm]   mode = 1: load register [4:][4: source]   mode = 2: load memory [address]   mode = 3: store register [address])
                         case "MOV": if (!TryProcessBinaryOp(args, OPCode.MOV)) return args.err; break;
 
                         case "MOVA": case "MOVNBE": if (!TryProcessBinaryOp(args, OPCode.MOVa)) return args.err; break;
@@ -3140,7 +3154,9 @@ namespace csx64
                             break;
 
                         case "UEXTEND": case "UX": a = (UInt64)OPCode.UEXTEND; goto XEXTEND;
-                        case "SEXTEND": case "SX": a = (UInt64)OPCode.SEXTEND;
+                        case "SEXTEND":
+                        case "SX":
+                            a = (UInt64)OPCode.SEXTEND;
                         XEXTEND:
                             if (args.args.Length != 2) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: XEXTEND expected 2 args");
 
@@ -3190,6 +3206,7 @@ namespace csx64
                         // [8: la]   [4:][4: dest]   [address]
                         case "LA":
                             if (args.args.Length != 2) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: LA expected 2 args");
+                            if (args.sizecode != 3) return new Tuple<AssembleError, string>(AssembleError.UsageError, $"line {args.line}: LA does not support the specified size code");
 
                             if (!TryParseRegister(args, args.args[0], out a)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: LA expecetd register as first arg\n-> {args.err.Item2}");
                             if (!TryParseAddress(args, args.args[1], out b, out c, out hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: LA expected address as second arg\n-> {args.err.Item2}");
@@ -3289,7 +3306,7 @@ namespace csx64
                             break;
                         case "CALL":
                             if (args.args.Length != 1) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: CALL expected 1 arg");
-                            if (!TryParseAddress(args, args.args[0], out a, out b, out hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: CALLexpected address as first arg\n-> {args.err.Item2}");
+                            if (!TryParseAddress(args, args.args[0], out a, out b, out hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: CALL expected address as first arg\n-> {args.err.Item2}");
 
                             AppendVal(args, 1, (UInt64)OPCode.CALL);
                             if (!AppendAddress(args, a, b, hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}");
@@ -3308,6 +3325,50 @@ namespace csx64
                         case "BLSMSK": if (!TryProcessUnaryOp(args, OPCode.BLSMSK)) return args.err; break;
                         case "BLSR": if (!TryProcessUnaryOp(args, OPCode.BLSR)) return args.err; break;
                         case "ANDN": if (!TryProcessBinaryOp(args, OPCode.ANDN)) return args.err; break;
+
+                        case "GETF": a = (UInt64)OPCode.GETF; goto GETSETF;
+                        case "SETF":
+                            a = (UInt64)OPCode.SETF;
+                        GETSETF:
+                            if (args.args.Length != 1) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: GETF expected one arg");
+                            if (!TryParseRegister(args, args.args[0], out b)) return new Tuple<AssembleError, string>(AssembleError.UsageError, $"line {args.line}: GETF expected arg one to be a register");
+                            if (args.sizecode != 3) return new Tuple<AssembleError, string>(AssembleError.UsageError, $"line {args.line}: GETF does not support the specified size code");
+
+                            AppendVal(args, 1, a);
+                            AppendVal(args, 1, b);
+
+                            break;
+
+                        case "LOOP": // loop reg, address, (step = 1)
+                            // 2 args default step
+                            if (args.args.Length == 2) a = 0;
+                            // 3 args explicit step
+                            else if (args.args.Length == 2)
+                            {
+                                if (!TryParseInstantImm(args, args.args[2], out a, out floating))
+                                    return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: LOOP third argument (explicit step) expected an instant imm");
+                                if (floating) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: LOOP third argument (explicit step) may not be floating-point");
+
+                                switch (a)
+                                {
+                                    case 1: a = 0; break;
+                                    case 2: a = 1; break;
+                                    case 4: a = 2; break;
+                                    case 8: a = 3; break;
+
+                                    default: return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: LOOP third argument (explicit step) must be 1, 2, 4, or 8");
+                                }
+                            }
+                            else return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: LOOP expected two args (3 for explicit step)");
+
+                            if (!TryParseRegister(args, args.args[0], out b)) return new Tuple<AssembleError, string>(AssembleError.UsageError, $"line {args.line}: LOOP expected register as first arg");
+                            if (!TryParseAddress(args, args.args[1], out c, out d, out hole)) return new Tuple<AssembleError, string>(AssembleError.UsageError, $"line {args.line}: LOOP expected an address as second arg");
+
+                            AppendVal(args, 1, (UInt64)OPCode.LOOP);
+                            AppendVal(args, 1, (b << 4) | (args.sizecode << 2) | a);
+                            if (!AppendAddress(args, c, d, hole)) return args.err;
+
+                            break;
 
                         default: return new Tuple<AssembleError, string>(AssembleError.UnknownOp, $"line {args.line}: Unknown operation \"{args.op}\"");
                     }

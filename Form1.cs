@@ -12,7 +12,7 @@ namespace csx64
 {
     public partial class Form1 : Form
     {
-        private Computer C = new Computer();
+        private CSX64 C = new CSX64();
         private ulong Ticks = 0;
         private bool Sim = false;
 
@@ -48,7 +48,7 @@ namespace csx64
             base.OnPaint(e);
 
             Graphics g = e.Graphics;
-            Computer.FlagsRegister f = C.GetFlags();
+            CSX64.FlagsRegister f = C.GetFlags();
 
             float x, y;
             float h = 20;
@@ -90,13 +90,13 @@ namespace csx64
 
         private void CompileButton_Click(object sender, EventArgs e)
         {
-            Computer.ObjectFile file;
-            var assemble_res = Computer.Assemble(CodeBox.Text, out file);
-            if (assemble_res.Item1 != Computer.AssembleError.None) { MessageBox.Show(assemble_res.Item2, "Assemble Error"); return; }
+            CSX64.ObjectFile file;
+            var assemble_res = CSX64.Assemble(CodeBox.Text, out file);
+            if (assemble_res.Item1 != CSX64.AssembleError.None) { MessageBox.Show(assemble_res.Item2, "Assemble Error"); return; }
 
             byte[] exe = null;
-            var link_res = Computer.Link(ref exe, file);
-            if (link_res.Item1 != Computer.LinkError.None) { MessageBox.Show(link_res.Item2, "Link Error"); return; }
+            var link_res = CSX64.Link(ref exe, file);
+            if (link_res.Item1 != CSX64.LinkError.None) { MessageBox.Show(link_res.Item2, "Link Error"); return; }
 
             /*
             StringBuilder b = new StringBuilder();
@@ -105,7 +105,7 @@ namespace csx64
             MessageBox.Show(b.ToString());
             */
             
-            C = new Computer();
+            C = new CSX64();
             if (!C.Initialize(exe)) { MessageBox.Show("Something went wrong initializing the program", "Initialization Error"); return; }
             CInitialized = true;
             Ticks = 0;
@@ -185,20 +185,20 @@ namespace csx64
 
         private void TestsButton_Click(object sender, EventArgs e)
         {
-            Computer.FlagsRegister f = C.GetFlags();
+            CSX64.FlagsRegister f = C.GetFlags();
             MessageBox.Show($"a: {(f.a ? 1 : 0)}\nae: {(f.ae ? 1 : 0)}\nb: {(f.b ? 1 : 0)}\nbe: {(f.be ? 1 : 0)}\n" +
                 $"g: {(f.g ? 1 : 0)}\nge: {(f.ge ? 1 : 0)}\nl: {(f.l ? 1 : 0)}\nle: {(f.le ? 1 : 0)}");
         }
 
         private void GraphicalButton_Click(object sender, EventArgs e)
         {
-            Computer.ObjectFile obj;
-            var assemble_res = Computer.Assemble(CodeBox.Text, out obj);
-            if (assemble_res.Item1 != Computer.AssembleError.None) { MessageBox.Show(assemble_res.Item2, "Assemble Error"); return; }
+            CSX64.ObjectFile obj;
+            var assemble_res = CSX64.Assemble(CodeBox.Text, out obj);
+            if (assemble_res.Item1 != CSX64.AssembleError.None) { MessageBox.Show(assemble_res.Item2, "Assemble Error"); return; }
 
             byte[] exe = null;
-            var link_res = Computer.Link(ref exe, obj);
-            if (link_res.Item1 != Computer.LinkError.None) { MessageBox.Show(link_res.Item2, "Link Error"); return; }
+            var link_res = CSX64.Link(ref exe, obj);
+            if (link_res.Item1 != CSX64.LinkError.None) { MessageBox.Show(link_res.Item2, "Link Error"); return; }
 
             GraphicalDisplay g = new GraphicalDisplay();
             if (!g.C.Initialize(exe)) { MessageBox.Show("Something went wrong initializing the program", "Initialization Error"); return; }
@@ -208,7 +208,7 @@ namespace csx64
             g.Run();                            // begin execution
             g.ShowDialog();                     // display graphical client
 
-            g.C.Fail(Computer.ErrorCode.Abort); // cancellation results in an abort error
+            g.C.Fail(CSX64.ErrorCode.Abort); // cancellation results in an abort error
         }
     }
 }
