@@ -3016,7 +3016,7 @@ namespace csx64
 
             { Expr.OPs.NullCoalesce, 99 },
             { Expr.OPs.Pair, 100 },
-            { Expr.OPs.Condition, 101 }
+            { Expr.OPs.Condition, 100 }
         };
         private static readonly List<char> UnaryOps = new List<char>() { '+', '-', '~', '!', '*', '/' };
 
@@ -3074,31 +3074,17 @@ namespace csx64
             // if nothing found, fail
             return false;
         }
-        private static bool VerifyForm(Expr expr, ref string err)
-        {
-            switch (expr.OP)
-            {
-                case Expr.OPs.None: return true; // leaves are by definition well-formed
-
-                case Expr.OPs.Condition: // ternary conditional must have a pair portion to the right
-                    if (expr.Right.OP != Expr.OPs.Pair) { err = "Incomplete ternary conditional op encountered"; return false; }
-                    return VerifyForm(expr.Left, ref err) && VerifyForm(expr.Right.Left, ref err) && VerifyForm(expr.Right.Right, ref err);
-                case Expr.OPs.Pair: // ternary conditional pairs must have a condition
-                    err = "Ternary conditional pair encountered without a condition"; return false;
-
-                default: // all other ops must have verified ends
-                    return VerifyForm(expr.Left, ref err) && (expr.Right == null || VerifyForm(expr.Right, ref err));
-            }
-        }
         private static bool TryParseImm(AssembleArgs args, string token, out Expr hole)
         {
             hole = null; // initially-nulled result
 
             Expr temp; // temporary for node creation
             
-            int pos = 0, end;     // position in token
-            int depth;            // parenthesis depth
-            bool binPair = false; // marker if tree contains complete binary pairs (i.e. N+1 values and N binary ops)
+            int pos = 0, end; // position in token
+            int depth;        // parenthesis depth
+
+            bool binPair = false;          // marker if tree contains complete binary pairs (i.e. N+1 values and N binary ops)
+            int unpaired_conditionals = 0; // number of unpaired conditional ops
 
             Expr.OPs op = Expr.OPs.None; // extracted binary op (initialized so compiler doesn't complain)
             int oplen = 0;               // length of operator found (in characters)
@@ -3110,7 +3096,7 @@ namespace csx64
 
             // top of stack shall be refered to as current
 
-            stack.Push(null); // stack will always have a null at its base (simplifies code tremendously)
+            stack.Push(null); // stack will always have a null at its base (simplifies code slightly)
 
             if (token.Length == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Empty expression encountered"); return false; }
 
@@ -3130,12 +3116,12 @@ namespace csx64
                     else if (token[end] == ')') --depth;
 
                     // can't ever have negative depth
-                    if (depth < 0) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Mismatched parenthesis"); return false; }
+                    if (depth < 0) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Mismatched parenthesis \"{token}\""); return false; }
                 }
                 // if depth isn't back to 0, there was a parens mismatch
-                if (depth != 0) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Mismatched parenthesis"); return false; }
+                if (depth != 0) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Mismatched parenthesis \"{token}\""); return false; }
                 // if pos == end we'll have an empty token
-                if (pos == end) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Empty expression encountered"); return false; }
+                if (pos == end) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Empty token encountered in expression \"{token}\""); return false; }
 
                 // -- process value -- //
                 {
@@ -3190,7 +3176,10 @@ namespace csx64
                     // otherwise append to current (guaranteed to be defined by second pass)
                     else
                     {
-                        if (stack.Peek().Left == null) stack.Peek().Left = temp; else stack.Peek().Right = temp;
+                        //if (stack.Peek().Left == null) stack.Peek().Left = temp; else stack.Peek().Right = temp;
+
+                        // put it in the right (guaranteed by this algorithm to be empty)
+                        stack.Peek().Right = temp;
                     }
 
                     // flag as a valid binary pair
@@ -3205,14 +3194,17 @@ namespace csx64
                     {
                         // seek out nearest conditional without a pair
                         for (; stack.Peek() != null && (stack.Peek().OP != Expr.OPs.Condition || stack.Peek().Right.OP == Expr.OPs.Pair); stack.Pop()) ;
+
+                        // if we didn't find anywhere to put it, this is an error
+                        if (stack.Peek() == null) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Expression contained a ternary conditional pair without a corresponding condition \"{token}\""); return false; }
                     }
-                    // special rules cont.
+                    // right-to-left operators
                     else if (op == Expr.OPs.Condition)
                     {
-                        // seek out nearest conditional or pair
-                        for (; stack.Peek() != null && stack.Peek().OP != Expr.OPs.Condition && stack.Peek().OP != Expr.OPs.Pair; stack.Pop()) ;
+                        // wind current up to correct precedence (right-to-left evaluation, so don't skip equal precedence)
+                        for (; stack.Peek() != null && Precedence[stack.Peek().OP] < Precedence[op]; stack.Pop()) ;
                     }
-                    // all others are standard left-to-right
+                    // left-to-right operators
                     else
                     {
                         // wind current up to correct precedence (left-to-right evaluation, so also skip equal precedence)
@@ -3232,8 +3224,11 @@ namespace csx64
                         stack.Push(hole = new Expr() { OP = op, Left = hole });
                     }
 
-                    // flag as invalid binary pair
-                    binPair = false;
+                    binPair = false; // flag as invalid binary pair
+
+                    // update unpaired conditionals
+                    if (op == Expr.OPs.Condition) ++unpaired_conditionals;
+                    else if (op == Expr.OPs.Pair) --unpaired_conditionals;
                 }
 
                 // pass last delimiter
@@ -3243,8 +3238,8 @@ namespace csx64
             // handle binary pair mismatch
             if (!binPair) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Expression contained a mismatched binary op: \"{token}\""); return false; }
 
-            // verify the resulting form
-            if (!VerifyForm(hole, ref err)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: {err}"); return false; }
+            // make sure all conditionals were matched
+            if (unpaired_conditionals != 0) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Expression contained {unpaired_conditionals} incomplete ternary {(unpaired_conditionals == 1 ? "conditional" : "conditionals")}"); return false; }
 
             return true;
         }
@@ -3881,7 +3876,7 @@ namespace csx64
 
             /* testing for expressions
             {
-                string test = "a?b:c?d:e";
+                string test = "a?b?c:d?e:f:g";
                 //string test = "a?b?c:d:e?f:g";
 
                 if (!TryParseImm(args, test, out Expr _test)) MessageBox.Show(args.err.ToString());
