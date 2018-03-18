@@ -11,7 +11,7 @@ namespace csx64
     {
         public static UInt64 Negative(this UInt64 val, bool floating)
         {
-            return floating ? Computer.ConvertDouble(-Computer.ConvertDouble(val)) : ~val + 1;
+            return floating ? Computer.AsUInt64(-Computer.AsDouble(val)) : ~val + 1;
         }
         public static Int64 MakeSigned(this UInt64 val)
         {
@@ -51,7 +51,9 @@ namespace csx64
 
             Cmp, Test,
 
-            Inc, Dec, Neg, Not,
+            Inc, Dec, Neg, Not, Abs, Id,
+
+            La,
 
             Jmp,
             Ja, Jae, Jb, Jbe, Jg, Jge, Jl, Jle,
@@ -61,12 +63,17 @@ namespace csx64
             SETz, SETnz, SETs, SETns, SETp, SETnp, SETo, SETno, SETc, SETnc,
 
             Fadd, Fsub, Fmul, Fdiv, Fmod,
-            Fpow, Fsqrt, Fexp, Fln,
+            Fpow, Fsqrt, Fexp, Fln, Fabs, Fid,
+
             Fsin, Fcos, Ftan,
             Fsinh, Fcosh, Ftanh,
             Fasin, Facos, Fatan, Fatan2,
+
             Ffloor, Fceil, Fround, Ftrunc,
-            Fabs
+
+            Fcmp,
+
+            FtoI, ItoF
         }
 
         /// <summary>
@@ -540,6 +547,28 @@ namespace csx64
                 return res;
             }
         }
+        private struct ABS : IUnaryEvaluator
+        {
+            public UInt64 Evaluate(UInt64 sizecode, UInt64 val, FlagsRegister flags)
+            {
+                UInt64 res = Negative(val, sizecode) ? Truncate(~val + 1, sizecode) : val;
+
+                if (flags != null)
+                {
+                    UpdateFlags(sizecode, res, flags);
+                }
+
+                return res;
+            }
+        }
+
+        private struct ID : IUnaryEvaluator
+        {
+            public UInt64 Evaluate(UInt64 sizecode, UInt64 a, FlagsRegister flags)
+            {
+                return new SUB().Evaluate(sizecode, a, 0, flags);
+            }
+        }
 
         // -- floatint point ops --
 
@@ -547,22 +576,22 @@ namespace csx64
         {
             public UInt64 Evaluate(UInt64 sizecode, UInt64 a, UInt64 b, FlagsRegister flags)
             {
-                double res = ConvertDouble(a) + ConvertDouble(b);
+                double res = AsDouble(a) + AsDouble(b);
 
                 if (flags != null) UpdateFlagsF(res, flags);
 
-                return ConvertDouble(res);
+                return AsUInt64(res);
             }
         }
         private struct FSUB : IBinaryEvaluator
         {
             public UInt64 Evaluate(UInt64 sizecode, UInt64 a, UInt64 b, FlagsRegister flags)
             {
-                double res = ConvertDouble(a) - ConvertDouble(b);
+                double res = AsDouble(a) - AsDouble(b);
 
                 if (flags != null) UpdateFlagsF(res, flags);
 
-                return ConvertDouble(res);
+                return AsUInt64(res);
             }
         }
 
@@ -570,11 +599,11 @@ namespace csx64
         {
             public UInt64 Evaluate(UInt64 sizecode, UInt64 a, UInt64 b, FlagsRegister flags)
             {
-                double res = ConvertDouble(a) * ConvertDouble(b);
+                double res = AsDouble(a) * AsDouble(b);
 
                 if (flags != null) UpdateFlagsF(res, flags);
 
-                return ConvertDouble(res);
+                return AsUInt64(res);
             }
         }
 
@@ -582,22 +611,22 @@ namespace csx64
         {
             public UInt64 Evaluate(UInt64 sizecode, UInt64 a, UInt64 b, FlagsRegister flags)
             {
-                double res = ConvertDouble(a) / ConvertDouble(b);
+                double res = AsDouble(a) / AsDouble(b);
 
                 if (flags != null) UpdateFlagsF(res, flags);
 
-                return ConvertDouble(res);
+                return AsUInt64(res);
             }
         }
         private struct FMOD : IBinaryEvaluator
         {
             public UInt64 Evaluate(UInt64 sizecode, UInt64 a, UInt64 b, FlagsRegister flags)
             {
-                double res = ConvertDouble(a) % ConvertDouble(b);
+                double res = AsDouble(a) % AsDouble(b);
 
                 if (flags != null) UpdateFlagsF(res, flags);
 
-                return ConvertDouble(res);
+                return AsUInt64(res);
             }
         }
 
@@ -605,45 +634,55 @@ namespace csx64
         {
             public UInt64 Evaluate(UInt64 sizecode, UInt64 a, UInt64 b, FlagsRegister flags)
             {
-                double res = Math.Pow(ConvertDouble(a), ConvertDouble(b));
+                double res = Math.Pow(AsDouble(a), AsDouble(b));
 
                 if (flags != null) UpdateFlagsF(res, flags);
 
-                return ConvertDouble(res);
+                return AsUInt64(res);
             }
         }
         private struct FSQRT : IUnaryEvaluator
         {
             public UInt64 Evaluate(UInt64 sizecode, UInt64 a, FlagsRegister flags)
             {
-                double res = Math.Sqrt(ConvertDouble(a));
+                double res = Math.Sqrt(AsDouble(a));
 
                 if (flags != null) UpdateFlagsF(res, flags);
 
-                return ConvertDouble(res);
+                return AsUInt64(res);
             }
         }
-
         private struct FEXP : IUnaryEvaluator
         {
             public UInt64 Evaluate(UInt64 sizecode, UInt64 a, FlagsRegister flags)
             {
-                double res = Math.Exp(ConvertDouble(a));
+                double res = Math.Exp(AsDouble(a));
 
                 if (flags != null) UpdateFlagsF(res, flags);
 
-                return ConvertDouble(res);
+                return AsUInt64(res);
             }
         }
         private struct FLN : IUnaryEvaluator
         {
             public UInt64 Evaluate(UInt64 sizecode, UInt64 a, FlagsRegister flags)
             {
-                double res = Math.Log(ConvertDouble(a));
+                double res = Math.Log(AsDouble(a));
 
                 if (flags != null) UpdateFlagsF(res, flags);
 
-                return ConvertDouble(res);
+                return AsUInt64(res);
+            }
+        }
+        private struct FABS : IUnaryEvaluator
+        {
+            public UInt64 Evaluate(UInt64 sizecode, UInt64 a, FlagsRegister flags)
+            {
+                double res = Math.Abs(AsDouble(a));
+
+                if (flags != null) UpdateFlagsF(res, flags);
+
+                return AsUInt64(res);
             }
         }
 
@@ -651,33 +690,33 @@ namespace csx64
         {
             public UInt64 Evaluate(UInt64 sizecode, UInt64 a, FlagsRegister flags)
             {
-                double res = Math.Sin(ConvertDouble(a));
+                double res = Math.Sin(AsDouble(a));
 
                 if (flags != null) UpdateFlagsF(res, flags);
 
-                return ConvertDouble(res);
+                return AsUInt64(res);
             }
         }
         private struct FCOS : IUnaryEvaluator
         {
             public UInt64 Evaluate(UInt64 sizecode, UInt64 a, FlagsRegister flags)
             {
-                double res = Math.Cos(ConvertDouble(a));
+                double res = Math.Cos(AsDouble(a));
 
                 if (flags != null) UpdateFlagsF(res, flags);
 
-                return ConvertDouble(res);
+                return AsUInt64(res);
             }
         }
         private struct FTAN : IUnaryEvaluator
         {
             public UInt64 Evaluate(UInt64 sizecode, UInt64 a, FlagsRegister flags)
             {
-                double res = Math.Tan(ConvertDouble(a));
+                double res = Math.Tan(AsDouble(a));
 
                 if (flags != null) UpdateFlagsF(res, flags);
 
-                return ConvertDouble(res);
+                return AsUInt64(res);
             }
         }
 
@@ -685,33 +724,33 @@ namespace csx64
         {
             public UInt64 Evaluate(UInt64 sizecode, UInt64 a, FlagsRegister flags)
             {
-                double res = Math.Sinh(ConvertDouble(a));
+                double res = Math.Sinh(AsDouble(a));
 
                 if (flags != null) UpdateFlagsF(res, flags);
 
-                return ConvertDouble(res);
+                return AsUInt64(res);
             }
         }
         private struct FCOSH : IUnaryEvaluator
         {
             public UInt64 Evaluate(UInt64 sizecode, UInt64 a, FlagsRegister flags)
             {
-                double res = Math.Cosh(ConvertDouble(a));
+                double res = Math.Cosh(AsDouble(a));
 
                 if (flags != null) UpdateFlagsF(res, flags);
 
-                return ConvertDouble(res);
+                return AsUInt64(res);
             }
         }
         private struct FTANH : IUnaryEvaluator
         {
             public UInt64 Evaluate(UInt64 sizecode, UInt64 a, FlagsRegister flags)
             {
-                double res = Math.Tanh(ConvertDouble(a));
+                double res = Math.Tanh(AsDouble(a));
 
                 if (flags != null) UpdateFlagsF(res, flags);
 
-                return ConvertDouble(res);
+                return AsUInt64(res);
             }
         }
 
@@ -719,44 +758,44 @@ namespace csx64
         {
             public UInt64 Evaluate(UInt64 sizecode, UInt64 a, FlagsRegister flags)
             {
-                double res = Math.Asin(ConvertDouble(a));
+                double res = Math.Asin(AsDouble(a));
 
                 if (flags != null) UpdateFlagsF(res, flags);
 
-                return ConvertDouble(res);
+                return AsUInt64(res);
             }
         }
         private struct FACOS : IUnaryEvaluator
         {
             public UInt64 Evaluate(UInt64 sizecode, UInt64 a, FlagsRegister flags)
             {
-                double res = Math.Acos(ConvertDouble(a));
+                double res = Math.Acos(AsDouble(a));
 
                 if (flags != null) UpdateFlagsF(res, flags);
 
-                return ConvertDouble(res);
+                return AsUInt64(res);
             }
         }
         private struct FATAN : IUnaryEvaluator
         {
             public UInt64 Evaluate(UInt64 sizecode, UInt64 a, FlagsRegister flags)
             {
-                double res = Math.Atan(ConvertDouble(a));
+                double res = Math.Atan(AsDouble(a));
 
                 if (flags != null) UpdateFlagsF(res, flags);
 
-                return ConvertDouble(res);
+                return AsUInt64(res);
             }
         }
         private struct FATAN2 : IBinaryEvaluator
         {
             public UInt64 Evaluate(UInt64 sizecode, UInt64 a, UInt64 b, FlagsRegister flags)
             {
-                double res = Math.Atan2(ConvertDouble(a), ConvertDouble(b));
+                double res = Math.Atan2(AsDouble(a), AsDouble(b));
 
                 if (flags != null) UpdateFlagsF(res, flags);
 
-                return ConvertDouble(res);
+                return AsUInt64(res);
             }
         }
 
@@ -764,56 +803,67 @@ namespace csx64
         {
             public UInt64 Evaluate(UInt64 sizecode, UInt64 a, FlagsRegister flags)
             {
-                double res = Math.Floor(ConvertDouble(a));
+                double res = Math.Floor(AsDouble(a));
 
                 if (flags != null) UpdateFlagsF(res, flags);
 
-                return ConvertDouble(res);
+                return AsUInt64(res);
             }
         }
         private struct FCEIL : IUnaryEvaluator
         {
             public UInt64 Evaluate(UInt64 sizecode, UInt64 a, FlagsRegister flags)
             {
-                double res = Math.Ceiling(ConvertDouble(a));
+                double res = Math.Ceiling(AsDouble(a));
 
                 if (flags != null) UpdateFlagsF(res, flags);
 
-                return ConvertDouble(res);
+                return AsUInt64(res);
             }
         }
         private struct FROUND : IUnaryEvaluator
         {
             public UInt64 Evaluate(UInt64 sizecode, UInt64 a, FlagsRegister flags)
             {
-                double res = Math.Round(ConvertDouble(a));
+                double res = Math.Round(AsDouble(a));
 
                 if (flags != null) UpdateFlagsF(res, flags);
 
-                return ConvertDouble(res);
+                return AsUInt64(res);
             }
         }
         private struct FTRUNC : IUnaryEvaluator
         {
             public UInt64 Evaluate(UInt64 sizecode, UInt64 a, FlagsRegister flags)
             {
-                double res = Math.Truncate(ConvertDouble(a));
+                double res = Math.Truncate(AsDouble(a));
 
                 if (flags != null) UpdateFlagsF(res, flags);
 
-                return ConvertDouble(res);
+                return AsUInt64(res);
             }
         }
 
-        private struct FABS : IUnaryEvaluator
+        private struct FID : IUnaryEvaluator
         {
             public UInt64 Evaluate(UInt64 sizecode, UInt64 a, FlagsRegister flags)
             {
-                double res = Math.Abs(ConvertDouble(a));
+                return new FSUB().Evaluate(sizecode, a, AsUInt64(0.0), flags);
+            }
+        }
 
-                if (flags != null) UpdateFlagsF(res, flags);
-
-                return ConvertDouble(res);
+        private struct FTOI : IUnaryEvaluator
+        {
+            public UInt64 Evaluate(UInt64 sizecode, UInt64 a, FlagsRegister flags)
+            {
+                return new ID().Evaluate(sizecode, ((long)AsDouble(a)).MakeUnsigned(), flags);
+            }
+        }
+        private struct ITOF : IUnaryEvaluator
+        {
+            public UInt64 Evaluate(UInt64 sizecode, UInt64 a, FlagsRegister flags)
+            {
+                return new FID().Evaluate(sizecode, AsUInt64((double)a.MakeSigned()), flags);
             }
         }
 
@@ -885,7 +935,7 @@ namespace csx64
         /// Interprets a double as its raw bits
         /// </summary>
         /// <param name="val">value to interpret</param>
-        public static unsafe UInt64 ConvertDouble(double val)
+        public static unsafe UInt64 AsUInt64(double val)
         {
             return *(UInt64*)&val;
         }
@@ -893,7 +943,7 @@ namespace csx64
         /// Interprets raw bits as a double
         /// </summary>
         /// <param name="val">value to interpret</param>
-        public static unsafe double ConvertDouble(UInt64 val)
+        public static unsafe double AsDouble(UInt64 val)
         {
             return *(double*)&val;
         }
@@ -1113,6 +1163,14 @@ namespace csx64
                 case OPCode.Inc: return UnaryOp<INC>();
                 case OPCode.Dec: return UnaryOp<DEC>();
                 case OPCode.Not: return UnaryOp<NOT>();
+                case OPCode.Abs: return UnaryOp<ABS>();
+                case OPCode.Id: return UnaryOp<ID>(false);
+
+                // [8: la]   [4:][4: dest]   [address]
+                case OPCode.La:
+                    if (!GetMem(1, ref a) || !GetAddress(ref b)) return false;
+                    Registers[a & 15].x64 = b;
+                    return true;
 
                 // [8: Jcc]   [address]
                 case OPCode.Jmp: if (!GetAddress(ref a)) return false; Pos = a; return true;
@@ -1170,6 +1228,8 @@ namespace csx64
                 case OPCode.Fsqrt: return UnaryOp<FSQRT>();
                 case OPCode.Fexp: return UnaryOp<FEXP>();
                 case OPCode.Fln: return UnaryOp<FLN>();
+                case OPCode.Fabs: return UnaryOp<FABS>();
+                case OPCode.Fid: return UnaryOp<FID>(false);
 
                 case OPCode.Fsin: return UnaryOp<FSIN>();
                 case OPCode.Fcos: return UnaryOp<FCOS>();
@@ -1189,7 +1249,10 @@ namespace csx64
                 case OPCode.Fround: return UnaryOp<FROUND>();
                 case OPCode.Ftrunc: return UnaryOp<FTRUNC>();
 
-                case OPCode.Fabs: return UnaryOp<FABS>();
+                case OPCode.Fcmp: return BinaryOp<FSUB>(false);
+
+                case OPCode.FtoI: return UnaryOp<FTOI>();
+                case OPCode.ItoF: return UnaryOp<ITOF>();
 
                 // otherwise, unknown opcode
                 default: Fail(ErrorCode.UndefinedBehavior); return false;
@@ -1246,7 +1309,7 @@ namespace csx64
                 if (TryParseInstantImm(file, sub, out UInt64 temp, out bool floating))
                 {
                     // add location depends on floating or not
-                    if (floating) { Floating = true; FValue += ConvertDouble(temp); }
+                    if (floating) { Floating = true; FValue += AsDouble(temp); }
                     else Value += temp;
                 }
                 // account for the __pos__ symbol (due to being an address, it's value is meaningless until link time)
@@ -1319,7 +1382,7 @@ namespace csx64
             // if we can fill it immediately, do so
             if (hole.Segments.Count == 0)
             {
-                Append(file, size, hole.Floating ? ConvertDouble(hole.Value.MakeSigned() + hole.FValue) : hole.Value);
+                Append(file, size, hole.Floating ? AsUInt64(hole.Value.MakeSigned() + hole.FValue) : hole.Value);
             }
             // otherwise there really is a hole
             else
@@ -1392,7 +1455,7 @@ namespace csx64
                 else if (file.Symbols.TryGetValue(_sub, out Symbol symbol) && !symbol.IsAddress)
                 {
                     // add depending on floating or not
-                    if (symbol.IsFloating) { floating = true; fsum += sub[0] == '-' ? -ConvertDouble(symbol.Value) : ConvertDouble(symbol.Value); }
+                    if (symbol.IsFloating) { floating = true; fsum += sub[0] == '-' ? -AsDouble(symbol.Value) : AsDouble(symbol.Value); }
                     else res += sub[0] == '-' ? ~symbol.Value + 1 : symbol.Value;
                 }
                 // otherwise it's a dud
@@ -1403,7 +1466,7 @@ namespace csx64
             }
 
             // if result is floating, recalculate res as sum of floating and integral components
-            if (floating) res = ConvertDouble(res + fsum);
+            if (floating) res = AsUInt64(res + fsum);
 
             return true;
         }
@@ -1694,16 +1757,16 @@ namespace csx64
                 ["__time__"] = new Symbol() { Value = Time(), IsAddress = false, IsFloating = false },
                 ["__version__"] = new Symbol() { Value = Version, IsAddress = false, IsFloating = false },
 
-                ["__pinf__"] = new Symbol() { Value = ConvertDouble(double.PositiveInfinity), IsAddress = false, IsFloating = true },
-                ["__ninf__"] = new Symbol() { Value = ConvertDouble(double.NegativeInfinity), IsAddress = false, IsFloating = true },
-                ["__nan__"] = new Symbol() { Value = ConvertDouble(double.NaN), IsAddress = false, IsFloating = true },
+                ["__pinf__"] = new Symbol() { Value = AsUInt64(double.PositiveInfinity), IsAddress = false, IsFloating = true },
+                ["__ninf__"] = new Symbol() { Value = AsUInt64(double.NegativeInfinity), IsAddress = false, IsFloating = true },
+                ["__nan__"] = new Symbol() { Value = AsUInt64(double.NaN), IsAddress = false, IsFloating = true },
 
-                ["__fmax__"] = new Symbol() { Value = ConvertDouble(double.MaxValue), IsAddress = false, IsFloating = true },
-                ["__fmin__"] = new Symbol() { Value = ConvertDouble(double.MinValue), IsAddress = false, IsFloating = true },
-                ["__fepsilon__"] = new Symbol() { Value = ConvertDouble(double.Epsilon), IsAddress = false, IsFloating = true },
+                ["__fmax__"] = new Symbol() { Value = AsUInt64(double.MaxValue), IsAddress = false, IsFloating = true },
+                ["__fmin__"] = new Symbol() { Value = AsUInt64(double.MinValue), IsAddress = false, IsFloating = true },
+                ["__fepsilon__"] = new Symbol() { Value = AsUInt64(double.Epsilon), IsAddress = false, IsFloating = true },
 
-                ["__pi__"] = new Symbol() { Value = ConvertDouble(Math.PI), IsAddress = false, IsFloating = true },
-                ["__e__"] = new Symbol() { Value = ConvertDouble(Math.E), IsAddress = false, IsFloating = true }
+                ["__pi__"] = new Symbol() { Value = AsUInt64(Math.PI), IsAddress = false, IsFloating = true },
+                ["__e__"] = new Symbol() { Value = AsUInt64(Math.E), IsAddress = false, IsFloating = true }
             };
 
             int line = 0; // current line number
@@ -1858,6 +1921,20 @@ namespace csx64
                         case "DEC": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Dec, ref err)) return err; break;
                         case "NEG": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Neg, ref err)) return err; break;
                         case "NOT": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Not, ref err)) return err; break;
+                        case "ABS": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Abs, ref err)) return err; break;
+                        case "ID":  if (!TryProcessUnaryOp(file, tokens, line, OPCode.Id, ref err)) return err; break;
+
+                        // [8: la]   [4:][4: dest]   [address]
+                        case "LA":
+                            if (tokens.Length != 3) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {line}: LA expected 2 args");
+                            if (!TryParseRegister(file, tokens[1], out a)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {line}: LA expecetd register as first arg");
+                            if (!TryParseAddress(file, tokens[2], out b, out c, out hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {line}: LA expected address as second arg");
+
+                            Append(file, 1, (UInt64)OPCode.La);
+                            Append(file, 1, a);
+                            AppendAddress(file, b, c, hole);
+
+                            break;
 
                         // [8: Jcc]   [address]
                         case "JMP": if (!TryProcessJump(file, tokens, line, OPCode.Jmp, ref err)) return err; break;
@@ -1913,6 +1990,8 @@ namespace csx64
                         case "FSQRT": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Fsqrt, ref err)) return err; break;
                         case "FEXP": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Fexp, ref err)) return err; break;
                         case "FLN": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Fln, ref err)) return err; break;
+                        case "FABS": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Fabs, ref err)) return err; break;
+                        case "FID": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Fid, ref err)) return err; break;
 
                         case "FSIN": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Fsin, ref err)) return err; break;
                         case "FCOS": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Fcos, ref err)) return err; break;
@@ -1932,7 +2011,10 @@ namespace csx64
                         case "FROUND": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Fround, ref err)) return err; break;
                         case "FTRUNC": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Ftrunc, ref err)) return err; break;
 
-                        case "FABS": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Fabs, ref err)) return err; break;
+                        case "FCMP": if (!TryProcessBinaryOp(file, tokens, line, OPCode.Fcmp, ref err)) return err; break;
+
+                        case "FTOI": if (!TryProcessUnaryOp(file, tokens, line, OPCode.FtoI, ref err)) return err; break;
+                        case "ITOF": if (!TryProcessUnaryOp(file, tokens, line, OPCode.ItoF, ref err)) return err; break;
 
                         default: return new Tuple<AssembleError, string>(AssembleError.UnknownOp, $"line {line}: Couldn't process operator \"{tokens[0]}\"");
                     }
@@ -1999,12 +2081,12 @@ namespace csx64
                         // prefer static definitions
                         if (!objs[i].Symbols.TryGetValue(seg.Symbol, out symbol) && !symbols.TryGetValue(seg.Symbol, out symbol)) return new Tuple<LinkError, string>(LinkError.MissingSymbol, $"Symbol \"{seg.Symbol}\" undefined");
 
-                        if (symbol.IsFloating) { floating = true; fvalue += seg.IsNegative ? -ConvertDouble(symbol.Value) : ConvertDouble(symbol.Value); }
+                        if (symbol.IsFloating) { floating = true; fvalue += seg.IsNegative ? -AsDouble(symbol.Value) : AsDouble(symbol.Value); }
                         else value += seg.IsNegative ? ~symbol.Value + 1 : symbol.Value;
                     }
 
                     // fill it in
-                    Write(res, hole.Address + offsets[i], hole.Size, floating ? ConvertDouble(value.MakeSigned() + fvalue) : value);
+                    Write(res, hole.Address + offsets[i], hole.Size, floating ? AsUInt64(value.MakeSigned() + fvalue) : value);
                 }
 
             // write the header
