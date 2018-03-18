@@ -1486,36 +1486,6 @@ namespace csx64
         /// </summary>
         protected virtual bool Syscall() { return false; }
 
-        // [8: mov]   [4: source/dest][2: size][2: mode]   (mode = 0: load imm [size: imm]   mode = 1: load register [4:][4: source]   mode = 2: load memory [address]   mode = 3: store register [address])
-        /*private bool ProcessMove(bool keep = true)
-        {
-            UInt64 a = 0, b = 0;
-
-            // consume all instruction data
-            if (!GetMem(1, ref a)) return false;
-            switch (a & 3)
-            {
-                case 0: if (!GetMem(Size((a >> 2) & 3), ref b)) return false; break;
-                case 1: if (!GetMem(1, ref b)) return false; b = Registers[b & 15].x64; break;
-                case 2:
-                case 3: if (!GetAddress(ref b)) return false; break;
-            }
-
-            // conditionally follow through with transfer
-            if (keep)
-            {
-                switch (a & 3)
-                {
-                    case 0:
-                    case 1: Registers[a >> 4].Set((a >> 2) & 3, b); break;
-                    case 2: if (!GetMem(b, Size((a >> 2) & 3), ref b)) return false; Registers[a >> 4].Set((a >> 2) & 3, b); break;
-                    case 3: if (!SetMem(b, Size((a >> 2) & 3), Registers[a >> 4].x64)) return false; break;
-                }
-            }
-
-            return true;
-        }*/
-
         /// <summary>
         /// Performs a single operation. Returns true if successful
         /// </summary>
@@ -1672,23 +1642,22 @@ namespace csx64
                 case OPCode.FTOI: return ProcessFTOI();
                 case OPCode.ITOF: return ProcessITOF();
 
-                // [8: push]   [4: source][2: size][2: mode]   ([size: imm])   (mode = 0: push imm   mode = 1: push register   otherwise undefined)
+                // [8: push]   [4: src][2: size][1:][1: reg]   ([size: imm])   (reg = 0: push imm   reg = 1: push src)
                 case OPCode.Push:
                     if (!GetMem(1, ref a)) return false;
-                    switch (a & 3)
+                    switch (a & 1)
                     {
                         case 0: if (!GetMem(Size((a >> 2) & 3), ref b)) return false; break;
                         case 1: b = Registers[a >> 4].x64; break;
-                        default: return false;
                     }
                     Registers[15].x64 -= Size((a >> 2) & 3);
                     if (!SetMem(Registers[15].x64, Size((a >> 2) & 3), b)) return false;
                     return true;
-                // [8: pop]   [4: dest][2:][2: size]
+                // [8: pop]   [4: dest][2: size][2:]
                 case OPCode.Pop:
-                    if (!GetMem(1, ref a) || !GetMem(Registers[15].x64, Size(a & 3), ref b)) return false;
-                    Registers[15].x64 += Size(a & 3);
-                    Registers[a >> 4].Set(a & 3, b);
+                    if (!GetMem(1, ref a) || !GetMem(Registers[15].x64, Size((a >> 2) & 3), ref b)) return false;
+                    Registers[15].x64 += Size((a >> 2) & 3);
+                    Registers[a >> 4].Set((a >> 2) & 3, b);
                     return true;
                 // [8: call]   [address]
                 case OPCode.Call:
@@ -1722,13 +1691,13 @@ namespace csx64
             None, EmptyResult, SymbolRedefinition, MissingSymbol
         }
 
-        public struct Symbol
+        internal struct Symbol
         {
             public UInt64 Value;
             public bool IsAddress;
             public bool IsFloating;
         }
-        public class Hole
+        internal class Hole
         {
             public struct Segment
             {
@@ -1749,13 +1718,13 @@ namespace csx64
 
             // -------------------
 
-            public bool Append(ObjectFile file, string sub, string last_static_label, int line, ref Tuple<AssembleError, string> err)
+            public bool Append(AssembleArgs args, string sub)
             {
                 string _sub = sub.Length > 0 && sub[0] == '+' || sub[0] == '-' ? sub.Substring(1) : sub;
-                if (_sub.Length == 0) { err = new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {line}: Empty label encountered"); return false; }
+                if (_sub.Length == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Empty label encountered"); return false; }
 
                 // if we can get a value for it, add it
-                if (TryParseInstantImm(file, sub, out UInt64 temp, out bool floating, last_static_label, line, ref err))
+                if (TryParseInstantImm(args, sub, out UInt64 temp, out bool floating))
                 {
                     // add location depends on floating or not
                     if (floating) { Floating = true; FValue += AsDouble(temp); }
@@ -1765,21 +1734,21 @@ namespace csx64
                 else if (_sub == "__pos__")
                 {
                     // get the position symbol
-                    Symbol __pos__ = file.Symbols["__pos__"];
+                    Symbol __pos__ = args.file.Symbols["__pos__"];
                     // create a virtual label name to refer to current value of __pos__
                     string virt_label = $"{__pos__.Value:x16}";
 
                     // create the clone symbol
-                    file.Symbols[virt_label] = __pos__;
+                    args.file.Symbols[virt_label] = __pos__;
                     // add virtual symbol to segments
                     Segments.Add(new Segment() { Symbol = virt_label, IsNegative = sub[0] == '-' });
                 }
                 // otherwise add a segment if it's a legal label
                 else
                 {
-                    if (!MutateLabel(ref _sub, last_static_label, line, ref err)) return false;
+                    if (!MutateLabel(args, ref _sub)) return false;
                     if (IsValidLabel(_sub)) Segments.Add(new Segment() { Symbol = _sub, IsNegative = sub[0] == '-' });
-                    else { err = new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {line}: \"{_sub}\" is not a valid label"); return false; }
+                    else { args.err = new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: \"{_sub}\" is not a valid label"); return false; }
                 }
 
                 return true;
@@ -1787,11 +1756,22 @@ namespace csx64
         }
         public class ObjectFile
         {
-            public Dictionary<string, Symbol> Symbols = new Dictionary<string, Symbol>();
+            internal Dictionary<string, Symbol> Symbols = new Dictionary<string, Symbol>();
 
-            public List<string> GlobalSymbols = new List<string>();
-            public List<Hole> Holes = new List<Hole>();
-            public List<byte> Data = new List<byte>();
+            internal List<string> GlobalSymbols = new List<string>();
+            internal List<Hole> Holes = new List<Hole>();
+            internal List<byte> Data = new List<byte>();
+        }
+
+        internal class AssembleArgs
+        {
+            public ObjectFile file;
+            public int line;
+
+            public string[] tokens;
+
+            public string last_static_label;
+            public Tuple<AssembleError, string> err;
         }
 
         /// <summary>
@@ -1858,7 +1838,7 @@ namespace csx64
             if ((a & 0x80) != 0) Append(file, 8, hole);
         }
 
-        private static bool TryParseInstantImm(ObjectFile file, string token, out UInt64 res, out bool floating, string last_static_label, int line, ref Tuple<AssembleError, string> err)
+        private static bool TryParseInstantImm(AssembleArgs args, string token, out UInt64 res, out bool floating)
         {
             int pos = 0, end = 0;   // position in token
             UInt64 temp = 0;        // placeholders for parsing
@@ -1868,7 +1848,7 @@ namespace csx64
             res = 0; 
             floating = false;
 
-            if (token.Length == 0) { err = new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {line}: Empty label encountered"); return false; }
+            if (token.Length == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Empty label encountered"); return false; }
 
             while (pos < token.Length)
             {
@@ -1881,7 +1861,7 @@ namespace csx64
                 // get subtoken to process
                 string sub = token.Substring(pos, end - pos);
                 string _sub = sub[0] == '+' || sub[0] == '-' ? sub.Substring(1) : sub;
-                if (_sub.Length == 0) { err = new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {line}: Empty label encountered"); return false; }
+                if (_sub.Length == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Empty label encountered"); return false; }
 
                 // if it's a numeric literal
                 if (char.IsDigit(_sub[0]))
@@ -1901,21 +1881,21 @@ namespace csx64
 
                     // if none of thise worked, try a floating point conversion
                     if (double.TryParse(sub, out ftemp)) { floating = true; fsum += ftemp; }
-                    else { err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {line}: Unknown numeric literal encountered \"{_sub}\""); return false; }
+                    else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Unknown numeric literal encountered \"{_sub}\""); return false; }
                     aft:;
                 }
                 // if it's an instant symbol
                 else
                 {
-                    if (!MutateLabel(ref _sub, last_static_label, line, ref err)) return false;
-                    if (file.Symbols.TryGetValue(_sub, out Symbol symbol) && !symbol.IsAddress)
+                    if (!MutateLabel(args, ref _sub)) return false;
+                    if (args.file.Symbols.TryGetValue(_sub, out Symbol symbol) && !symbol.IsAddress)
                     {
                         // add depending on floating or not
                         if (symbol.IsFloating) { floating = true; fsum += sub[0] == '-' ? -AsDouble(symbol.Value) : AsDouble(symbol.Value); }
                         else res += sub[0] == '-' ? ~symbol.Value + 1 : symbol.Value;
                     }
                     // otherwise it's a dud
-                    else { err = new Tuple<AssembleError, string>(AssembleError.UnknownSymbol, $"line {line}: Undefined instant symbol encountered \"{_sub}\""); return false; }
+                    else { args.err = new Tuple<AssembleError, string>(AssembleError.UnknownSymbol, $"line {args.line}: Undefined instant symbol encountered \"{_sub}\""); return false; }
                 }
 
                 // start of next token includes separator
@@ -1928,21 +1908,21 @@ namespace csx64
             return true;
         }
 
-        private static bool TryParseRegister(ObjectFile file, string token, out UInt64 res, string last_static_label, int line, ref Tuple<AssembleError, string> err)
+        private static bool TryParseRegister(AssembleArgs args, string token, out UInt64 res)
         {
             res = 0;
-            if (token.Length < 2 || token[0] != '$') { err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {line}: Invalid register format encountered \"{token}\""); return false; }
-            if (!TryParseInstantImm(file, token.Substring(1), out res, out bool floating, last_static_label, line, ref err)) { err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line{line}: Failed to parse register \"{token}\"\n-> {err.Item2}"); return false; }
-            if (floating) { err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {line}: Attempt to use floating point value to specify register \"{token}\""); return false; }
-            if (res >= 16) { err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {line}: Register out of range \"{token}\" -> {res}"); return false; }
+            if (token.Length < 2 || token[0] != '$') { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Invalid register format encountered \"{token}\""); return false; }
+            if (!TryParseInstantImm(args, token.Substring(1), out res, out bool floating)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line{args.line}: Failed to parse register \"{token}\"\n-> {args.err.Item2}"); return false; }
+            if (floating) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Attempt to use floating point value to specify register \"{token}\""); return false; }
+            if (res >= 16) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Register out of range \"{token}\" -> {res}"); return false; }
 
             return true;
         }
-        private static bool TryParseSizecode(ObjectFile file, string token, out UInt64 res, String last_static_label, int line, ref Tuple<AssembleError, string> err)
+        private static bool TryParseSizecode(AssembleArgs args, string token, out UInt64 res)
         {
             // must be able ti get an instant imm
-            if (!TryParseInstantImm(file, token, out res, out bool floating, last_static_label, line, ref err)) { err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {line}: Failed to parse size code \"{token}\"\n-> {err.Item2}"); return false; }
-            if (floating) { err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {line}: Attempt to use floating point value to specify register size \"{token}\" -> {res}"); return false; }
+            if (!TryParseInstantImm(args, token, out res, out bool floating)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to parse size code \"{token}\"\n-> {args.err.Item2}"); return false; }
+            if (floating) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Attempt to use floating point value to specify register size \"{token}\" -> {res}"); return false; }
 
             // convert to size code
             switch (res)
@@ -1952,14 +1932,14 @@ namespace csx64
                 case 4: res = 2; return true;
                 case 8: res = 3; return true;
 
-                default: err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {line}: Invalid register size {res}"); return false;
+                default: args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Invalid register size {res}"); return false;
             }
         }
-        private static bool TryParseMultcode(ObjectFile file, string token, out UInt64 res, string last_static_label, int line, ref Tuple<AssembleError, string> err)
+        private static bool TryParseMultcode(AssembleArgs args, string token, out UInt64 res)
         {
             // must be able ti get an instant imm
-            if (!TryParseInstantImm(file, token, out res, out bool floating, last_static_label, line, ref err)) { err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {line}: Failed to parse multiplier \"{token}\"\n-> {err.Item2}"); return false; }
-            if (floating) { err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {line}: Attempt to use floating point value to specify size multiplier \"{token}\" -> {res}"); return false; }
+            if (!TryParseInstantImm(args, token, out res, out bool floating)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to parse multiplier \"{token}\"\n-> {args.err.Item2}"); return false; }
+            if (floating) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Attempt to use floating point value to specify size multiplier \"{token}\" -> {res}"); return false; }
 
             // convert to mult code
             switch (res)
@@ -1973,16 +1953,16 @@ namespace csx64
                 case 32: res = 6; return true;
                 case 64: res = 7; return true;
 
-                default: err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {line}: Invalid size multiplier {res}"); return false;
+                default: args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Invalid size multiplier {res}"); return false;
             }
         }
 
-        private static bool TryParseImm(ObjectFile file, string token, out Hole hole, string last_static_label, int line, ref Tuple<AssembleError, string> err)
+        private static bool TryParseImm(AssembleArgs args, string token, out Hole hole)
         {
             int pos = 0, end = 0; // position in token
             hole = new Hole();    // resulting hole
 
-            if (token.Length == 0) { err = new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {line}: Empty label encountered"); return false; }
+            if (token.Length == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Empty label encountered"); return false; }
 
             while (pos < token.Length)
             {
@@ -1995,7 +1975,7 @@ namespace csx64
                 string sub = token.Substring(pos, end - pos);
 
                 // append subtoken to the hole
-                if (!hole.Append(file, sub, last_static_label, line, ref err)) { err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {line}: Failed to parse imm \"{token}\"\n-> {err.Item2}"); return false; }
+                if (!hole.Append(args, sub)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to parse imm \"{token}\"\n-> {args.err.Item2}"); return false; }
 
                 // start of next token includes separator
                 pos = end;
@@ -2004,13 +1984,13 @@ namespace csx64
             return true;
         }
 
-        private static bool TryParseAddressReg(ObjectFile file, string token, out UInt64 r, out UInt64 m, string last_static_label, int line, ref Tuple<AssembleError, string> err)
+        private static bool TryParseAddressReg(AssembleArgs args, string token, out UInt64 r, out UInt64 m)
         {
             r = m = 0;
 
             // remove sign
             string _seg = token[0] == '+' || token[0] == '-' ? token.Substring(1) : token;
-            if (_seg.Length == 0) { err = new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {line}: Empty symbol encountered"); return false; }
+            if (_seg.Length == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Empty symbol encountered"); return false; }
 
             // split on multiplication
             string[] _r = _seg.Split(new char[] { '*' });
@@ -2019,29 +1999,28 @@ namespace csx64
             if (_r.Length == 1)
             {
                 m = 1;
-                return TryParseRegister(file, _r[0], out r, last_static_label, line, ref err);
+                return TryParseRegister(args, _r[0], out r);
             }
             // if 2 tokens, has a multcode
             else if (_r.Length == 2)
             {
-                if ((!TryParseRegister(file, _r[0], out r, last_static_label, line, ref err) || !TryParseMultcode(file, _r[1], out m, last_static_label, line, ref err))
-                    && (!TryParseRegister(file, _r[1], out r, last_static_label, line, ref err) || !TryParseMultcode(file, _r[0], out m, last_static_label, line, ref err)))
-                { err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {line}: Invalid multiplier-register pair encountered \"{token}\""); return false; }
+                if ((!TryParseRegister(args, _r[0], out r) || !TryParseMultcode(args, _r[1], out m)) && (!TryParseRegister(args, _r[1], out r) || !TryParseMultcode(args, _r[0], out m)))
+                { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Invalid multiplier-register pair encountered \"{token}\""); return false; }
             }
             // otherwise is illegal
-            else { err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {line}: Cannot use more than one multiplier and one register per address register subtoken"); return false; }
+            else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Cannot use more than one multiplier and one register per address register subtoken"); return false; }
 
             return true;
         }
         // [1: literal][3: m1][1: -m2][3: m2]   ([4: r1][4: r2])   ([64: imm])
-        private static bool TryParseAddress(ObjectFile file, string token, out UInt64 a, out UInt64 b, out Hole hole, string last_static_label, int line, ref Tuple<AssembleError, string> err)
+        private static bool TryParseAddress(AssembleArgs args, string token, out UInt64 a, out UInt64 b, out Hole hole)
         {
             a = b = 0;
             hole = new Hole();
 
             // must be of [*] format
             if (token.Length < 3 || token[0] != '[' || token[token.Length - 1] != ']')
-                { err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {line}: Invalid address format encountered \"{token}\""); return false; }
+                { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Invalid address format encountered \"{token}\""); return false; }
 
             string r1_seg = null, r2_seg = null; // register parsing temporaries
 
@@ -2066,7 +2045,7 @@ namespace csx64
                         // if r2 empty, put it there
                         if (r2_seg == null) r2_seg = sub;
                         // otherwise fail
-                        else { err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {line}: Address cannot have more than one negative register"); return false; }
+                        else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Address cannot have more than one negative register"); return false; }
                     }
                     // otherwise positive
                     else
@@ -2076,11 +2055,11 @@ namespace csx64
                         // otherwise try r2
                         else if (r2_seg == null) r2_seg = sub;
                         // otherwise fail
-                        else { err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {line}: Address may only use one register"); return false; }
+                        else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Address may only use one register"); return false; }
                     }
                 }
                 // otherwise tack it onto the hole
-                else if (!hole.Append(file, sub, last_static_label, line, ref err)) return false;
+                else if (!hole.Append(args, sub)) return false;
 
                 // start of next token includes separator
                 pos = end;
@@ -2090,8 +2069,8 @@ namespace csx64
             UInt64 r1 = 0, r2 = 0, m1 = 0, m2 = 0;
 
             // process regs
-            if (r1_seg != null && !TryParseAddressReg(file, r1_seg, out r1, out m1, last_static_label, line, ref err)) return false;
-            if (r2_seg != null && !TryParseAddressReg(file, r2_seg, out r2, out m2, last_static_label, line, ref err)) return false;
+            if (r1_seg != null && !TryParseAddressReg(args, r1_seg, out r1, out m1)) return false;
+            if (r2_seg != null && !TryParseAddressReg(args, r2_seg, out r2, out m2)) return false;
 
             // if there was no hole, null it
             if (hole.Value == 0 && hole.FValue == 0 && hole.Segments.Count == 0) hole = null;
@@ -2111,15 +2090,15 @@ namespace csx64
                 if (token[i] != '_' && !char.IsLetterOrDigit(token[i])) return false;
             return true;
         }
-        private static bool MutateLabel(ref string label, string last_static_label, int line, ref Tuple<AssembleError, string> err)
+        private static bool MutateLabel(AssembleArgs args, ref string label)
         {
             // if defining a local label
             if (label.Length >= 2 && label[0] == '.')
             {
-                if (last_static_label == null) { err = new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {line}: Cannot define a local label before the first static label"); return false; }
+                if (args.last_static_label == null) { args.err = new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Cannot define a local label before the first static label"); return false; }
 
                 // mutate the label
-                label = $"{last_static_label}_{label.Substring(1)}";
+                label = $"{args.last_static_label}_{label.Substring(1)}";
             }
 
             return true;
@@ -2129,118 +2108,116 @@ namespace csx64
         {
             return DateTime.UtcNow.Ticks.MakeUnsigned();
         }
-
-        private static bool TryProcessBinaryOp(ObjectFile file, string[] tokens, int line, OPCode op, string last_static_label, ref Tuple<AssembleError, string> err)
+        
+        private static bool TryProcessBinaryOp(AssembleArgs args, OPCode op)
         {
             UInt64 a, b, c, d; // parsing temporaries
             Hole hole1, hole2;
 
-            if (tokens.Length != 4) { err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {line}: Binary OP expected 3 args"); return false; }
-            if (!TryParseSizecode(file, tokens[1], out a, last_static_label, line, ref err)) { err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {line}: {op} expected size parameter as first arg\n-> {err.Item2}"); return false; }
+            if (args.tokens.Length != 4) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: Binary OP expected 3 args"); return false; }
+            if (!TryParseSizecode(args, args.tokens[1], out a)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: {op} expected size parameter as first arg\n-> {args.err.Item2}"); return false; }
 
-            Append(file, 1, (UInt64)op);
+            Append(args.file, 1, (UInt64)op);
 
-            if (TryParseRegister(file, tokens[2], out b, last_static_label, line, ref err))
+            if (TryParseRegister(args, args.tokens[2], out b))
             {
-                if (TryParseImm(file, tokens[3], out hole1, last_static_label, line, ref err))
+                if (TryParseImm(args, args.tokens[3], out hole1))
                 {
-                    Append(file, 1, (b << 4) | (a << 2) | 0);
-                    Append(file, Size(a), hole1);
+                    Append(args.file, 1, (b << 4) | (a << 2) | 0);
+                    Append(args.file, Size(a), hole1);
                 }
-                else if (TryParseAddress(file, tokens[3], out c, out d, out hole1, last_static_label, line, ref err))
+                else if (TryParseAddress(args, args.tokens[3], out c, out d, out hole1))
                 {
-                    Append(file, 1, (b << 4) | (a << 2) | 1);
-                    AppendAddress(file, c, d, hole1);
+                    Append(args.file, 1, (b << 4) | (a << 2) | 1);
+                    AppendAddress(args.file, c, d, hole1);
                 }
-                else if (TryParseRegister(file, tokens[3], out c, last_static_label, line, ref err))
+                else if (TryParseRegister(args, args.tokens[3], out c))
                 {
-                    Append(file, 1, (b << 4) | (a << 2) | 2);
-                    Append(file, 1, c);
+                    Append(args.file, 1, (b << 4) | (a << 2) | 2);
+                    Append(args.file, 1, c);
                 }
-                else { err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {line}: Unknown usage of {op}"); return false; }
+                else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Unknown usage of {op}"); return false; }
             }
-            else if (TryParseAddress(file, tokens[2], out b, out c, out hole1, last_static_label, line, ref err))
+            else if (TryParseAddress(args, args.tokens[2], out b, out c, out hole1))
             {
-                if (TryParseRegister(file, tokens[3], out d, last_static_label, line, ref err))
+                if (TryParseRegister(args, args.tokens[3], out d))
                 {
-                    Append(file, 1, (a << 2) | 2);
-                    Append(file, 1, 16 | d);
-                    AppendAddress(file, b, c, hole1);
+                    Append(args.file, 1, (a << 2) | 2);
+                    Append(args.file, 1, 16 | d);
+                    AppendAddress(args.file, b, c, hole1);
                 }
-                else if (TryParseImm(file, tokens[3], out hole2, last_static_label, line, ref err))
+                else if (TryParseImm(args, args.tokens[3], out hole2))
                 {
-                    Append(file, 1, (a << 2) | 3);
-                    Append(file, Size(a), hole2);
-                    AppendAddress(file, b, c, hole1);
+                    Append(args.file, 1, (a << 2) | 3);
+                    Append(args.file, Size(a), hole2);
+                    AppendAddress(args.file, b, c, hole1);
                 }
-                else { err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {line}: Unknown usage of {op}"); return false; }
+                else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Unknown usage of {op}"); return false; }
             }
-            else { err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {line}: Unknown usage of {op}"); return false; }
+            else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Unknown usage of {op}"); return false; }
 
             return true;
         }
-        private static bool TryProcessUnaryOp(ObjectFile file, string[] tokens, int line, OPCode op, string last_static_label, ref Tuple<AssembleError, string> err)
+        private static bool TryProcessUnaryOp(AssembleArgs args, OPCode op)
         {
             UInt64 a, b;
             Hole hole;
 
-            if (tokens.Length != 3) { err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {line}: Unary OP expected 2 args"); return false; }
-            if (!TryParseSizecode(file, tokens[1], out a, last_static_label, line, ref err)) { err = new Tuple<AssembleError, string>(AssembleError.MissingSize, $"line {line}: {op} expected size parameter as first arg\n-> {err.Item2}"); return false; }
+            if (args.tokens.Length != 3) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: Unary OP expected 2 args"); return false; }
+            if (!TryParseSizecode(args, args.tokens[1], out a)) { args.err = new Tuple<AssembleError, string>(AssembleError.MissingSize, $"line {args.line}: {op} expected size parameter as first arg\n-> {args.err.Item2}"); return false; }
 
-            Append(file, 1, (UInt64)op);
+            Append(args.file, 1, (UInt64)op);
 
-            if (TryParseRegister(file, tokens[2], out b, last_static_label, line, ref err))
+            if (TryParseRegister(args, args.tokens[2], out b))
             {
-                Append(file, 1, (b << 4) | (a << 2) | 0);
+                Append(args.file, 1, (b << 4) | (a << 2) | 0);
             }
-            else if (TryParseAddress(file, tokens[2], out a, out b, out hole, last_static_label, line, ref err))
+            else if (TryParseAddress(args, args.tokens[2], out a, out b, out hole))
             {
-                Append(file, 1, (a << 2) | 1);
-                AppendAddress(file, a, b, hole);
+                Append(args.file, 1, (a << 2) | 1);
+                AppendAddress(args.file, a, b, hole);
             }
-            else { err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {line}: Unknown format of {op}"); return false; }
+            else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Unknown format of {op}"); return false; }
 
             return true;
         }
-        private static bool TryProcessJump(ObjectFile file, string[] tokens, int line, OPCode op, string last_static_label, ref Tuple<AssembleError, string> err)
+        private static bool TryProcessJump(AssembleArgs args, OPCode op)
         {
-            // [8: Jcc]   [address]
+            if (args.tokens.Length != 2) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: Jump expected 1 arg"); return false; }
+            if (!TryParseAddress(args, args.tokens[1], out UInt64 a, out UInt64 b, out Hole hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Jump expected address as first arg\n-> {args.err.Item2}"); return false; }
 
-            if (tokens.Length != 2) { err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {line}: Jump expected 1 arg"); return false; }
-            if (!TryParseAddress(file, tokens[1], out UInt64 a, out UInt64 b, out Hole hole, last_static_label, line, ref err)) { err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {line}: Jump expected address as first arg\n-> {err.Item2}"); return false; }
-
-            Append(file, 1, (UInt64)op);
-            AppendAddress(file, a, b, hole);
+            Append(args.file, 1, (UInt64)op);
+            AppendAddress(args.file, a, b, hole);
 
             return true;
         }
-        private static bool TryProcessEmission(ObjectFile file, string[] tokens, int line, UInt64 size, string last_static_label, ref Tuple<AssembleError, string> err)
+        private static bool TryProcessEmission(AssembleArgs args, UInt64 size)
         {
-            if (tokens.Length < 2) { err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {line}: Emission expected at least one value"); return false; }
+            if (args.tokens.Length < 2) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: Emission expected at least one value"); return false; }
             
             Hole hole = new Hole(); // initially empty hole (to allow for buffer shorthand e.x. "emit x32")
             UInt64 mult;
             bool floating;
 
-            for (int i = 1; i < tokens.Length; ++i)
+            for (int i = 1; i < args.tokens.Length; ++i)
             {
                 // if a multiplier
-                if (tokens[i][0] == 'x')
+                if (args.tokens[i][0] == 'x')
                 {
                     // get the multiplier and ensure is valid
-                    if (!TryParseInstantImm(file, tokens[i].Substring(1), out mult, out floating, last_static_label, line, ref err)) return false;
-                    if (floating) { err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {line}: Emission multiplier cannot be floating point"); return false; }
-                    if (mult > EmissionMaxMultiplier) { err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {line}: Emission multiplier cannot exceed {EmissionMaxMultiplier}"); return false; }
-                    if (mult == 0) { err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {line}: Emission multiplier cannot be zero"); return false; }
+                    if (!TryParseInstantImm(args, args.tokens[i].Substring(1), out mult, out floating)) return false;
+                    if (floating) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Emission multiplier cannot be floating point"); return false; }
+                    if (mult > EmissionMaxMultiplier) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Emission multiplier cannot exceed {EmissionMaxMultiplier}"); return false; }
+                    if (mult == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Emission multiplier cannot be zero"); return false; }
 
                     // account for first written value
-                    if (tokens[i - 1][0] != 'x') --mult;
+                    if (args.tokens[i - 1][0] != 'x') --mult;
                 }
                 // otherwise is a value
                 else
                 {
                     // get the value
-                    if (!TryParseImm(file, tokens[i], out hole, last_static_label, line, ref err)) return false;
+                    if (!TryParseImm(args, args.tokens[i], out hole)) return false;
 
                     // make one of them
                     mult = 1;
@@ -2248,96 +2225,52 @@ namespace csx64
 
                 // write the value(s)
                 for (UInt64 j = 0; j < mult; ++j)
-                    Append(file, size, hole);
+                    Append(args.file, size, hole);
             }
 
             return true;
         }
-        private static bool TryProcessMove(ObjectFile file, string[] tokens, int line, OPCode op, string last_static_label, ref Tuple<AssembleError, string> err)
+        private static bool TryProcessXMULXDIV(AssembleArgs args, OPCode op)
         {
-            // [8: mov]   [4: source/dest][2: size][2: mode]   (mode = 0: load imm [size: imm]   mode = 1: load register [4:][4: source]   mode = 2: load memory [address]   mode = 3: store register [address])
-
-            UInt64 sizecode, a, b, c;
-            Hole hole;
-
-            if (tokens.Length != 4) { err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {line}: MOV expected 3 args"); return false; }
-            if (!TryParseSizecode(file, tokens[1], out sizecode, last_static_label, line, ref err)) { err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {line}: MOV expected size parameter as first arg\n-> {err.Item2}"); return false; }
-
-            Append(file, 1, (UInt64)op);
-
-            // loading
-            if (TryParseRegister(file, tokens[2], out a, last_static_label, line, ref err))
-            {
-                // from imm
-                if (TryParseImm(file, tokens[3], out hole, last_static_label, line, ref err))
-                {
-                    Append(file, 1, (a << 4) | (sizecode << 2) | 0);
-                    Append(file, Size(sizecode), hole);
-                }
-                // from register
-                else if (TryParseRegister(file, tokens[3], out b, last_static_label, line, ref err))
-                {
-                    Append(file, 1, (a << 4) | (sizecode << 2) | 1);
-                    Append(file, 1, b);
-                }
-                // from memory
-                else if (TryParseAddress(file, tokens[3], out b, out c, out hole, last_static_label, line, ref err))
-                {
-                    Append(file, 1, (a << 4) | (sizecode << 2) | 2);
-                    AppendAddress(file, b, c, hole);
-                }
-                else { err = new Tuple<AssembleError, string>(AssembleError.UsageError, $"line {line}: Unknown usage of MOV\n-> Couldn't parse \"{tokens[3]}\" as an imm, register, or address"); return false; }
-            }
-            // storing
-            else if (TryParseAddress(file, tokens[2], out a, out b, out hole, last_static_label, line, ref err))
-            {
-                // from register
-                if (TryParseRegister(file, tokens[3], out c, last_static_label, line, ref err))
-                {
-                    Append(file, 1, (c << 4) | (sizecode << 2) | 3);
-                    AppendAddress(file, a, b, hole);
-                }
-                else { err = new Tuple<AssembleError, string>(AssembleError.UsageError, $"line {line}: Unknown usage of MOV\n-> Couldn't parse \"{tokens[3]}\" as a register"); return false; }
-            }
-            else { err = new Tuple<AssembleError, string>(AssembleError.UsageError, $"line {line}: Unknown usage of MOV\n-> Couldn't parse \"{tokens[2]}\" as a register or address"); return false; }
-
-            return true;
-        }
-        private static bool TryProcessXMULXDIV(ObjectFile file, string[] tokens, int line, OPCode op, string last_static_label, ref Tuple<AssembleError, string> err)
-        {
-            // [8: xmul/xdiv]   [4: reg][2: size][2: mode]   (mode = 0: [size: imm]   mode = 1: use reg   mode = 2: [address]   mode = 3: UND)
-
             UInt64 sizecode, a, b;
             Hole hole;
 
-            if (tokens.Length != 3) { err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {line}: {op} expected 2 args"); return false; }
-            if (!TryParseSizecode(file, tokens[1], out sizecode, last_static_label, line, ref err)) { err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {line}: {op} expected size parameter as first arg\n-> {err.Item2}"); return false; }
+            if (args.tokens.Length != 3) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: {op} expected 2 args"); return false; }
+            if (!TryParseSizecode(args, args.tokens[1], out sizecode)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: {op} expected size parameter as first arg\n-> {args.err.Item2}"); return false; }
 
-            Append(file, 1, (UInt64)op);
-            if (TryParseImm(file, tokens[2], out hole, last_static_label, line, ref err))
+            Append(args.file, 1, (UInt64)op);
+            if (TryParseImm(args, args.tokens[2], out hole))
             {
-                Append(file, 1, (sizecode << 2) | 0);
-                Append(file, Size(sizecode), hole);
+                Append(args.file, 1, (sizecode << 2) | 0);
+                Append(args.file, Size(sizecode), hole);
             }
-            else if (TryParseRegister(file, tokens[2], out a, last_static_label, line, ref err))
+            else if (TryParseRegister(args, args.tokens[2], out a))
             {
-                Append(file, 1, (a << 4) | (sizecode << 2) | 1);
+                Append(args.file, 1, (a << 4) | (sizecode << 2) | 1);
             }
-            else if (TryParseAddress(file, tokens[2], out a, out b, out hole, last_static_label, line, ref err))
+            else if (TryParseAddress(args, args.tokens[2], out a, out b, out hole))
             {
-                Append(file, 1, (sizecode << 2) | 2);
-                AppendAddress(file, a, b, hole);
+                Append(args.file, 1, (sizecode << 2) | 2);
+                AppendAddress(args.file, a, b, hole);
             }
-            else { err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {line}: Unknown usage of {op}"); return false; }
+            else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Unknown usage of {op}"); return false; }
 
             return true;
         }
         public static Tuple<AssembleError, string> Assemble(string code, out ObjectFile file)
         {
             file = new ObjectFile();
+            AssembleArgs args = new AssembleArgs()
+            {
+                file = file,
+                line = 0,
+
+                last_static_label = null,
+                err = null
+            };
             
             // predefined symbols
-            file.Symbols = new Dictionary<string, Symbol>()
+            args.file.Symbols = new Dictionary<string, Symbol>()
             {
                 ["__time__"] = new Symbol() { Value = Time(), IsAddress = false, IsFloating = false },
                 ["__version__"] = new Symbol() { Value = Version, IsAddress = false, IsFloating = false },
@@ -2354,14 +2287,11 @@ namespace csx64
                 ["__e__"] = new Symbol() { Value = AsUInt64(Math.E), IsAddress = false, IsFloating = true }
             };
 
-            int line = 0; // current line number
             int pos = 0, end = 0; // position in code
-            string last_static_label = null; // the last non-local label created
 
             // potential parsing args for an instruction
             UInt64 a = 0, b = 0, c = 0;
             Hole hole;
-            Tuple<AssembleError, string> err = null;
             bool floating;
 
             if (code.Length == 0) return new Tuple<AssembleError, string>(AssembleError.EmptyFile, "The file was empty");
@@ -2372,63 +2302,63 @@ namespace csx64
                 for (end = pos; end < code.Length && code[end] != '\n' && code[end] != '#'; ++end) ;
 
                 // split line into tokens
-                string[] tokens = code.Substring(pos, end - pos).Split(new char[] { ' ', '\t', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-                ++line; // advance line counter
+                args.tokens = code.Substring(pos, end - pos).Split(new char[] { ' ', '\t', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                ++args.line; // advance line counter
 
                 // if the separator was a comment character, consume the rest of the line as well as noop
                 if (end < code.Length && code[end] == '#')
                     for (; end < code.Length && code[end] != '\n'; ++end) ;
 
                 // if this marks a label
-                while (tokens.Length > 0 && tokens[0][tokens[0].Length - 1] == ':')
+                while (args.tokens.Length > 0 && args.tokens[0][args.tokens[0].Length - 1] == ':')
                 {
                     // take off the colon
-                    string label = tokens[0].Substring(0, tokens[0].Length - 1);
+                    string label = args.tokens[0].Substring(0, args.tokens[0].Length - 1);
 
                     // handle local mutation
-                    if (label.Length > 0 && label[0] != '.') last_static_label = label;
-                    if (!MutateLabel(ref label, last_static_label, line, ref err)) return err;
+                    if (label.Length > 0 && label[0] != '.') args.last_static_label = label;
+                    if (!MutateLabel(args, ref label)) return args.err;
 
-                    if (!IsValidLabel(label)) return new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {line}: Symbol name \"{label}\" invalid");
-                    if (file.Symbols.ContainsKey(label)) return new Tuple<AssembleError, string>(AssembleError.SymbolRedefinition, $"line {line}: Symbol \"{label}\" was already defined");
+                    if (!IsValidLabel(label)) return new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Symbol name \"{label}\" invalid");
+                    if (file.Symbols.ContainsKey(label)) return new Tuple<AssembleError, string>(AssembleError.SymbolRedefinition, $"line {args.line}: Symbol \"{label}\" was already defined");
 
                     // add the symbol as an address
                     file.Symbols.Add(label, new Symbol() { Value = (UInt64)file.Data.LongCount(), IsAddress = true, IsFloating = false });
 
                     // remove the first token
-                    string[] _tokens = new string[tokens.Length - 1];
-                    for (int i = 1; i < tokens.Length; ++i)
-                        _tokens[i - 1] = tokens[i];
-                    tokens = _tokens;
+                    string[] _tokens = new string[args.tokens.Length - 1];
+                    for (int i = 1; i < args.tokens.Length; ++i)
+                        _tokens[i - 1] = args.tokens[i];
+                    args.tokens = _tokens;
                 }
 
                 // empty lines are ignored
-                if (tokens.Length > 0)
+                if (args.tokens.Length > 0)
                 {
                     // update compile-time symbols (for modifications, also update TryParseImm())
-                    file.Symbols["__line__"] = new Symbol() { Value = (UInt64)line, IsAddress = false, IsFloating = false };
+                    file.Symbols["__line__"] = new Symbol() { Value = (UInt64)args.line, IsAddress = false, IsFloating = false };
                     file.Symbols["__pos__"] = new Symbol() { Value = (UInt64)file.Data.LongCount(), IsAddress = true, IsFloating = false };
 
-                    switch (tokens[0].ToUpper())
+                    switch (args.tokens[0].ToUpper())
                     {
                         case "GLOBAL":
-                            if (tokens.Length != 2) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {line}: GLOBAL expected 1 arg");
-                            if (!IsValidLabel(tokens[1])) return new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {line}: Invalid label name \"{tokens[1]}\"");
-                            file.GlobalSymbols.Add(tokens[1]);
+                            if (args.tokens.Length != 2) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: GLOBAL expected 1 arg");
+                            if (!IsValidLabel(args.tokens[1])) return new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Invalid label name \"{args.tokens[1]}\"");
+                            file.GlobalSymbols.Add(args.tokens[1]);
                             break;
                         case "DEF":
-                            if (tokens.Length != 3) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {line}: DEF expected 2 args");
-                            if (!MutateLabel(ref tokens[1], last_static_label, line, ref err)) return err;
-                            if (!IsValidLabel(tokens[1])) return new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {line}: Invalid label name \"{tokens[1]}\"");
-                            if (!TryParseInstantImm(file, tokens[2], out a, out floating, last_static_label, line, ref err)) return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {line}: DEF expected a number as third arg\n-> {err.Item2}");
-                            if (file.Symbols.ContainsKey(tokens[1])) return new Tuple<AssembleError, string>(AssembleError.SymbolRedefinition, $"line {line}: Symbol \"{tokens[1]}\" was already defined");
-                            file.Symbols.Add(tokens[1], new Symbol() { Value = a, IsAddress = false, IsFloating = floating });
+                            if (args.tokens.Length != 3) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: DEF expected 2 args");
+                            if (!MutateLabel(args, ref args.tokens[1])) return args.err;
+                            if (!IsValidLabel(args.tokens[1])) return new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Invalid label name \"{args.tokens[1]}\"");
+                            if (!TryParseInstantImm(args, args.tokens[2], out a, out floating)) return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: DEF expected a number as third arg\n-> {args.err.Item2}");
+                            if (file.Symbols.ContainsKey(args.tokens[1])) return new Tuple<AssembleError, string>(AssembleError.SymbolRedefinition, $"line {args.line}: Symbol \"{args.tokens[1]}\" was already defined");
+                            file.Symbols.Add(args.tokens[1], new Symbol() { Value = a, IsAddress = false, IsFloating = floating });
                             break;
 
-                        case "BYTE": if (!TryProcessEmission(file, tokens, line, 1, last_static_label, ref err)) return err; break;
-                        case "WORD": if (!TryProcessEmission(file, tokens, line, 2, last_static_label, ref err)) return err; break;
-                        case "DWORD": if (!TryProcessEmission(file, tokens, line, 4, last_static_label, ref err)) return err; break;
-                        case "QWORD": if (!TryProcessEmission(file, tokens, line, 8, last_static_label, ref err)) return err; break;
+                        case "BYTE": if (!TryProcessEmission(args, 1)) return args.err; break;
+                        case "WORD": if (!TryProcessEmission(args, 2)) return args.err; break;
+                        case "DWORD": if (!TryProcessEmission(args, 4)) return args.err; break;
+                        case "QWORD": if (!TryProcessEmission(args, 8)) return args.err; break;
 
                         // --------------------------
                         // -- OPCode assembly impl --
@@ -2436,44 +2366,44 @@ namespace csx64
 
                         // [8: op]
                         case "NOP":
-                            if (tokens.Length != 1) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {line}: NOP expected 0 args");
+                            if (args.tokens.Length != 1) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: NOP expected 0 args");
                             Append(file, 1, (UInt64)OPCode.Nop); break;
                         case "STOP":
-                            if (tokens.Length != 1) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {line}: STOP expected 0 args");
+                            if (args.tokens.Length != 1) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: STOP expected 0 args");
                             Append(file, 1, (UInt64)OPCode.Stop); break;
                         case "SYSCALL":
-                            if (tokens.Length != 1) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {line}: SYSCALL expected 0 args");
+                            if (args.tokens.Length != 1) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: SYSCALL expected 0 args");
                             Append(file, 1, (UInt64)OPCode.Syscall); break;
 
                         // [8: MOVcc]   [4: source/dest][2: size][2: mode]   (mode = 0: load imm [size: imm]   mode = 1: load register [4:][4: source]   mode = 2: load memory [address]   mode = 3: store register [address])
-                        case "MOV": if (!TryProcessBinaryOp(file, tokens, line, OPCode.Mov, last_static_label, ref err)) return err; break;
+                        case "MOV": if (!TryProcessBinaryOp(args, OPCode.Mov)) return args.err; break;
 
-                        case "MOVA": case "MOVNBE": if (!TryProcessMove(file, tokens, line, OPCode.MOVa, last_static_label, ref err)) return err; break;
-                        case "MOVAE": case "MOVNB": if (!TryProcessMove(file, tokens, line, OPCode.MOVae, last_static_label, ref err)) return err; break;
-                        case "MOVB": case "MOVNAE": if (!TryProcessMove(file, tokens, line, OPCode.MOVb, last_static_label, ref err)) return err; break;
-                        case "MOVBE": case "MOVNA": if (!TryProcessMove(file, tokens, line, OPCode.MOVbe, last_static_label, ref err)) return err; break;
+                        case "MOVA": case "MOVNBE": if (!TryProcessBinaryOp(args, OPCode.MOVa)) return args.err; break;
+                        case "MOVAE": case "MOVNB": if (!TryProcessBinaryOp(args, OPCode.MOVae)) return args.err; break;
+                        case "MOVB": case "MOVNAE": if (!TryProcessBinaryOp(args, OPCode.MOVb)) return args.err; break;
+                        case "MOVBE": case "MOVNA": if (!TryProcessBinaryOp(args, OPCode.MOVbe)) return args.err; break;
 
-                        case "MOVG": case "MOVNLE": if (!TryProcessMove(file, tokens, line, OPCode.MOVg, last_static_label, ref err)) return err; break;
-                        case "MOVGE": case "MOVNL": if (!TryProcessMove(file, tokens, line, OPCode.MOVge, last_static_label, ref err)) return err; break;
-                        case "MOVL": case "MOVNGE": if (!TryProcessMove(file, tokens, line, OPCode.MOVl, last_static_label, ref err)) return err; break;
-                        case "MOVLE": case "MOVNG": if (!TryProcessMove(file, tokens, line, OPCode.MOVle, last_static_label, ref err)) return err; break;
+                        case "MOVG": case "MOVNLE": if (!TryProcessBinaryOp(args, OPCode.MOVg)) return args.err; break;
+                        case "MOVGE": case "MOVNL": if (!TryProcessBinaryOp(args, OPCode.MOVge)) return args.err; break;
+                        case "MOVL": case "MOVNGE": if (!TryProcessBinaryOp(args, OPCode.MOVl)) return args.err; break;
+                        case "MOVLE": case "MOVNG": if (!TryProcessBinaryOp(args, OPCode.MOVle)) return args.err; break;
 
-                        case "MOVZ": case "MOVE": if (!TryProcessMove(file, tokens, line, OPCode.MOVz, last_static_label, ref err)) return err; break;
-                        case "MOVNZ": case "MOVNE": if (!TryProcessMove(file, tokens, line, OPCode.MOVnz, last_static_label, ref err)) return err; break;
-                        case "MOVS": if (!TryProcessMove(file, tokens, line, OPCode.MOVs, last_static_label, ref err)) return err; break;
-                        case "MOVNS": if (!TryProcessMove(file, tokens, line, OPCode.MOVns, last_static_label, ref err)) return err; break;
-                        case "MOVP": if (!TryProcessMove(file, tokens, line, OPCode.MOVp, last_static_label, ref err)) return err; break;
-                        case "MOVNP": if (!TryProcessMove(file, tokens, line, OPCode.MOVnp, last_static_label, ref err)) return err; break;
-                        case "MOVO": if (!TryProcessMove(file, tokens, line, OPCode.MOVo, last_static_label, ref err)) return err; break;
-                        case "MOVNO": if (!TryProcessMove(file, tokens, line, OPCode.MOVno, last_static_label, ref err)) return err; break;
-                        case "MOVC": if (!TryProcessMove(file, tokens, line, OPCode.MOVc, last_static_label, ref err)) return err; break;
-                        case "MOVNC": if (!TryProcessMove(file, tokens, line, OPCode.MOVnc, last_static_label, ref err)) return err; break;
+                        case "MOVZ": case "MOVE": if (!TryProcessBinaryOp(args, OPCode.MOVz)) return args.err; break;
+                        case "MOVNZ": case "MOVNE": if (!TryProcessBinaryOp(args, OPCode.MOVnz)) return args.err; break;
+                        case "MOVS": if (!TryProcessBinaryOp(args, OPCode.MOVs)) return args.err; break;
+                        case "MOVNS": if (!TryProcessBinaryOp(args, OPCode.MOVns)) return args.err; break;
+                        case "MOVP": if (!TryProcessBinaryOp(args, OPCode.MOVp)) return args.err; break;
+                        case "MOVNP": if (!TryProcessBinaryOp(args, OPCode.MOVnp)) return args.err; break;
+                        case "MOVO": if (!TryProcessBinaryOp(args, OPCode.MOVo)) return args.err; break;
+                        case "MOVNO": if (!TryProcessBinaryOp(args, OPCode.MOVno)) return args.err; break;
+                        case "MOVC": if (!TryProcessBinaryOp(args, OPCode.MOVc)) return args.err; break;
+                        case "MOVNC": if (!TryProcessBinaryOp(args, OPCode.MOVnc)) return args.err; break;
 
                         // [8: swap]   [4: r1][4: r2]
                         case "SWAP":
-                            if (tokens.Length != 3) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {line}: SWAP expected 2 args");
-                            if (!TryParseRegister(file, tokens[1], out a, last_static_label, line, ref err)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {line}: SWAP expected a register as first arg\n-> {err.Item2}");
-                            if (!TryParseRegister(file, tokens[2], out b, last_static_label, line, ref err)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {line}: SWAP expected a register as second arg\n-> {err.Item2}");
+                            if (args.tokens.Length != 3) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: SWAP expected 2 args");
+                            if (!TryParseRegister(args, args.tokens[1], out a)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: SWAP expected a register as first arg\n-> {args.err.Item2}");
+                            if (!TryParseRegister(args, args.tokens[2], out b)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: SWAP expected a register as second arg\n-> {args.err.Item2}");
 
                             Append(file, 1, (UInt64)OPCode.Swap);
                             Append(file, 1, (a << 4) | b);
@@ -2483,58 +2413,58 @@ namespace csx64
                         // [8: XExtend]   [4: register][2: from size][2: to size]     ---     XExtend from to reg
                         case "UEXTEND":
                         case "SEXTEND":
-                            if (tokens.Length != 4) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {line}: XEXTEND expected 3 args");
-                            if (!TryParseSizecode(file, tokens[1], out a, last_static_label, line, ref err)) return new Tuple<AssembleError, string>(AssembleError.MissingSize, $"line {line}: UEXTEND expected size parameter as first arg\n-> {err.Item2}");
-                            if (!TryParseSizecode(file, tokens[2], out b, last_static_label, line, ref err)) return new Tuple<AssembleError, string>(AssembleError.MissingSize, $"line {line}: UEXTEND expected size parameter as second arg\n-> {err.Item2}");
-                            if (!TryParseRegister(file, tokens[3], out c, last_static_label, line, ref err)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {line}: UEXTEND expected register parameter as third arg\n-> {err.Item2}");
+                            if (args.tokens.Length != 4) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: XEXTEND expected 3 args");
+                            if (!TryParseSizecode(args, args.tokens[1], out a)) return new Tuple<AssembleError, string>(AssembleError.MissingSize, $"line {args.line}: UEXTEND expected size parameter as first arg\n-> {args.err.Item2}");
+                            if (!TryParseSizecode(args, args.tokens[2], out b)) return new Tuple<AssembleError, string>(AssembleError.MissingSize, $"line {args.line}: UEXTEND expected size parameter as second arg\n-> {args.err.Item2}");
+                            if (!TryParseRegister(args, args.tokens[3], out c)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: UEXTEND expected register parameter as third arg\n-> {args.err.Item2}");
 
-                            Append(file, 1, (UInt64)(tokens[0].ToUpper() == "UEXTEND" ? OPCode.UExtend : OPCode.SExtend));
+                            Append(file, 1, (UInt64)(args.tokens[0].ToUpper() == "UEXTEND" ? OPCode.UExtend : OPCode.SExtend));
                             Append(file, 1, (c << 4) | (a << 2) | b);
 
                             break;
 
                         // [8: xmul/xdiv]   [4: reg][2: size][2: mode]   (mode = 0: [size: imm]   mode = 1: use reg   mode = 2: [address]   mode = 3: UND)
-                        case "UMUL": if (!TryProcessXMULXDIV(file, tokens, line, OPCode.UMUL, last_static_label, ref err)) return err; break;
-                        case "SMUL": if (!TryProcessXMULXDIV(file, tokens, line, OPCode.SMUL, last_static_label, ref err)) return err; break;
-                        case "UDIV": if (!TryProcessXMULXDIV(file, tokens, line, OPCode.UDIV, last_static_label, ref err)) return err; break;
-                        case "SDIV": if (!TryProcessXMULXDIV(file, tokens, line, OPCode.SDIV, last_static_label, ref err)) return err; break;
+                        case "UMUL": if (!TryProcessXMULXDIV(args, OPCode.UMUL)) return args.err; break;
+                        case "SMUL": if (!TryProcessXMULXDIV(args, OPCode.SMUL)) return args.err; break;
+                        case "UDIV": if (!TryProcessXMULXDIV(args, OPCode.UDIV)) return args.err; break;
+                        case "SDIV": if (!TryProcessXMULXDIV(args, OPCode.SDIV)) return args.err; break;
 
                         // [8: binary op]   [4: dest][2: size][2: mode]   (mode = 0: [size: imm]   mode = 1: [4:][4: r]   mode = 2: [address]   mode = 3: UND)
-                        case "ADD": if (!TryProcessBinaryOp(file, tokens, line, OPCode.Add, last_static_label, ref err)) return err; break;
-                        case "SUB": if (!TryProcessBinaryOp(file, tokens, line, OPCode.Sub, last_static_label, ref err)) return err; break;
-                        case "BMUL": if (!TryProcessBinaryOp(file, tokens, line, OPCode.Bmul, last_static_label, ref err)) return err; break;
-                        case "BUDIV": if (!TryProcessBinaryOp(file, tokens, line, OPCode.Budiv, last_static_label, ref err)) return err; break;
-                        case "BUMOD": if (!TryProcessBinaryOp(file, tokens, line, OPCode.Bumod, last_static_label, ref err)) return err; break;
-                        case "BSDIV": if (!TryProcessBinaryOp(file, tokens, line, OPCode.Bsdiv, last_static_label, ref err)) return err; break;
-                        case "BSMOD": if (!TryProcessBinaryOp(file, tokens, line, OPCode.Bsmod, last_static_label, ref err)) return err; break;
+                        case "ADD": if (!TryProcessBinaryOp(args, OPCode.Add)) return args.err; break;
+                        case "SUB": if (!TryProcessBinaryOp(args, OPCode.Sub)) return args.err; break;
+                        case "BMUL": if (!TryProcessBinaryOp(args, OPCode.Bmul)) return args.err; break;
+                        case "BUDIV": if (!TryProcessBinaryOp(args, OPCode.Budiv)) return args.err; break;
+                        case "BUMOD": if (!TryProcessBinaryOp(args, OPCode.Bumod)) return args.err; break;
+                        case "BSDIV": if (!TryProcessBinaryOp(args, OPCode.Bsdiv)) return args.err; break;
+                        case "BSMOD": if (!TryProcessBinaryOp(args, OPCode.Bsmod)) return args.err; break;
 
-                        case "SL": if (!TryProcessBinaryOp(file, tokens, line, OPCode.SL, last_static_label, ref err)) return err; break;
-                        case "SR": if (!TryProcessBinaryOp(file, tokens, line, OPCode.SR, last_static_label, ref err)) return err; break;
-                        case "SAL": if (!TryProcessBinaryOp(file, tokens, line, OPCode.SAL, last_static_label, ref err)) return err; break;
-                        case "SAR": if (!TryProcessBinaryOp(file, tokens, line, OPCode.SAR, last_static_label, ref err)) return err; break;
-                        case "RL": if (!TryProcessBinaryOp(file, tokens, line, OPCode.RL, last_static_label, ref err)) return err; break;
-                        case "RR": if (!TryProcessBinaryOp(file, tokens, line, OPCode.RR, last_static_label, ref err)) return err; break;
+                        case "SL": if (!TryProcessBinaryOp(args, OPCode.SL)) return args.err; break;
+                        case "SR": if (!TryProcessBinaryOp(args, OPCode.SR)) return args.err; break;
+                        case "SAL": if (!TryProcessBinaryOp(args, OPCode.SAL)) return args.err; break;
+                        case "SAR": if (!TryProcessBinaryOp(args, OPCode.SAR)) return args.err; break;
+                        case "RL": if (!TryProcessBinaryOp(args, OPCode.RL)) return args.err; break;
+                        case "RR": if (!TryProcessBinaryOp(args, OPCode.RR)) return args.err; break;
 
-                        case "AND": if (!TryProcessBinaryOp(file, tokens, line, OPCode.And, last_static_label, ref err)) return err; break;
-                        case "OR": if (!TryProcessBinaryOp(file, tokens, line, OPCode.Or, last_static_label, ref err)) return err; break;
-                        case "XOR": if (!TryProcessBinaryOp(file, tokens, line, OPCode.Xor, last_static_label, ref err)) return err; break;
+                        case "AND": if (!TryProcessBinaryOp(args, OPCode.And)) return args.err; break;
+                        case "OR": if (!TryProcessBinaryOp(args, OPCode.Or)) return args.err; break;
+                        case "XOR": if (!TryProcessBinaryOp(args, OPCode.Xor)) return args.err; break;
 
-                        case "CMP": if (!TryProcessBinaryOp(file, tokens, line, OPCode.Cmp, last_static_label, ref err)) return err; break;
-                        case "TEST": if (!TryProcessBinaryOp(file, tokens, line, OPCode.Test, last_static_label, ref err)) return err; break;
+                        case "CMP": if (!TryProcessBinaryOp(args, OPCode.Cmp)) return args.err; break;
+                        case "TEST": if (!TryProcessBinaryOp(args, OPCode.Test)) return args.err; break;
 
                         // [8: unary op]   [4: dest][2:][2: size]
-                        case "INC": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Inc, last_static_label, ref err)) return err; break;
-                        case "DEC": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Dec, last_static_label, ref err)) return err; break;
-                        case "NEG": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Neg, last_static_label, ref err)) return err; break;
-                        case "NOT": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Not, last_static_label, ref err)) return err; break;
-                        case "ABS": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Abs, last_static_label, ref err)) return err; break;
-                        case "CMP0": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Cmp0, last_static_label, ref err)) return err; break;
+                        case "INC": if (!TryProcessUnaryOp(args, OPCode.Inc)) return args.err; break;
+                        case "DEC": if (!TryProcessUnaryOp(args, OPCode.Dec)) return args.err; break;
+                        case "NEG": if (!TryProcessUnaryOp(args, OPCode.Neg)) return args.err; break;
+                        case "NOT": if (!TryProcessUnaryOp(args, OPCode.Not)) return args.err; break;
+                        case "ABS": if (!TryProcessUnaryOp(args, OPCode.Abs)) return args.err; break;
+                        case "CMP0": if (!TryProcessUnaryOp(args, OPCode.Cmp0)) return args.err; break;
 
                         // [8: la]   [4:][4: dest]   [address]
                         case "LA":
-                            if (tokens.Length != 3) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {line}: LA expected 2 args");
-                            if (!TryParseRegister(file, tokens[1], out a, last_static_label, line, ref err)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {line}: LA expecetd register as first arg\n-> {err.Item2}");
-                            if (!TryParseAddress(file, tokens[2], out b, out c, out hole, last_static_label, line, ref err)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {line}: LA expected address as second arg\n-> {err.Item2}");
+                            if (args.tokens.Length != 3) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: LA expected 2 args");
+                            if (!TryParseRegister(args, args.tokens[1], out a)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: LA expecetd register as first arg\n-> {args.err.Item2}");
+                            if (!TryParseAddress(args, args.tokens[2], out b, out c, out hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: LA expected address as second arg\n-> {args.err.Item2}");
 
                             Append(file, 1, (UInt64)OPCode.La);
                             Append(file, 1, a);
@@ -2543,105 +2473,105 @@ namespace csx64
                             break;
 
                         // [8: Jcc]   [address]
-                        case "JMP": if (!TryProcessJump(file, tokens, line, OPCode.Jmp, last_static_label, ref err)) return err; break;
+                        case "JMP": if (!TryProcessJump(args, OPCode.Jmp)) return args.err; break;
 
-                        case "JA": case "JNBE": if (!TryProcessJump(file, tokens, line, OPCode.Ja, last_static_label, ref err)) return err; break;
-                        case "JAE": case "JNB": if (!TryProcessJump(file, tokens, line, OPCode.Jae, last_static_label, ref err)) return err; break;
-                        case "JB": case "JNAE": if (!TryProcessJump(file, tokens, line, OPCode.Jb, last_static_label, ref err)) return err; break;
-                        case "JBE": case "JNA": if (!TryProcessJump(file, tokens, line, OPCode.Jbe, last_static_label, ref err)) return err; break;
+                        case "JA": case "JNBE": if (!TryProcessJump(args, OPCode.Ja)) return args.err; break;
+                        case "JAE": case "JNB": if (!TryProcessJump(args, OPCode.Jae)) return args.err; break;
+                        case "JB": case "JNAE": if (!TryProcessJump(args, OPCode.Jb)) return args.err; break;
+                        case "JBE": case "JNA": if (!TryProcessJump(args, OPCode.Jbe)) return args.err; break;
 
-                        case "JG": case "JNLE": if (!TryProcessJump(file, tokens, line, OPCode.Jg, last_static_label, ref err)) return err; break;
-                        case "JGE": case "JNL": if (!TryProcessJump(file, tokens, line, OPCode.Jge, last_static_label, ref err)) return err; break;
-                        case "JL": case "JNGE": if (!TryProcessJump(file, tokens, line, OPCode.Jl, last_static_label, ref err)) return err; break;
-                        case "JLE": case "JNG": if (!TryProcessJump(file, tokens, line, OPCode.Jle, last_static_label, ref err)) return err; break;
+                        case "JG": case "JNLE": if (!TryProcessJump(args, OPCode.Jg)) return args.err; break;
+                        case "JGE": case "JNL": if (!TryProcessJump(args, OPCode.Jge)) return args.err; break;
+                        case "JL": case "JNGE": if (!TryProcessJump(args, OPCode.Jl)) return args.err; break;
+                        case "JLE": case "JNG": if (!TryProcessJump(args, OPCode.Jle)) return args.err; break;
 
-                        case "JZ": case "JE": if (!TryProcessJump(file, tokens, line, OPCode.Jz, last_static_label, ref err)) return err; break;
-                        case "JNZ": case "JNE": if (!TryProcessJump(file, tokens, line, OPCode.Jnz, last_static_label, ref err)) return err; break;
-                        case "JS": if (!TryProcessJump(file, tokens, line, OPCode.Js, last_static_label, ref err)) return err; break;
-                        case "JNS": if (!TryProcessJump(file, tokens, line, OPCode.Jns, last_static_label, ref err)) return err; break;
-                        case "JP": if (!TryProcessJump(file, tokens, line, OPCode.Jp, last_static_label, ref err)) return err; break;
-                        case "JNP": if (!TryProcessJump(file, tokens, line, OPCode.Jnp, last_static_label, ref err)) return err; break;
-                        case "JO": if (!TryProcessJump(file, tokens, line, OPCode.Jo, last_static_label, ref err)) return err; break;
-                        case "JNO": if (!TryProcessJump(file, tokens, line, OPCode.Jno, last_static_label, ref err)) return err; break;
-                        case "JC": if (!TryProcessJump(file, tokens, line, OPCode.Jc, last_static_label, ref err)) return err; break;
-                        case "JNC": if (!TryProcessJump(file, tokens, line, OPCode.Jnc, last_static_label, ref err)) return err; break;
+                        case "JZ": case "JE": if (!TryProcessJump(args, OPCode.Jz)) return args.err; break;
+                        case "JNZ": case "JNE": if (!TryProcessJump(args, OPCode.Jnz)) return args.err; break;
+                        case "JS": if (!TryProcessJump(args, OPCode.Js)) return args.err; break;
+                        case "JNS": if (!TryProcessJump(args, OPCode.Jns)) return args.err; break;
+                        case "JP": if (!TryProcessJump(args, OPCode.Jp)) return args.err; break;
+                        case "JNP": if (!TryProcessJump(args, OPCode.Jnp)) return args.err; break;
+                        case "JO": if (!TryProcessJump(args, OPCode.Jo)) return args.err; break;
+                        case "JNO": if (!TryProcessJump(args, OPCode.Jno)) return args.err; break;
+                        case "JC": if (!TryProcessJump(args, OPCode.Jc)) return args.err; break;
+                        case "JNC": if (!TryProcessJump(args, OPCode.Jnc)) return args.err; break;
 
-                        case "FADD": if (!TryProcessBinaryOp(file, tokens, line, OPCode.Fadd, last_static_label, ref err)) return err; break;
-                        case "FSUB": if (!TryProcessBinaryOp(file, tokens, line, OPCode.Fsub, last_static_label, ref err)) return err; break;
-                        case "FMUL": if (!TryProcessBinaryOp(file, tokens, line, OPCode.Fmul, last_static_label, ref err)) return err; break;
-                        case "FDIV": if (!TryProcessBinaryOp(file, tokens, line, OPCode.Fdiv, last_static_label, ref err)) return err; break;
-                        case "FMOD": if (!TryProcessBinaryOp(file, tokens, line, OPCode.Fmod, last_static_label, ref err)) return err; break;
+                        case "FADD": if (!TryProcessBinaryOp(args, OPCode.Fadd)) return args.err; break;
+                        case "FSUB": if (!TryProcessBinaryOp(args, OPCode.Fsub)) return args.err; break;
+                        case "FMUL": if (!TryProcessBinaryOp(args, OPCode.Fmul)) return args.err; break;
+                        case "FDIV": if (!TryProcessBinaryOp(args, OPCode.Fdiv)) return args.err; break;
+                        case "FMOD": if (!TryProcessBinaryOp(args, OPCode.Fmod)) return args.err; break;
 
-                        case "FPOW": if (!TryProcessBinaryOp(file, tokens, line, OPCode.Fpow, last_static_label, ref err)) return err; break;
-                        case "FSQRT": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Fsqrt, last_static_label, ref err)) return err; break;
-                        case "FEXP": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Fexp, last_static_label, ref err)) return err; break;
-                        case "FLN": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Fln, last_static_label, ref err)) return err; break;
-                        case "FNEG": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Fneg, last_static_label, ref err)) return err; break;
-                        case "FABS": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Fabs, last_static_label, ref err)) return err; break;
-                        case "FCMP0": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Fcmp0, last_static_label, ref err)) return err; break;
+                        case "FPOW": if (!TryProcessBinaryOp(args, OPCode.Fpow)) return args.err; break;
+                        case "FSQRT": if (!TryProcessUnaryOp(args, OPCode.Fsqrt)) return args.err; break;
+                        case "FEXP": if (!TryProcessUnaryOp(args, OPCode.Fexp)) return args.err; break;
+                        case "FLN": if (!TryProcessUnaryOp(args, OPCode.Fln)) return args.err; break;
+                        case "FNEG": if (!TryProcessUnaryOp(args, OPCode.Fneg)) return args.err; break;
+                        case "FABS": if (!TryProcessUnaryOp(args, OPCode.Fabs)) return args.err; break;
+                        case "FCMP0": if (!TryProcessUnaryOp(args, OPCode.Fcmp0)) return args.err; break;
 
-                        case "FSIN": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Fsin, last_static_label, ref err)) return err; break;
-                        case "FCOS": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Fcos, last_static_label, ref err)) return err; break;
-                        case "FTAN": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Ftan, last_static_label, ref err)) return err; break;
+                        case "FSIN": if (!TryProcessUnaryOp(args, OPCode.Fsin)) return args.err; break;
+                        case "FCOS": if (!TryProcessUnaryOp(args, OPCode.Fcos)) return args.err; break;
+                        case "FTAN": if (!TryProcessUnaryOp(args, OPCode.Ftan)) return args.err; break;
 
-                        case "FSINH": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Fsinh, last_static_label, ref err)) return err; break;
-                        case "FCOSH": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Fcosh, last_static_label, ref err)) return err; break;
-                        case "FTANH": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Ftanh, last_static_label, ref err)) return err; break;
+                        case "FSINH": if (!TryProcessUnaryOp(args, OPCode.Fsinh)) return args.err; break;
+                        case "FCOSH": if (!TryProcessUnaryOp(args, OPCode.Fcosh)) return args.err; break;
+                        case "FTANH": if (!TryProcessUnaryOp(args, OPCode.Ftanh)) return args.err; break;
 
-                        case "FASIN": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Fasin, last_static_label, ref err)) return err; break;
-                        case "FACOS": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Facos, last_static_label, ref err)) return err; break;
-                        case "FATAN": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Fatan, last_static_label, ref err)) return err; break;
-                        case "FATAN2": if (!TryProcessBinaryOp(file, tokens, line, OPCode.Fatan2, last_static_label, ref err)) return err; break;
+                        case "FASIN": if (!TryProcessUnaryOp(args, OPCode.Fasin)) return args.err; break;
+                        case "FACOS": if (!TryProcessUnaryOp(args, OPCode.Facos)) return args.err; break;
+                        case "FATAN": if (!TryProcessUnaryOp(args, OPCode.Fatan)) return args.err; break;
+                        case "FATAN2": if (!TryProcessBinaryOp(args, OPCode.Fatan2)) return args.err; break;
 
-                        case "FFLOOR": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Ffloor, last_static_label, ref err)) return err; break;
-                        case "FCEIL": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Fceil, last_static_label, ref err)) return err; break;
-                        case "FROUND": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Fround, last_static_label, ref err)) return err; break;
-                        case "FTRUNC": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Ftrunc, last_static_label, ref err)) return err; break;
+                        case "FFLOOR": if (!TryProcessUnaryOp(args, OPCode.Ffloor)) return args.err; break;
+                        case "FCEIL": if (!TryProcessUnaryOp(args, OPCode.Fceil)) return args.err; break;
+                        case "FROUND": if (!TryProcessUnaryOp(args, OPCode.Fround)) return args.err; break;
+                        case "FTRUNC": if (!TryProcessUnaryOp(args, OPCode.Ftrunc)) return args.err; break;
 
-                        case "FCMP": if (!TryProcessBinaryOp(file, tokens, line, OPCode.Fcmp, last_static_label, ref err)) return err; break;
+                        case "FCMP": if (!TryProcessBinaryOp(args, OPCode.Fcmp)) return args.err; break;
 
-                        case "FTOI": if (!TryProcessUnaryOp(file, tokens, line, OPCode.FTOI, last_static_label, ref err)) return err; break;
-                        case "ITOF": if (!TryProcessUnaryOp(file, tokens, line, OPCode.ITOF, last_static_label, ref err)) return err; break;
+                        case "FTOI": if (!TryProcessUnaryOp(args, OPCode.FTOI)) return args.err; break;
+                        case "ITOF": if (!TryProcessUnaryOp(args, OPCode.ITOF)) return args.err; break;
 
-                        // [8: push]   [4: source][2: size][2: mode]   ([size: imm])   (mode = 0: push imm   mode = 0: push register   otherwise undefined)
+                        // [8: push]   [4: src][2: size][1:][1: reg]   ([size: imm])   (reg = 0: push imm   reg = 1: push src)
                         case "PUSH":
-                            if (tokens.Length != 3) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {line}: PUSH expected 2 args");
-                            if (!TryParseSizecode(file, tokens[1], out a, last_static_label, line, ref err)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {line}: PUSH size parameter as first arg\n-> {err.Item2}");
+                            if (args.tokens.Length != 3) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: PUSH expected 2 args");
+                            if (!TryParseSizecode(args, args.tokens[1], out a)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: PUSH size parameter as first arg\n-> {args.err.Item2}");
 
                             Append(file, 1, (UInt64)OPCode.Push);
-                            if (TryParseImm(file, tokens[2], out hole, last_static_label, line, ref err))
+                            if (TryParseImm(args, args.tokens[2], out hole))
                             {
                                 Append(file, 1, (a << 2) | 0);
                                 Append(file, Size(a), hole);
                             }
-                            else if (TryParseRegister(file, tokens[2], out b, last_static_label, line, ref err))
+                            else if (TryParseRegister(args, args.tokens[2], out b))
                             {
                                 Append(file, 1, (b << 4) | (a << 2) | 1);
                             }
-                            else return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {line}: Unknown usage of PUSH");
+                            else return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Unknown usage of PUSH");
                             break;
-                        // [8: pop]   [4: dest][2:][2: size]
+                        // [8: pop]   [4: dest][2: size][2:]
                         case "POP":
-                            if (tokens.Length != 3) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {line}: POP expected 2 args");
-                            if (!TryParseSizecode(file, tokens[1], out a, last_static_label, line, ref err)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {line}: POP expected size parameter as first arg\n-> {err.Item2}");
-                            if (!TryParseRegister(file, tokens[2], out b, last_static_label, line, ref err)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {line}: POP expected register as second arg\n-> {err.Item2}");
+                            if (args.tokens.Length != 3) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: POP expected 2 args");
+                            if (!TryParseSizecode(args, args.tokens[1], out a)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: POP expected size parameter as first arg\n-> {args.err.Item2}");
+                            if (!TryParseRegister(args, args.tokens[2], out b)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: POP expected register as second arg\n-> {args.err.Item2}");
                             Append(file, 1, (UInt64)OPCode.Pop);
-                            Append(file, 1, (b << 4) | a);
+                            Append(file, 1, (b << 4) | (a << 2));
                             break;
                         // [8: call]   [address]
                         case "CALL":
-                            if (tokens.Length != 2) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {line}: CALL expected one arg");
-                            if (!TryParseAddress(file, tokens[1], out a, out b, out hole, last_static_label, line, ref err)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {line}: CALLexpected address as first arg\n-> {err.Item2}");
+                            if (args.tokens.Length != 2) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: CALL expected one arg");
+                            if (!TryParseAddress(args, args.tokens[1], out a, out b, out hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: CALLexpected address as first arg\n-> {args.err.Item2}");
                             Append(file, 1, (UInt64)OPCode.Call);
                             AppendAddress(file, a, b, hole);
                             break;
                         // [8: ret]
                         case "RET":
-                            if (tokens.Length != 1) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {line}: CALL expected one arg");
+                            if (args.tokens.Length != 1) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: CALL expected one arg");
                             Append(file, 1, (UInt64)OPCode.Ret);
                             break;
 
-                        default: return new Tuple<AssembleError, string>(AssembleError.UnknownOp, $"line {line}: Couldn't process operator \"{tokens[0]}\"");
+                        default: return new Tuple<AssembleError, string>(AssembleError.UnknownOp, $"line {args.line}: Couldn't process operator \"{args.tokens[0]}\"");
                     }
                 }
 
