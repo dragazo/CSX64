@@ -81,7 +81,7 @@ namespace csx64
 
             PUSH, POP, CALL, RET,
 
-            BSWAP
+            BSWAP, BEXTR, BLSI, BLSMSK, BLSR, ANDN
         }
 
         /// <summary>
@@ -400,49 +400,51 @@ namespace csx64
 	        mode = 3: [size: imm]   [address]
 		        M[address] <- imm
         */
-        private bool FetchBinaryOpFormat(ref UInt64 s, ref UInt64 m, ref UInt64 a, ref UInt64 b)
+        private bool FetchBinaryOpFormat(ref UInt64 s, ref UInt64 m, ref UInt64 a, ref UInt64 b, int _a_sizecode = -1, int _b_sizecode = -1)
         {
             // read settings
             if (!GetMemAdv(1, ref s)) return false;
-            UInt64 sizecode = (s >> 2) & 3;
+
+            UInt64 a_sizecode = _a_sizecode == -1 ? (s >> 2) & 3 : (UInt64)_a_sizecode;
+            UInt64 b_sizecode = _b_sizecode == -1 ? (s >> 2) & 3 : (UInt64)_b_sizecode;
 
             // switch through mode
             switch (s & 3)
             {
                 case 0:
-                    a = Registers[s >> 4].Get(sizecode);
-                    if (!GetMemAdv(Size(sizecode), ref b)) return false;
+                    a = Registers[s >> 4].Get(a_sizecode);
+                    if (!GetMemAdv(Size(b_sizecode), ref b)) return false;
                     break;
                 case 1:
-                    a = Registers[s >> 4].Get(sizecode);
-                    if (!GetAddressAdv(ref b) || !GetMem(b, Size(sizecode), ref b)) return false;
+                    a = Registers[s >> 4].Get(a_sizecode);
+                    if (!GetAddressAdv(ref b) || !GetMem(b, Size(b_sizecode), ref b)) return false;
                     break;
                 case 2:
                     if (!GetMemAdv(1, ref b)) return false;
                     switch ((b >> 4) & 1)
                     {
                         case 0:
-                            a = Registers[s >> 4].Get(sizecode);
-                            b = Registers[b & 15].Get(sizecode);
+                            a = Registers[s >> 4].Get(a_sizecode);
+                            b = Registers[b & 15].Get(b_sizecode);
                             break;
                         case 1:
-                            if (!GetAddressAdv(ref m) || !GetMem(m, Size(sizecode), ref a)) return false;
-                            b = Registers[b & 15].Get(sizecode);
-                            s |= 256;
+                            if (!GetAddressAdv(ref m) || !GetMem(m, Size(a_sizecode), ref a)) return false;
+                            b = Registers[b & 15].Get(b_sizecode);
+                            s |= 256; // mark as memory path of mode 2
                             break;
                     }
                     break;
                 case 3:
-                    if (!GetMemAdv(Size(sizecode), ref b)) return false;
-                    if (!GetAddressAdv(ref m) || !GetMem(m, Size(sizecode), ref a)) return false;
+                    if (!GetMemAdv(Size(b_sizecode), ref b)) return false;
+                    if (!GetAddressAdv(ref m) || !GetMem(m, Size(a_sizecode), ref a)) return false;
                     break;
             }
 
             return true;
         }
-        private bool StoreBinaryOpFormat(UInt64 s, UInt64 m, UInt64 res)
+        private bool StoreBinaryOpFormat(UInt64 s, UInt64 m, UInt64 res, int _sizecode = -1)
         {
-            UInt64 sizecode = (s >> 2) & 3;
+            UInt64 sizecode = _sizecode == -1 ? (s >> 2) & 3 : (UInt64)_sizecode;
 
             // switch through mode
             switch (s & 3)
@@ -470,28 +472,29 @@ namespace csx64
 	        mem = 1: [address]
 		        M[address] <- M[address]
         */
-        private bool FetchUnaryOpFormat(ref UInt64 s, ref UInt64 m, ref UInt64 a)
+        private bool FetchUnaryOpFormat(ref UInt64 s, ref UInt64 m, ref UInt64 a, int _a_sizecode = -1)
         {
             // read settings
             if (!GetMemAdv(1, ref s)) return false;
-            UInt64 sizecode = (s >> 2) & 3;
+
+            UInt64 a_sizecode = _a_sizecode == -1 ? (s >> 2) & 3 : (UInt64)_a_sizecode;
 
             // switch through mode
             switch (s & 1)
             {
                 case 0:
-                    a = Registers[s >> 4].Get(sizecode);
+                    a = Registers[s >> 4].Get(a_sizecode);
                     break;
                 case 1:
-                    if (!GetAddressAdv(ref m) || !GetMem(m, Size(sizecode), ref a)) return false;
+                    if (!GetAddressAdv(ref m) || !GetMem(m, Size(a_sizecode), ref a)) return false;
                     break;
             }
 
             return true;
         }
-        private bool StoreUnaryOpFormat(UInt64 s, UInt64 m, UInt64 res)
+        private bool StoreUnaryOpFormat(UInt64 s, UInt64 m, UInt64 res, int _sizecode = -1)
         {
-            UInt64 sizecode = (s >> 2) & 3;
+            UInt64 sizecode = _sizecode == -1 ? (s >> 2) & 3 : (UInt64)_sizecode;
 
             // switch through mode
             switch (s & 1)
@@ -1829,6 +1832,30 @@ namespace csx64
 
         // -- misc operations --
 
+        private bool ProcessSWAP()
+        {
+            UInt64 a = 0, b = 0, c = 0, d = 0;
+
+            if (!GetMemAdv(1, ref a)) return false;
+            switch (a & 1)
+            {
+                case 0:
+                    if (!GetMemAdv(1, ref b)) return false;
+                    c = Registers[a >> 4].x64;
+                    Registers[a >> 4].Set((a >> 2) & 3, Registers[b & 15].x64);
+                    Registers[b & 15].Set((a >> 2) & 3, c);
+                    break;
+                case 1:
+                    if (!GetAddressAdv(ref b) || !GetMem(b, Size((a >> 2) & 3), ref c)) return false;
+                    d = Registers[a >> 4].x64;
+                    Registers[a >> 4].Set((a >> 2) & 3, c);
+                    if (!SetMem(b, Size((a >> 2) & 3), d)) return false;
+                    break;
+            }
+
+            return true;
+        }
+
         private bool ProcessBSWAP()
         {
             UInt64 s = 0, m = 0, a = 0;
@@ -1844,6 +1871,63 @@ namespace csx64
                 case 1: res = (a << 8) | (a >> 8); break;
                 case 0: res = a; break;
             }
+
+            return StoreUnaryOpFormat(s, m, res);
+        }
+        private bool ProcessBEXTR()
+        {
+            UInt64 s = 0, m = 0, a = 0, b = 0;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b, -1, 1)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
+
+            ushort pos = (ushort)((b >> 8) % SizeBits(sizecode));
+            ushort len = (ushort)((b & 0xff) % SizeBits(sizecode));
+
+            UInt64 res = (a >> pos) & ((1ul << len) - 1);
+
+            return StoreUnaryOpFormat(s, m, res);
+        }
+        private bool ProcessBLSI()
+        {
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
+
+            UInt64 res = a & (~a + 1);
+
+            Flags.Z = res == 0;
+
+            return StoreUnaryOpFormat(s, m, res);
+        }
+        private bool ProcessBLSMSK()
+        {
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
+
+            UInt64 res = Truncate(a ^ (a - 1), sizecode);
+
+            return StoreUnaryOpFormat(s, m, res);
+        }
+        private bool ProcessBLSR()
+        {
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
+
+            UInt64 res = a & (a - 1);
+
+            Flags.Z = res == 0;
+
+            return StoreUnaryOpFormat(s, m, res);
+        }
+        private bool ProcessANDN()
+        {
+            UInt64 s = 0, m = 0, a = 0, b = 0;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
+            UInt64 sizecode = (a >> 2) & 3;
+
+            UInt64 res = a & ~b;
+
+            UpdateFlagsI(res, sizecode);
 
             return StoreUnaryOpFormat(s, m, res);
         }
@@ -1981,6 +2065,28 @@ namespace csx64
         }
 
         /// <summary>
+        /// Pushes a value onto the stack
+        /// </summary>
+        /// <param name="size">the size of the value (in bytes)</param>
+        /// <param name="val">the value to push</param>
+        protected bool Push(UInt64 size, UInt64 val)
+        {
+            Registers[15].x64 -= size;
+            return SetMem(Registers[15].x64, size, val);
+        }
+        /// <summary>
+        /// Pops a value from the stack
+        /// </summary>
+        /// <param name="size">the size of the value (in bytes)</param>
+        /// <param name="val">the resulting value</param>
+        protected bool Pop(UInt64 size, ref UInt64 val)
+        {
+            if (!GetMem(Registers[15].x64, size, ref val)) return false;
+            Registers[15].x64 += size;
+            return true;
+        }
+
+        /// <summary>
         /// Handles syscall instructions from the processor. Returns true iff the syscall was handled successfully.
         /// Should not be called directly: only by interpreted syscall instructions
         /// </summary>
@@ -2029,24 +2135,7 @@ namespace csx64
                 case OPCode.MOVc: return ProcessMov(Flags.C);
                 case OPCode.MOVnc: return ProcessMov(!Flags.C);
 
-                case OPCode.SWAP:
-                    if (!GetMemAdv(1, ref a)) return false;
-                    switch (a & 1)
-                    {
-                        case 0:
-                            if (!GetMemAdv(1, ref b)) return false;
-                            c = Registers[a >> 4].x64;
-                            Registers[a >> 4].Set((a >> 2) & 3, Registers[b & 15].x64);
-                            Registers[b & 15].Set((a >> 2) & 3, c);
-                            break;
-                        case 1:
-                            if (!GetAddressAdv(ref b) || !GetMem(b, Size((a >> 2) & 3), ref c)) return false;
-                            d = Registers[a >> 4].x64;
-                            Registers[a >> 4].Set((a >> 2) & 3, c);
-                            if (!SetMem(b, Size((a >> 2) & 3), d)) return false;
-                            break;
-                    }
-                    return true;
+                case OPCode.SWAP: return ProcessSWAP();
 
                 case OPCode.UEXTEND: if (!GetMemAdv(1, ref a)) return false; Registers[a >> 4].Set(a & 3, Registers[a >> 4].Get((a >> 2) & 3)); return true;
                 case OPCode.SEXTEND: if (!GetMemAdv(1, ref a)) return false; Registers[a >> 4].Set(a & 3, SignExtend(Registers[a >> 4].Get((a >> 2) & 3), (a >> 2) & 3)); return true;
@@ -2157,25 +2246,24 @@ namespace csx64
                         case 0: if (!GetMemAdv(Size((a >> 2) & 3), ref b)) return false; break;
                         case 1: b = Registers[a >> 4].x64; break;
                     }
-                    Registers[15].x64 -= Size((a >> 2) & 3);
-                    if (!SetMem(Registers[15].x64, Size((a >> 2) & 3), b)) return false;
-                    return true;
+                    return Push(Size((a >> 2) & 3), b);
                 case OPCode.POP:
-                    if (!GetMemAdv(1, ref a) || !GetMem(Registers[15].x64, Size((a >> 2) & 3), ref b)) return false;
-                    Registers[15].x64 += Size((a >> 2) & 3);
+                    if (!GetMemAdv(1, ref a) || !Pop(Size((a >> 2) & 3), ref b)) return false;
                     Registers[a >> 4].Set((a >> 2) & 3, b);
                     return true;
                 case OPCode.CALL:
-                    if (!GetAddressAdv(ref a)) return false;
-                    Registers[15].x64 -= 8;
-                    if (!SetMem(Registers[15].x64, 8, Pos)) return false;
-                    Pos = a;
-                    return true;
+                    if (!GetAddressAdv(ref a) || !Push(8, a)) return false;
+                    Pos = a; return true;
                 case OPCode.RET:
-                    if (!GetMem(Registers[15].x64, 8, ref a)) return false;
-                    Registers[15].x64 += 8;
-                    Pos = a;
-                    return true;
+                    if (!Pop(8, ref a)) return false;
+                    Pos = a; return true;
+
+                case OPCode.BSWAP: return ProcessBSWAP();
+                case OPCode.BEXTR: return ProcessBEXTR();
+                case OPCode.BLSI: return ProcessBLSI();
+                case OPCode.BLSMSK: return ProcessBLSMSK();
+                case OPCode.BLSR: return ProcessBLSR();
+                case OPCode.ANDN: return ProcessANDN();
 
                 // otherwise, unknown opcode
                 default: Fail(ErrorCode.UndefinedBehavior); return false;
@@ -2717,7 +2805,7 @@ namespace csx64
             return DateTime.UtcNow.Ticks.MakeUnsigned();
         }
 
-        private static bool TryProcessBinaryOp(AssembleArgs args, OPCode op, UInt64 sizemask = 15)
+        private static bool TryProcessBinaryOp(AssembleArgs args, OPCode op, int _b_sizecode = -1, UInt64 sizemask = 15)
         {
             UInt64 a, b, c; // parsing temporaries
             Hole hole1, hole2;
@@ -2727,12 +2815,14 @@ namespace csx64
 
             AppendVal(args, 1, (UInt64)op);
 
+            UInt64 b_sizecode = _b_sizecode == -1 ? args.sizecode : (UInt64)_b_sizecode;
+
             if (TryParseRegister(args, args.args[0], out a))
             {
                 if (TryParseImm(args, args.args[1], out hole1))
                 {
                     AppendVal(args, 1, (a << 4) | (args.sizecode << 2) | 0);
-                    if (!AppendHole(args, Size(args.sizecode), hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
+                    if (!AppendHole(args, Size(b_sizecode), hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
                 }
                 else if (TryParseAddress(args, args.args[1], out b, out c, out hole1))
                 {
@@ -2757,7 +2847,7 @@ namespace csx64
                 else if (TryParseImm(args, args.args[1], out hole2))
                 {
                     AppendVal(args, 1, (args.sizecode << 2) | 3);
-                    if (!AppendHole(args, Size(args.sizecode), hole2)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
+                    if (!AppendHole(args, Size(b_sizecode), hole2)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
                     if (!AppendAddress(args, a, b, hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
                 }
                 else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Couldn't parse \"{args.args[1]}\" as a register or imm"); return false; }
@@ -3134,13 +3224,13 @@ namespace csx64
                         case "JC": if (!TryProcessJump(args, OPCode.Jc)) return args.err; break;
                         case "JNC": if (!TryProcessJump(args, OPCode.Jnc)) return args.err; break;
 
-                        case "FADD": if (!TryProcessBinaryOp(args, OPCode.FADD, 12)) return args.err; break;
-                        case "FSUB": if (!TryProcessBinaryOp(args, OPCode.FSUB, 12)) return args.err; break;
-                        case "FMUL": if (!TryProcessBinaryOp(args, OPCode.FMUL, 12)) return args.err; break;
-                        case "FDIV": if (!TryProcessBinaryOp(args, OPCode.FDIV, 12)) return args.err; break;
-                        case "FMOD": if (!TryProcessBinaryOp(args, OPCode.FMOD, 12)) return args.err; break;
+                        case "FADD": if (!TryProcessBinaryOp(args, OPCode.FADD, -1, 12)) return args.err; break;
+                        case "FSUB": if (!TryProcessBinaryOp(args, OPCode.FSUB, -1, 12)) return args.err; break;
+                        case "FMUL": if (!TryProcessBinaryOp(args, OPCode.FMUL, -1, 12)) return args.err; break;
+                        case "FDIV": if (!TryProcessBinaryOp(args, OPCode.FDIV, -1, 12)) return args.err; break;
+                        case "FMOD": if (!TryProcessBinaryOp(args, OPCode.FMOD, -1, 12)) return args.err; break;
 
-                        case "POW": if (!TryProcessBinaryOp(args, OPCode.POW, 12)) return args.err; break;
+                        case "POW": if (!TryProcessBinaryOp(args, OPCode.POW, -1, 12)) return args.err; break;
                         case "SQRT": if (!TryProcessUnaryOp(args, OPCode.SQRT, 12)) return args.err; break;
                         case "EXP": if (!TryProcessUnaryOp(args, OPCode.EXP, 12)) return args.err; break;
                         case "LN": if (!TryProcessUnaryOp(args, OPCode.LN, 12)) return args.err; break;
@@ -3159,14 +3249,14 @@ namespace csx64
                         case "ASIN": if (!TryProcessUnaryOp(args, OPCode.ASIN, 12)) return args.err; break;
                         case "ACOS": if (!TryProcessUnaryOp(args, OPCode.ACOS, 12)) return args.err; break;
                         case "ATAN": if (!TryProcessUnaryOp(args, OPCode.ATAN, 12)) return args.err; break;
-                        case "ATAN2": if (!TryProcessBinaryOp(args, OPCode.ATAN2, 12)) return args.err; break;
+                        case "ATAN2": if (!TryProcessBinaryOp(args, OPCode.ATAN2, -1, 12)) return args.err; break;
 
                         case "FLOOR": if (!TryProcessUnaryOp(args, OPCode.FLOOR, 12)) return args.err; break;
                         case "CEIL": if (!TryProcessUnaryOp(args, OPCode.CEIL, 12)) return args.err; break;
                         case "ROUND": if (!TryProcessUnaryOp(args, OPCode.ROUND, 12)) return args.err; break;
                         case "TRUNC": if (!TryProcessUnaryOp(args, OPCode.TRUNC, 12)) return args.err; break;
 
-                        case "FCMP": if (!TryProcessBinaryOp(args, OPCode.FCMP, 12)) return args.err; break;
+                        case "FCMP": if (!TryProcessBinaryOp(args, OPCode.FCMP, -1, 12)) return args.err; break;
 
                         case "FTOI": if (!TryProcessUnaryOp(args, OPCode.FTOI, 12)) return args.err; break;
                         case "ITOF": if (!TryProcessUnaryOp(args, OPCode.ITOF, 12)) return args.err; break;
@@ -3213,6 +3303,11 @@ namespace csx64
                             break;
 
                         case "BSWAP": if (!TryProcessUnaryOp(args, OPCode.BSWAP)) return args.err; break;
+                        case "BEXTR": if (!TryProcessBinaryOp(args, OPCode.BEXTR, 1)) return args.err; break;
+                        case "BLSI": if (!TryProcessUnaryOp(args, OPCode.BLSI)) return args.err; break;
+                        case "BLSMSK": if (!TryProcessUnaryOp(args, OPCode.BLSMSK)) return args.err; break;
+                        case "BLSR": if (!TryProcessUnaryOp(args, OPCode.BLSR)) return args.err; break;
+                        case "ANDN": if (!TryProcessBinaryOp(args, OPCode.ANDN)) return args.err; break;
 
                         default: return new Tuple<AssembleError, string>(AssembleError.UnknownOp, $"line {args.line}: Unknown operation \"{args.op}\"");
                     }
