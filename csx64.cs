@@ -2351,6 +2351,15 @@ namespace csx64
                     _Evaluated = false; // mark as unevaluated
                 }
             }
+            public Tuple<UInt64, bool> Result
+            {
+                set
+                {
+                    _Evaluated = true;
+                    _Result = value.Item1;
+                    _Floating = value.Item2;
+                }
+            }
 
             public bool Evaluate(Dictionary<string, Hole> symbols, out UInt64 res, out bool floating, ref string err, Stack<string> visited = null)
             {
@@ -3069,11 +3078,40 @@ namespace csx64
 
         private static bool TryParseRegister(AssembleArgs args, string token, out UInt64 res)
         {
+            res = 0;
+
             // registers prefaced with $
-            if (token.Length < 2 || token[0] != '$') { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Invalid register format encountered \"{token}\""); res = 0; return false; }
+            if (token.Length < 2 || token[0] != '$') { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Invalid register format encountered \"{token}\""); return false; }
+
+            int end = 0; // ending of register expression token
+
+            // if this starts parenthetical region
+            if (token[1] == '(')
+            {
+                int depth = 1; // depth of 1
+
+                // start searching for ending parens after first parens
+                for (end = 2; end < token.Length && depth > 0; ++end)
+                {
+                    if (token[end] == '(') ++depth;
+                    else if (token[end] == ')') --depth;
+                }
+
+                // make sure we reached zero depth
+                if (depth != 0) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Mismatched parenthesis in register expression \"{token.Substring(1, end - 1)}\""); return false; }
+            }
+            // otherwise normal symbol
+            else
+            {
+                // take all legal chars
+                for (end = 1; end < token.Length && (char.IsLetterOrDigit(token[end]) || token[end] == '_'); ++end) ;
+            }
+
+            // make sure we consumed the entire string
+            if (end != token.Length) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Expressions used as register ids must be parenthesized"); return false; }
 
             // register index must be instant imm
-            if (!TryParseInstantImm(args, token.Substring(1), out res, out bool floating)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to parse register index \"{token.Substring(1)}\"\n-> {args.err.Item2}"); return false; }
+            if (!TryParseInstantImm(args, token.Substring(1, end - 1), out res, out bool floating)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to parse register index \"{token.Substring(1, end - 1)}\"\n-> {args.err.Item2}"); return false; }
 
             // ensure not floating and in proper range
             if (floating) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Attempt to use floating point value to specify register \"{token}\""); return false; }
@@ -3310,8 +3348,27 @@ namespace csx64
             {
                 // find the next register marker
                 for (pos = 1; pos < token.Length && token[pos] != '$'; ++pos) ;
-                // find its end (take all legal number/symbol chars)
-                for (end = pos + 1; end < token.Length && (char.IsLetterOrDigit(token[end]) || token[end] == '_'); ++end) ;
+                // if this starts parenthetical region
+                if (pos + 1 < token.Length && token[pos + 1] == '(')
+                {
+                    int depth = 1; // depth of 1
+
+                    // start searching for ending parens after first parens
+                    for (end = pos + 2; end < token.Length && depth > 0; ++end)
+                    {
+                        if (token[end] == '(') ++depth;
+                        else if (token[end] == ')') --depth;
+                    }
+
+                    // make sure we reached zero depth
+                    if (depth != 0) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Mismatched parenthesis in register expression \"{token.Substring(pos, end - pos)}\""); return false; }
+                }
+                // otherwise normal symbol
+                else
+                {
+                    // take all legal chars
+                    for (end = pos + 1; end < token.Length && (char.IsLetterOrDigit(token[end]) || token[end] == '_'); ++end) ;
+                }
 
                 // break out if we've reached the end
                 if (pos >= token.Length) break;
@@ -3410,42 +3467,63 @@ namespace csx64
 
             UInt64 b_sizecode = _b_sizecode == -1 ? args.sizecode : (UInt64)_b_sizecode;
 
-            if (TryParseRegister(args, args.args[0], out a))
+            // reg, *
+            if (args.args[0][0] == '$')
             {
-                if (TryParseImm(args, args.args[1], out hole1))
+                if (!TryParseRegister(args, args.args[0], out a)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[0]}\" as a register\n-> {args.err.Item2}"); return false; }
+
+                // reg, reg
+                if (args.args[1][0] == '$')
                 {
-                    AppendVal(args, 1, (a << 4) | (args.sizecode << 2) | 0);
-                    if (!TryAppendHole(args, Size(b_sizecode), hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
-                }
-                else if (TryParseAddress(args, args.args[1], out b, out c, out hole1))
-                {
-                    AppendVal(args, 1, (a << 4) | (args.sizecode << 2) | 1);
-                    if (!TryAppendAddress(args, b, c, hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
-                }
-                else if (TryParseRegister(args, args.args[1], out b))
-                {
+                    if (!TryParseRegister(args, args.args[1], out b)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[1]}\" as a register\n-> {args.err.Item2}"); return false; }
+
                     AppendVal(args, 1, (a << 4) | (args.sizecode << 2) | 2);
                     AppendVal(args, 1, b);
                 }
-                else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Couldn't parse \"{args.args[1]}\" as an imm, address, or register"); return false; }
-            }
-            else if (TryParseAddress(args, args.args[0], out a, out b, out hole1))
-            {
-                if (TryParseRegister(args, args.args[1], out c))
+                // reg, mem
+                else if (args.args[1][0] == '[')
                 {
+                    if (!TryParseAddress(args, args.args[1], out b, out c, out hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[1]}\" as an address\n-> {args.err.Item2}"); return false; }
+
+                    AppendVal(args, 1, (a << 4) | (args.sizecode << 2) | 1);
+                    if (!TryAppendAddress(args, b, c, hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
+                }
+                // reg, imm
+                else
+                {
+                    if (!TryParseImm(args, args.args[1], out hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[1]}\" as an imm\n-> {args.err.Item2}"); return false; }
+
+                    AppendVal(args, 1, (a << 4) | (args.sizecode << 2) | 0);
+                    if (!TryAppendHole(args, Size(b_sizecode), hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
+                }
+            }
+            // mem, *
+            else if (args.args[0][0] == '[')
+            {
+                if (!TryParseAddress(args, args.args[0], out a, out b, out hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[0]}\" as an address\n-> {args.err.Item2}"); return false; }
+
+                // mem, reg
+                if (args.args[1][0] == '$')
+                {
+                    if (!TryParseRegister(args, args.args[1], out c)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[1]}\" as a register\n-> {args.err.Item2}"); return false; }
+
                     AppendVal(args, 1, (args.sizecode << 2) | 2);
                     AppendVal(args, 1, 16 | c);
                     if (!TryAppendAddress(args, a, b, hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; };
                 }
-                else if (TryParseImm(args, args.args[1], out hole2))
+                // mem, mem
+                else if (args.args[1][0] == '[') { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: {op} does not support memory-to-memory"); return false; }
+                // mem, imm
+                else
                 {
+                    if (!TryParseImm(args, args.args[1], out hole2)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[1]}\" as an imm\n-> {args.err.Item2}"); return false; }
+
                     AppendVal(args, 1, (args.sizecode << 2) | 3);
                     if (!TryAppendHole(args, Size(b_sizecode), hole2)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
                     if (!TryAppendAddress(args, a, b, hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
                 }
-                else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Couldn't parse \"{args.args[1]}\" as a register or imm"); return false; }
             }
-            else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Couldn't parse \"{args.args[0]}\" as a register or address"); return false; }
+            else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Destination must be register or memory"); return false; }
 
             return true;
         }
@@ -3459,16 +3537,23 @@ namespace csx64
 
             AppendVal(args, 1, (UInt64)op);
 
-            if (TryParseRegister(args, args.args[0], out b))
+            // reg
+            if (args.args[0][0] == '$')
             {
+                if (!TryParseRegister(args, args.args[0], out b)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[0]}\" as a register\n-> {args.err.Item2}"); return false; }
+
                 AppendVal(args, 1, (b << 4) | (args.sizecode << 2) | 0);
             }
-            else if (TryParseAddress(args, args.args[0], out a, out b, out hole))
+            // mem
+            else if (args.args[0][0] == '[')
             {
+                if (!TryParseAddress(args, args.args[0], out a, out b, out hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[0]}\" as an address\n-> {args.err.Item2}"); return false; }
+
                 AppendVal(args, 1, (args.sizecode << 2) | 1);
                 if (!TryAppendAddress(args, a, b, hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
             }
-            else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Couldn't parse \"{args.args[0]}\" as a register or address"); return false; }
+            // imm
+            else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Destination must be register or memory"); return false; }
 
             return true;
         }
@@ -3546,21 +3631,29 @@ namespace csx64
 
             AppendVal(args, 1, (UInt64)op);
 
-            if (TryParseImm(args, args.args[0], out hole))
+            // reg
+            if (args.args[0][0] == '$')
             {
-                AppendVal(args, 1, (args.sizecode << 2) | 0);
-                if (!TryAppendHole(args, Size(args.sizecode), hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
-            }
-            else if (TryParseRegister(args, args.args[0], out a))
-            {
+                if (!TryParseRegister(args, args.args[0], out a)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[0]}\" as a register\n-> {args.err.Item2}"); return false; }
+
                 AppendVal(args, 1, (a << 4) | (args.sizecode << 2) | 1);
             }
-            else if (TryParseAddress(args, args.args[0], out a, out b, out hole))
+            // mem
+            else if (args.args[0][0] == '[')
             {
+                if (!TryParseAddress(args, args.args[0], out a, out b, out hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[0]}\" as an address\n-> {args.err.Item2}"); return false; }
+
                 AppendVal(args, 1, (args.sizecode << 2) | 2);
                 if (!TryAppendAddress(args, a, b, hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
             }
-            else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Couldn't parse \"{args.args[0]}\" as an imm, register, or address"); return false; }
+            // imm
+            else
+            {
+                if (!TryParseImm(args, args.args[0], out hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[0]}\" as an imm\n-> {args.err.Item2}"); return false; }
+
+                AppendVal(args, 1, (args.sizecode << 2) | 0);
+                if (!TryAppendHole(args, Size(args.sizecode), hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
+            }
 
             return true;
         }
@@ -3580,19 +3673,19 @@ namespace csx64
             // predefined symbols
             args.file.Symbols = new Dictionary<string, Hole>()
             {
-                ["__time__"] = new Hole() { Value = Time().ToString() },
-                ["__version__"] = new Hole() { Value = Version.ToString() },
+                ["__time__"] = new Hole() { Result = new Tuple<UInt64, bool>(Time(), false) },
+                ["__version__"] = new Hole() { Result = new Tuple<UInt64, bool>(Version, false) },
 
-                ["__pinf__"] = new Hole() { Value = double.PositiveInfinity.ToString("e17") },
-                ["__ninf__"] = new Hole() { Value = double.NegativeInfinity.ToString("e17") },
-                ["__nan__"] = new Hole() { Value = double.NaN.ToString("e17") },
+                ["__pinf__"] = new Hole() { Result = new Tuple<UInt64, bool>(DoubleAsUInt64(double.PositiveInfinity), true) },
+                ["__ninf__"] = new Hole() { Result = new Tuple<UInt64, bool>(DoubleAsUInt64(double.NegativeInfinity), true) },
+                ["__nan__"] = new Hole() { Result = new Tuple<UInt64, bool>(DoubleAsUInt64(double.NaN), true) },
 
-                ["__fmax__"] = new Hole() { Value = double.MaxValue.ToString("e17") },
-                ["__fmin__"] = new Hole() { Value = double.MinValue.ToString("e17") },
-                ["__fepsilon__"] = new Hole() { Value = double.Epsilon.ToString("e17") },
+                ["__fmax__"] = new Hole() { Result = new Tuple<UInt64, bool>(DoubleAsUInt64(double.MaxValue), true) },
+                ["__fmin__"] = new Hole() { Result = new Tuple<UInt64, bool>(DoubleAsUInt64(double.MinValue), true) },
+                ["__fepsilon__"] = new Hole() { Result = new Tuple<UInt64, bool>(DoubleAsUInt64(double.Epsilon), true) },
 
-                ["__pi__"] = new Hole() { Value = Math.PI.ToString("e17") },
-                ["__e__"] = new Hole() { Value = Math.E.ToString("e17") },
+                ["__pi__"] = new Hole() { Result = new Tuple<UInt64, bool>(DoubleAsUInt64(Math.PI), true) },
+                ["__e__"] = new Hole() { Result = new Tuple<UInt64, bool>(DoubleAsUInt64(Math.E), true) },
             };
 
             int pos = 0, end = 0; // position in code
@@ -3997,7 +4090,7 @@ namespace csx64
             // create a combined symbols table with predefined values
             var G_symbols = new Dictionary<string, Hole>()
             {
-                ["__prog_end__"] = new Hole() { Value = res.LongLength.MakeUnsigned().ToString() }
+                ["__prog_end__"] = new Hole() { Result = new Tuple<UInt64, bool>(res.LongLength.MakeUnsigned(), false) }
             };
 
             UInt64 val; // parsing locations
