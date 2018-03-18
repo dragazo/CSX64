@@ -2309,6 +2309,10 @@ namespace csx64
         {
             None, EmptyResult, SymbolRedefinition, MissingSymbol, FormatError
         }
+        internal enum PatchError
+        {
+            None, Unevaluated, Error
+        }
 
         internal class Hole
         {
@@ -2342,6 +2346,9 @@ namespace csx64
             private UInt64 _Result = 0;
             private bool _Evaluated = false, _Floating = false;
 
+            /// <summary>
+            /// Gets the string that was evaluated or sets it (and marks as unevaluated)
+            /// </summary>
             public string Value
             {
                 get { return _Value; }
@@ -2351,16 +2358,39 @@ namespace csx64
                     _Evaluated = false; // mark as unevaluated
                 }
             }
-            public Tuple<UInt64, bool> Result
+            /// <summary>
+            /// Assigns this hole to be an evaluated integer
+            /// </summary>
+            public UInt64 IntResult
             {
                 set
                 {
                     _Evaluated = true;
-                    _Result = value.Item1;
-                    _Floating = value.Item2;
+                    _Result = value;
+                    _Floating = false;
+                }
+            }
+            /// <summary>
+            /// Assigns this hole to be an evaluated floating-point value
+            /// </summary>
+            public double FloatResult
+            {
+                set
+                {
+                    _Evaluated = true;
+                    _Result = DoubleAsUInt64(value);
+                    _Floating = true;
                 }
             }
 
+            /// <summary>
+            /// Attempts to evaluate the hole, returning true on success
+            /// </summary>
+            /// <param name="symbols">the symbols table to use for lookup</param>
+            /// <param name="res">the resulting value upon success</param>
+            /// <param name="floating">flag denoting result is floating-point</param>
+            /// <param name="err">error emitted upon failure</param>
+            /// <param name="visited">DO NOT PROVIDE THIS</param>
             public bool Evaluate(Dictionary<string, Hole> symbols, out UInt64 res, out bool floating, ref string err, Stack<string> visited = null)
             {
                 res = 0; // initialize out params
@@ -2554,6 +2584,8 @@ namespace csx64
                 return true;
             }
 
+            /// <summary>
+            /// Creates a replica of this expression tree
             public Hole Clone()
             {
                 return new Hole()
@@ -2569,6 +2601,11 @@ namespace csx64
                     _Floating = _Floating
                 };
             }
+            /// <summary>
+            /// Creates a replica of this expression tree, replacing a string with another string
+            /// </summary>
+            /// <param name="from">the string to find</param>
+            /// <param name="to">the string to replace with</param>
             public Hole Clone(string from, string to)
             {
                 Hole temp = new Hole() { OP = OP, Left = Left?.Clone(from, to), Right = Right?.Clone(from, to) };
@@ -2591,6 +2628,12 @@ namespace csx64
 
                 return temp;
             }
+            /// <summary>
+            /// Creates a replica of this expression tree, replacing a string with a value
+            /// </summary>
+            /// <param name="from">the string to find</param>
+            /// <param name="to">the value to replace with</param>
+            /// <param name="floating">flag if the specified value is floating-point</param>
             public Hole Clone(string from, UInt64 to, bool floating)
             {
                 Hole temp = new Hole() { OP = OP, Left = Left?.Clone(from, to, floating), Right = Right?.Clone(from, to, floating) };
@@ -2613,6 +2656,11 @@ namespace csx64
                 return temp;
             }
 
+            /// <summary>
+            /// Finds the value in the specified expression tree. Returns true on success
+            /// </summary>
+            /// <param name="value">the value to find</param>
+            /// <param name="path">the resulting path (with the root at the bottom of the stack and the found node at the top)</param>
             public bool Find(string value, Stack<Hole> path)
             {
                 path.Push(this);
@@ -2629,6 +2677,10 @@ namespace csx64
                 path.Pop();
                 return false;
             }
+            /// <summary>
+            /// Finds the value in the specified expression tree. Returns it on success, otherwise null
+            /// </summary>
+            /// <param name="value">the found node or null</param>
             public Hole Find(string value)
             {
                 if(OP == OPs.None) return Value == value ? this : null;
@@ -2642,7 +2694,7 @@ namespace csx64
                 {
                     Left._ToString(b);
                     if (Right != null) Right._ToString(b);
-
+                    
                     b.Append(OP);
                 }
             }
@@ -2666,15 +2718,18 @@ namespace csx64
                 Utility.Swap(ref a._Floating, ref b._Floating);
             }
         }
-        internal struct HoleData
+        internal class HoleData
         {
             public UInt64 Address;
             public UInt64 Size;
+
+            public int Line;
+            public Hole Hole;
         }
         public class ObjectFile
         {
             internal Dictionary<string, Hole> Symbols = new Dictionary<string, Hole>();
-            internal Dictionary<HoleData, Hole> Holes = new Dictionary<HoleData, Hole>();
+            internal List<HoleData> Holes = new List<HoleData>();
 
             internal List<string> GlobalSymbols = new List<string>();
             internal List<byte> Data = new List<byte>();
@@ -2700,14 +2755,14 @@ namespace csx64
         /// </summary>
         public const UInt64 EmissionMaxMultiplier = 1000000;
 
-        private static bool Write(byte[] arr, UInt64 pos, UInt64 size, UInt64 val)
+        private static bool Write<T>(T arr, UInt64 pos, UInt64 size, UInt64 val) where T : IList<byte>
         {
             // make sure we're not exceeding memory bounds
-            if (pos < 0 || pos + size > (UInt64)arr.LongLength) return false;
+            if (pos < 0 || pos + size > (UInt64)arr.LongCount()) return false;
 
             // write the value (little-endian)
             for (ushort i = 0; i < size; ++i)
-                arr[pos + i] = (byte)(val >> (8 * i));
+                arr[(int)pos + i] = (byte)(val >> (8 * i)); // POTENTIAL SIZE LIMITATION
 
             return true;
         }
@@ -2730,37 +2785,23 @@ namespace csx64
             for (ushort i = 0; i < size; ++i)
                 args.file.Data.Add((byte)(val >> (8 * i)));
         }
-        private static bool TryAppendHole(AssembleArgs args, UInt64 size, Hole hole)
+        private static bool TryAppendHole(AssembleArgs args, UInt64 size, Hole hole, int type = 3)
         {
-            string err = null; // error location for evaluation
+            string err = null; // evaluation error
 
-            // if we can fill it immediately, do so
-            if (hole.Evaluate(args.file.Symbols, out UInt64 val, out bool floating, ref err))
+            // create the hole data
+            HoleData data = new HoleData() { Address = (UInt64)args.file.Data.LongCount(), Size = size, Line = args.line, Hole = hole };
+            // write a dummy (all 1's for easy manual identification)
+            AppendVal(args, size, 0xffffffffffffffff);
+
+            // try to patch it
+            switch (TryPatchHole(args.file.Symbols, args.file.Data, data, ref err))
             {
-                /* !! IF MODIFIED HERE, MUST ALSO BE MODIFIED IN LINKER HOLE PATCHING !! */
+                case PatchError.None: break;
+                case PatchError.Unevaluated: args.file.Holes.Add(data); break;
+                case PatchError.Error: args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Error encountered while patching expression\n-> {err}"); return false;
 
-                // if it's floating-point
-                if (floating)
-                {
-                    // only 64-bit and 32-bit are supported
-                    switch (size)
-                    {
-                        case 8: AppendVal(args, 8, val); break;
-                        case 4: AppendVal(args, 4, FloatAsUInt64((float)AsDouble(val))); break;
-
-                        default: args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Attempt to use unsupported floating-point size"); return false;
-                    }
-                }
-                // otherwise it's integral
-                else AppendVal(args, size, val);
-            }
-            // otherwise there really is a hole
-            else
-            {
-                // add the hole for later linking
-                args.file.Holes.Add(new HoleData() { Address = (UInt64)args.file.Data.LongCount(), Size = size }, hole);
-                // write a dummy (all 1's for easy manual identification)
-                AppendVal(args, size, 0xffffffffffffffff);
+                default: throw new ArgumentException("Unknown patch error encountered");
             }
 
             return true;
@@ -2771,8 +2812,34 @@ namespace csx64
             AppendVal(args, 1, a);
             if ((a & 0x77) != 0) AppendVal(args, 1, b);
             if ((a & 0x80) != 0) { if (!TryAppendHole(args, 8, hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append address base\n-> {args.err.Item2}"); return false; } }
-
+            
             return true;
+        }
+
+        private static PatchError TryPatchHole<T>(Dictionary<string, Hole> symbols, T res, HoleData data, ref string err) where T : IList<byte>
+        {
+            // if we can fill it immediately, do so
+            if (data.Hole.Evaluate(symbols, out UInt64 val, out bool floating, ref err))
+            {
+                // if it's floating-point
+                if (floating)
+                {
+                    // only 64-bit and 32-bit are supported
+                    switch (data.Size)
+                    {
+                        case 8: Write(res, data.Address, 8, val); break;
+                        case 4: Write(res, data.Address, 4, FloatAsUInt64((float)AsDouble(val))); break;
+
+                        default: err = $"line {data.Line}: Attempt to use unsupported floating-point size"; return PatchError.Error;
+                    }
+                }
+                // otherwise it's integral
+                else Write(res, data.Address, data.Size, val);
+            }
+            else { err = $"line {data.Line}: Failed to evaluate expression\n-> {err}"; return PatchError.Unevaluated; }
+
+            // successfully patched
+            return PatchError.None;
         }
 
         private static bool SplitLine(AssembleArgs args)
@@ -3407,8 +3474,6 @@ namespace csx64
             // if we can evaluate the hole
             if (hole.Evaluate(args.file.Symbols, out UInt64 hole_val, out bool floating, ref err))
             {
-                // make sure it's not floating-point
-                if (floating) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Address base cannot be floating-point"); return false; }
                 // if it's zero, there is no hole (set to null)
                 if (hole_val == 0) hole = null;
             }
@@ -3673,19 +3738,19 @@ namespace csx64
             // predefined symbols
             args.file.Symbols = new Dictionary<string, Hole>()
             {
-                ["__time__"] = new Hole() { Result = new Tuple<UInt64, bool>(Time(), false) },
-                ["__version__"] = new Hole() { Result = new Tuple<UInt64, bool>(Version, false) },
+                ["__time__"] = new Hole() { IntResult = Time() },
+                ["__version__"] = new Hole() { IntResult = Version },
 
-                ["__pinf__"] = new Hole() { Result = new Tuple<UInt64, bool>(DoubleAsUInt64(double.PositiveInfinity), true) },
-                ["__ninf__"] = new Hole() { Result = new Tuple<UInt64, bool>(DoubleAsUInt64(double.NegativeInfinity), true) },
-                ["__nan__"] = new Hole() { Result = new Tuple<UInt64, bool>(DoubleAsUInt64(double.NaN), true) },
+                ["__pinf__"] = new Hole() { FloatResult = double.PositiveInfinity },
+                ["__ninf__"] = new Hole() { FloatResult = double.NegativeInfinity },
+                ["__nan__"] = new Hole() { FloatResult = double.NaN },
 
-                ["__fmax__"] = new Hole() { Result = new Tuple<UInt64, bool>(DoubleAsUInt64(double.MaxValue), true) },
-                ["__fmin__"] = new Hole() { Result = new Tuple<UInt64, bool>(DoubleAsUInt64(double.MinValue), true) },
-                ["__fepsilon__"] = new Hole() { Result = new Tuple<UInt64, bool>(DoubleAsUInt64(double.Epsilon), true) },
+                ["__fmax__"] = new Hole() { FloatResult = double.MaxValue },
+                ["__fmin__"] = new Hole() { FloatResult = double.MinValue },
+                ["__fepsilon__"] = new Hole() { FloatResult = double.Epsilon },
 
-                ["__pi__"] = new Hole() { Result = new Tuple<UInt64, bool>(DoubleAsUInt64(Math.PI), true) },
-                ["__e__"] = new Hole() { Result = new Tuple<UInt64, bool>(DoubleAsUInt64(Math.E), true) },
+                ["__pi__"] = new Hole() { FloatResult = Math.PI },
+                ["__e__"] = new Hole() { FloatResult = Math.E },
             };
 
             int pos = 0, end = 0; // position in code
@@ -4063,12 +4128,25 @@ namespace csx64
             }
 
             // make sure all global symbols were actually defined prior to link-time
-            foreach (string str in file.GlobalSymbols)
-                if (!file.Symbols.ContainsKey(str)) return new Tuple<AssembleError, string>(AssembleError.UnknownSymbol, $"Global symbol \"{str}\" was never defined");
+            foreach (string str in file.GlobalSymbols) if (!file.Symbols.ContainsKey(str)) return new Tuple<AssembleError, string>(AssembleError.UnknownSymbol, $"Global symbol \"{str}\" was never defined");
 
-            // evaluate each symbol and hole to link all internal symbols (object file should then only be dependent on external symbols)
-            foreach (Hole _hole in file.Symbols.Select(h => h.Value).Union(file.Holes.Select(h => h.Value)))
-                _hole.Evaluate(file.Symbols, out a, out floating, ref err);
+            // evaluate each symbol to link all internal symbols and minimize object file complexity
+            foreach (var entry in file.Symbols) entry.Value.Evaluate(file.Symbols, out a, out floating, ref err);
+
+            // try to eliminate as many holes as possible (we want as clean an object file as possible)
+            for (int i = file.Holes.Count - 1; i >= 0; --i)
+            {
+                switch (TryPatchHole(file.Symbols, file.Data, file.Holes[i], ref err))
+                {
+                    case PatchError.None: file.Holes.RemoveAt(i); break; // remove the hole if we solved it
+                    case PatchError.Unevaluated: break;
+                    case PatchError.Error: return new Tuple<AssembleError, string>(AssembleError.ArgError, err);
+
+                    default: throw new ArgumentException("Unknown patch error");
+                }
+
+                file.Holes[i].Hole.Evaluate(file.Symbols, out a, out floating, ref err);
+            }
 
             // return no error
             return new Tuple<AssembleError, string>(AssembleError.None, string.Empty);
@@ -4090,7 +4168,7 @@ namespace csx64
             // create a combined symbols table with predefined values
             var G_symbols = new Dictionary<string, Hole>()
             {
-                ["__prog_end__"] = new Hole() { Result = new Tuple<UInt64, bool>(res.LongLength.MakeUnsigned(), false) }
+                ["__prog_end__"] = new Hole() { IntResult = res.LongLength.MakeUnsigned() }
             };
 
             UInt64 val; // parsing locations
@@ -4146,39 +4224,28 @@ namespace csx64
             for (int i = 0; i < objs.Length; ++i)
             {
                 // patch all the holes
-                foreach (var entry in objs[i].Holes)
+                foreach (HoleData _data in objs[i].Holes)
                 {
-                    Hole hole = entry.Value.Clone(); // create a copy of the hole (so as not to corrupt object file)
+                    // create a copy of hole and data (so as not to corrupt object file)
+                    HoleData data = new HoleData { Address = _data.Address + offsets[i], Size = _data.Size, Line = _data.Line, Hole = _data.Hole.Clone() };
 
-                    // fill in the value (evaluate with local symbols first to ensure they take precedence over globals)
-                    if (hole.Evaluate(symbols[i], out val, out floating, ref err) || hole.Evaluate(G_symbols, out val, out floating, ref err))
+                    // try to patch it
+                    PatchError _err = TryPatchHole(symbols[i], res, data, ref err);
+                    if (_err == PatchError.Unevaluated) _err = TryPatchHole(G_symbols, res, data, ref err);
+                    switch (_err)
                     {
-                        /* !! IF MODIFIED HERE, MUST ALSO BE MODIFIED IN TRY APPEND HOLE !! */
+                        case PatchError.None: break;
+                        case PatchError.Unevaluated: return new Tuple<LinkError, string>(LinkError.MissingSymbol, err);
+                        case PatchError.Error: return new Tuple<LinkError, string>(LinkError.FormatError, err);
 
-                        // if it's floating-point
-                        if (floating)
-                        {
-                            // only 64-bit and 32-bit are supported
-                            switch (entry.Key.Size)
-                            {
-                                case 8: Write(res, entry.Key.Address + offsets[i], 8, val); break;
-                                case 4: Write(res, entry.Key.Address + offsets[i], 4, FloatAsUInt64((float)AsDouble(val))); break;
-
-                                default: return new Tuple<LinkError, string>(LinkError.FormatError, $"Attempt to use unsupported floating-point size");
-                            }
-                        }
-                        // otherwise it's integral
-                        else Write(res, entry.Key.Address + offsets[i], entry.Key.Size, val);
+                        default: throw new ArgumentException("Unknown patch error encountered");
                     }
-                    // if any holes fail, link fails
-                    else return new Tuple<LinkError, string>(LinkError.MissingSymbol, $"Failed to evaluate expression\n-> {err}");
                 }
             }
 
             // write the header
             if (main == null) return new Tuple<LinkError, string>(LinkError.MissingSymbol, "No entry point \"main\"");
             if (!main.Evaluate(G_symbols, out val, out floating, ref err)) return new Tuple<LinkError, string>(LinkError.MissingSymbol, $"Failed to evaluate global symbol \"main\"\n-> {err}");
-            if (floating) return new Tuple<LinkError, string>(LinkError.FormatError, "Global symbol \"main\" may not be floating point");
 
             Write(res, 0, 1, (UInt64)OPCode.JMP);
             Write(res, 1, 1, 0x80);
