@@ -10,11 +10,6 @@ namespace csx64
 {
     public static class ComputerExtensions
     {
-        public static UInt64 Negative(this UInt64 val, bool floating)
-        {
-            return floating ? Computer.AsUInt64(-Computer.AsDouble(val)) : ~val + 1;
-        }
-
         public static Int64 MakeSigned(this UInt64 val)
         {
             return (val & 0x8000000000000000) != 0 ? -(Int64)(~val + 1) : (Int64)val;
@@ -216,6 +211,36 @@ namespace csx64
             public bool le { get => Z || S != O; }
         }
 
+        // --------------------
+        // -- Execution Data --
+        // --------------------
+
+        private Register[] Registers = new Register[16];
+        private FlagsRegister Flags = new FlagsRegister();
+
+        private byte[] Memory = null;
+
+        /// <summary>
+        /// Gets the total amount of memory the processor currently has access to
+        /// </summary>
+        public UInt64 MemorySize { get => (UInt64)Memory.LongLength; }
+
+        /// <summary>
+        /// The current execution positon (executed on next tick)
+        /// </summary>
+        public UInt64 Pos { get; private set; }
+        /// <summary>
+        /// Flag marking if the program is still executing
+        /// </summary>
+        public bool Running { get; private set; }
+
+        /// <summary>
+        /// Gets the current error code
+        /// </summary>
+        public ErrorCode Error { get; private set; }
+
+        private static Random Rand = new Random();
+
         // -----------------------
         // -- Utility Functions --
         // -----------------------
@@ -346,6 +371,8 @@ namespace csx64
         // ---------------
         // -- Operators --
         // ---------------
+
+        #region
 
         // -- op utilities --
 
@@ -2229,35 +2256,7 @@ namespace csx64
             return true;
         }
 
-        // --------------------
-        // -- Execution Data --
-        // --------------------
-
-        private Register[] Registers = new Register[16];
-        private FlagsRegister Flags = new FlagsRegister();
-
-        private byte[] Memory = null;
-
-        /// <summary>
-        /// Gets the total amount of memory the processor currently has access to
-        /// </summary>
-        public UInt64 MemorySize { get => (UInt64)Memory.LongLength; }
-
-        /// <summary>
-        /// The current execution positon (executed on next tick)
-        /// </summary>
-        public UInt64 Pos { get; private set; }
-        /// <summary>
-        /// Flag marking if the program is still executing
-        /// </summary>
-        public bool Running { get; private set; }
-
-        /// <summary>
-        /// Gets the current error code
-        /// </summary>
-        public ErrorCode Error { get; private set; }
-
-        private static Random Rand = new Random();
+        #endregion
 
         // ----------------------
         // -- Public Interface --
@@ -2374,31 +2373,6 @@ namespace csx64
         /// </summary>
         protected virtual bool Syscall() { return false; }
 
-        // [8: load]   [4: dest][2: size][2: mode]   (mode = 0: [size: imm]   mode = 1: [4:][4: r]   mode = 2: [address]   mode = 3: UND)
-        private bool ProcessLoad(bool keep = true)
-        {
-            UInt64 a = 0, b = 0;
-
-            if (!GetMem(1, ref a)) return false;
-            switch (a & 3)
-            {
-                case 0: if (!GetMem(Size((a >> 2) & 3), ref b)) return false; break;
-                case 1: if (!GetMem(1, ref b)) return false; b = Registers[b & 15].x64; break;
-                case 2: if (!GetAddress(ref b) || !GetMem(b, Size((a >> 2) & 3), ref b)) return false; break;
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
-            }
-            if (keep) Registers[a >> 4].Set((a >> 2) & 3, b);
-            return true;
-        }
-        // [8: store]   [4: source][2:][2: size]   [address]
-        private bool ProcessStore(bool keep = true)
-        {
-            UInt64 a = 0, b = 0;
-
-            if (!GetMem(1, ref a) || !GetAddress(ref b)) return false;
-            return !keep || SetMem(b, Size(a & 3), Registers[a >> 4].x64);
-        }
-
         // [8: mov]   [4: source/dest][2: size][2: mode]   (mode = 0: load imm [size: imm]   mode = 1: load register [4:][4: source]   mode = 2: load memory [address]   mode = 3: store register [address])
         private bool ProcessMove(bool keep = true)
         {
@@ -2428,6 +2402,7 @@ namespace csx64
 
             return true;
         }
+
         /// <summary>
         /// Performs a single operation. Returns true if successful
         /// </summary>
@@ -3252,14 +3227,19 @@ namespace csx64
             while (pos < code.Length)
             {
                 // find the next separator
-                for (int i = pos + 1; i < code.Length; ++i)
-                    if (code[i] == '\n') { end = i; break; }
-                // if nothing found, end is end of token
-                if (pos >= end) end = code.Length;
+                end = code.Length; // if no separaor found, end of code is default terminator
+                for (int i = pos; i < code.Length; ++i)
+                    if (code[i] == '\n' || code[i] == '#') { end = i; break; }
 
                 // split line into tokens
                 string[] tokens = code.Substring(pos, end - pos).Split(new char[] { ' ', '\t', '\r' }, StringSplitOptions.RemoveEmptyEntries);
                 ++line; // advance line counter
+
+                // if the separator was a comment character, consume the rest of the line as well as noop
+                if (end < code.Length && code[end] == '#')
+                {
+                    for (; end < code.Length && code[end] != '\n'; ++end) ;
+                }
 
                 // if this marks a label
                 while (tokens.Length > 0 && tokens[0][tokens[0].Length - 1] == ':')
@@ -3283,17 +3263,6 @@ namespace csx64
                         _tokens[i - 1] = tokens[i];
                     tokens = _tokens;
                 }
-
-                // remove anything after a comment initiator
-                for (int i = 0; i < tokens.Length; ++i)
-                    if (tokens[i][0] == '#')
-                    {
-                        string[] _tokens = new string[i];
-                        for (int j = 0; j < i; ++j)
-                            _tokens[j] = tokens[j];
-                        tokens = _tokens;
-                        break;
-                    }
 
                 // empty lines are ignored
                 if (tokens.Length > 0)
