@@ -31,7 +31,7 @@ namespace csx64
         
         public enum ErrorCode
         {
-            None, OutOfBounds, UnhandledSyscall, UndefinedBehavior, Placeholder, ArithmeticError
+            None, OutOfBounds, UnhandledSyscall, UndefinedBehavior, ArithmeticError
         }
         public enum OPCode
         {
@@ -62,7 +62,7 @@ namespace csx64
             Jz, Jnz, Js, Jns, Jp, Jnp, Jo, Jno, Jc, Jnc,
 
             Fadd, Fsub, Fmul, Fdiv, Fmod,
-            Fpow, Fsqrt, Fexp, Fln, Fabs, Fcmp0,
+            Fpow, Fsqrt, Fexp, Fln, Fneg, Fabs, Fcmp0,
 
             Fsin, Fcos, Ftan,
             Fsinh, Fcosh, Ftanh,
@@ -217,7 +217,7 @@ namespace csx64
 
         private Register[] Registers = new Register[16];
         private FlagsRegister Flags = new FlagsRegister();
-
+        
         private byte[] Memory = null;
 
         /// <summary>
@@ -594,9 +594,6 @@ namespace csx64
             ZF is set if the result is zero, and cleared otherwise.
             SF is set if the result is negative (high bit set), and cleared otherwise.
             PF is set if the result has even parity in the low 8 bits, and cleared otherwise.
-            
-            CF is set if the addition caused a carry out from the high bit, and cleared otherwise.
-            OF is set if the addition resulted in arithmetic over/underflow, and cleared otherwise.
 
         OPCode Format: [8: bumod]   [4: dest][2: size][2: mode]   (mode = 0: [size: imm]   mode = 1: [4:][4: r]   mode = 2: [address]   mode = 3: UND)
         */
@@ -1061,7 +1058,7 @@ namespace csx64
         /* -- NOT --
 
         Description:
-            Computes the logical not of an unsigned integer.
+            Computes the bitwise not of an unsigned integer.
             Must be performed on a register.
 
         Operation:
@@ -1361,7 +1358,7 @@ namespace csx64
             OF is set if the result is positive or negative infinity, and cleared otherwise.
             CF is set if the result is nan, and cleared otherwise.
 
-        OPCode Format: [8: fsqrt]   [4: dest][2:][2: size]
+        OPCode Format: [8: fsqrt]   [4: dest][4:]
         */
         private bool ProcessFsqrt()
         {
@@ -1425,6 +1422,34 @@ namespace csx64
             if (!ParseUnaryOpFormat(ref s, ref a)) return false;
 
             double res = Math.Log(AsDouble(a));
+            Registers[s >> 4].x64 = AsUInt64(res);
+
+            UpdateFlagsF(res);
+
+            return true;
+        }
+        /* -- FNEG --
+
+        Description:
+            Computes the negative of a floating point value.
+            Must be performed on a register.
+
+        Operation: qword dest <- - qword dest
+
+        Flags Affected:
+            ZF is set if the result is zero, and cleared otherwise.
+            SF is set if the result is negative, and cleared otherwise.
+            OF is set if the result is positive or negative infinity, and cleared otherwise.
+            CF is set if the result is nan, and cleared otherwise.
+
+        OPCode Format: [8: fneg]   [4: dest][2:][2: size]
+        */
+        private bool ProcessFneg()
+        {
+            UInt64 s = 0, a = 0;
+            if (!ParseUnaryOpFormat(ref s, ref a)) return false;
+
+            double res = -AsDouble(a);
             Registers[s >> 4].x64 = AsUInt64(res);
 
             UpdateFlagsF(res);
@@ -2004,7 +2029,7 @@ namespace csx64
                 OF and CF are both set if there are significant bits in the high portion of the product (i.e. truncation yields a different value), and cleared otherwise.
                 SF is set if the resulting value is negative (i.e. the highest bit of the result is set).
 
-            OPCode Format: [8: umul]   [4: reg][2: size][2: mode]   (mode = 0: [size: imm]   mode = 1: use reg   mode = 2: [address]   mode = 3: UND)
+            OPCode Format: [8: smul]   [4: reg][2: size][2: mode]   (mode = 0: [size: imm]   mode = 1: use reg   mode = 2: [address]   mode = 3: UND)
         */
         private bool ProcessSMUL()
         {
@@ -2178,7 +2203,7 @@ namespace csx64
 
             Flags Affected:
                 CF is set if the resulting remainder is nonzero, and cleared otherwise.
-                SF is set if the resulting quotient is negative (i.e. highest bit of quotient is set), and cleared otherwise
+                SF is set if the resulting quotient is negative (i.e. highest bit of quotient is set), and cleared otherwise.
 
             OPCode Format: [8: sdiv]   [4: reg][2: size][2: mode]   (mode = 0: [size: imm]   mode = 1: use reg   mode = 2: [address]   mode = 3: UND)
         */
@@ -2487,8 +2512,8 @@ namespace csx64
 
                 case OPCode.Inc: return ProcessInc();
                 case OPCode.Dec: return ProcessDec();
-                case OPCode.Not: return ProcessNot();
                 case OPCode.Neg: return ProcessNeg();
+                case OPCode.Not: return ProcessNot();
                 case OPCode.Abs: return ProcessAbs();
                 case OPCode.Cmp0: return ProcessCmp0();
                 
@@ -2532,6 +2557,7 @@ namespace csx64
                 case OPCode.Fsqrt: return ProcessFsqrt();
                 case OPCode.Fexp: return ProcessFexp();
                 case OPCode.Fln: return ProcessFln();
+                case OPCode.Fneg: return ProcessFneg();
                 case OPCode.Fabs: return ProcessFabs();
                 case OPCode.Fcmp0: return ProcessFcmp0();
 
@@ -2558,7 +2584,7 @@ namespace csx64
                 case OPCode.FTOI: return ProcessFTOI();
                 case OPCode.ITOF: return ProcessITOF();
 
-                // [8: push]   [4: source][2: size][2: mode]   ([size: imm])   (mode = 0: push imm   mode = 0: push register   otherwise undefined)
+                // [8: push]   [4: source][2: size][2: mode]   ([size: imm])   (mode = 0: push imm   mode = 1: push register   otherwise undefined)
                 case OPCode.Push:
                     if (!GetMem(1, ref a)) return false;
                     switch (a & 3)
@@ -3227,9 +3253,7 @@ namespace csx64
             while (pos < code.Length)
             {
                 // find the next separator
-                end = code.Length; // if no separaor found, end of code is default terminator
-                for (int i = pos; i < code.Length; ++i)
-                    if (code[i] == '\n' || code[i] == '#') { end = i; break; }
+                for (end = pos; end < code.Length && code[end] != '\n' && code[end] != '#'; ++end) ;
 
                 // split line into tokens
                 string[] tokens = code.Substring(pos, end - pos).Split(new char[] { ' ', '\t', '\r' }, StringSplitOptions.RemoveEmptyEntries);
@@ -3237,9 +3261,7 @@ namespace csx64
 
                 // if the separator was a comment character, consume the rest of the line as well as noop
                 if (end < code.Length && code[end] == '#')
-                {
                     for (; end < code.Length && code[end] != '\n'; ++end) ;
-                }
 
                 // if this marks a label
                 while (tokens.Length > 0 && tokens[0][tokens[0].Length - 1] == ':')
@@ -3438,6 +3460,7 @@ namespace csx64
                         case "FSQRT": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Fsqrt, last_static_label, ref err)) return err; break;
                         case "FEXP": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Fexp, last_static_label, ref err)) return err; break;
                         case "FLN": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Fln, last_static_label, ref err)) return err; break;
+                        case "FNEG": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Fneg, last_static_label, ref err)) return err; break;
                         case "FABS": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Fabs, last_static_label, ref err)) return err; break;
                         case "FCMP0": if (!TryProcessUnaryOp(file, tokens, line, OPCode.Fcmp0, last_static_label, ref err)) return err; break;
 
