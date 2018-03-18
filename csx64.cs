@@ -2339,7 +2339,19 @@ namespace csx64
             public Hole Parent = null;
             public Hole Left = null, Right = null;
 
-            public string Value = null;
+            private string _Value = null;
+            private UInt64 _Result = 0;
+            private bool _Evaluated = false, _Floating = false;
+
+            public string Value
+            {
+                get { return _Value; }
+                set
+                {
+                    _Value = value; // set the value
+                    _Evaluated = false; // mark as unevaluated
+                }
+            }
 
             public bool Evaluate(Dictionary<string, Hole> symbols, out UInt64 res, out bool floating, ref string err, Stack<string> visited = null)
             {
@@ -2354,6 +2366,9 @@ namespace csx64
                 {
                     // value
                     case OPs.None:
+                        // if this has already been evaluated, return the cached result
+                        if (_Evaluated) { res = _Result; floating = _Floating; return true; }
+
                         // try several integral radicies
                         try
                         {
@@ -2362,13 +2377,13 @@ namespace csx64
                             else if (Value.StartsWith("0b")) res = Convert.ToUInt64(Value.Substring(2), 2);
                             else if (Value[0] == '0' && Value.Length > 1) res = Convert.ToUInt64(Value.Substring(1), 8);
                             else res = Convert.ToUInt64(Value, 10);
-                            
-                            return true;
+
+                            break;
                         }
                         catch (Exception) { }
 
                         // if those fail, try floating-point
-                        if (double.TryParse(Value, out double f)) { res = DoubleAsUInt64(f); floating = true; return true; }
+                        if (double.TryParse(Value, out double f)) { res = DoubleAsUInt64(f); floating = true; break; }
 
                         // if it's a character
                         if (Value[0] == '\'')
@@ -2376,7 +2391,7 @@ namespace csx64
                             if (Value.Length != 3 || Value[2] != '\'') { err = $"Ill-formed character literal encountered \"{Value}\""; return false; }
 
                             res = Value[1];
-                            return true;
+                            break;
                         }
 
                         // otherwise if it's a defined symbol
@@ -2390,7 +2405,7 @@ namespace csx64
                             visited.Push(Value); // mark value as visited
 
                             // if we can't evaluate it, fail
-                            if (!hole.Evaluate(symbols, out res, out floating, ref err)) { err = $"Failed to evaluate referenced symbol \"{Value}\"\n-> {err}"; return false; }// error message generated in the recursion
+                            if (!hole.Evaluate(symbols, out res, out floating, ref err)) { err = $"Failed to evaluate referenced symbol \"{Value}\"\n-> {err}"; return false; }
 
                             visited.Pop(); // unmark value (must be done for diamond expressions i.e. a=b+c, b=d, c=d, d=0)
 
@@ -2509,11 +2524,12 @@ namespace csx64
                         break;
                     case OPs.Int:
                         if (!Left.Evaluate(symbols, out L, out LF, ref err)) return false;
-                        res = ((Int64)AsDouble(L)).MakeUnsigned();
+                        res = LF ? ((Int64)AsDouble(L)).MakeUnsigned() : L;
                         break;
                     case OPs.Float:
                         if (!Left.Evaluate(symbols, out L, out LF, ref err)) return false;
-                        res = DoubleAsUInt64((double)L.MakeSigned()); floating = true;
+                        res = LF ? L : DoubleAsUInt64((double)L.MakeSigned());
+                        floating = true;
                         break;
 
                     default: err = "Unknown operation"; return false;
@@ -2521,52 +2537,107 @@ namespace csx64
 
                 // since we got a value, turn this into a leaf so future accesses are faster
                 OP = OPs.None; Left = Right = null;
-                Value = floating ? AsDouble(res).ToString("e17") : res.ToString();
+
+                // cache the result
+                _Evaluated = true;
+                _Result = res;
+                _Floating = floating;
 
                 return true;
             }
 
             public Hole Clone()
             {
-                return new Hole() { OP = OP, Left = Left?.Clone(), Right = Right?.Clone(), Value = Value };
+                return new Hole()
+                {
+                    OP = OP,
+                    Left = Left?.Clone(),
+                    Right = Right?.Clone(),
+
+                    _Value = _Value,
+
+                    _Evaluated = _Evaluated,
+                    _Result = _Result,
+                    _Floating = _Floating
+                };
             }
             public Hole Clone(string from, string to)
             {
-                return new Hole() { OP = OP, Left = Left?.Clone(from, to), Right = Right?.Clone(from, to), Value = from == Value ? to : Value };
+                Hole temp = new Hole() { OP = OP, Left = Left?.Clone(from, to), Right = Right?.Clone(from, to) };
+
+                // if this is a replacement, swap for new value
+                if (Value == from)
+                {
+                    temp._Value = to;
+                    temp._Evaluated = false;
+                }
+                // otherwise copy cache data
+                else
+                {
+                    temp._Value = _Value;
+
+                    temp._Evaluated = _Evaluated;
+                    temp._Result = _Result;
+                    temp._Floating = _Floating;
+                }
+
+                return temp;
+            }
+            public Hole Clone(string from, UInt64 to, bool floating)
+            {
+                Hole temp = new Hole() { OP = OP, Left = Left?.Clone(from, to, floating), Right = Right?.Clone(from, to, floating) };
+
+                if (Value == from)
+                {
+                    temp._Evaluated = true;
+                    temp._Result = to;
+                    temp._Floating = floating;
+                }
+                else
+                {
+                    temp._Value = _Value;
+
+                    temp._Evaluated = _Evaluated;
+                    temp._Result = _Result;
+                    temp._Floating = _Floating;
+                }
+
+                return temp;
             }
 
             public bool Find(string value, Stack<Hole> path)
             {
                 path.Push(this);
 
-                switch (OP)
+                if (OP == OPs.None)
                 {
-                    case OPs.None: if (value == Value) return true; else { path.Pop(); return false; }
-
-                    case OPs.Neg: case OPs.BitNot: case OPs.LogNot: case OPs.Int:
-                        if (Left.Find(value, path)) return true;
-                        else { path.Pop(); return false; }
-
-                    default:
-                        if (Left.Find(value, path) || Right.Find(value, path)) return true;
-                        else { path.Pop(); return false; }
+                    if (value == Value) return true;
                 }
+                else
+                {
+                    if (Left.Find(value, path) || Right != null && Right.Find(value, path)) return true;
+                }
+
+                path.Pop();
+                return false;
             }
             public Hole Find(string value)
             {
-                switch (OP)
-                {
-                    case OPs.None: return Value == value ? this : null;
+                if(OP == OPs.None) return Value == value ? this : null;
+                else return Left.Find(value) ?? Right?.Find(value);
+            }
 
-                    case OPs.Neg:
-                    case OPs.BitNot:
-                    case OPs.LogNot:
-                    case OPs.Int:
-                        return Left.Find(value);
+            public static void Swap(Hole a, Hole b)
+            {
+                Utility.Swap(ref a.OP, ref b.OP);
 
-                    default:
-                        return Left.Find(value) ?? Right.Find(value);
-                }
+                Utility.Swap(ref a.Left, ref b.Left);
+                Utility.Swap(ref a.Right, ref b.Right);
+
+                Utility.Swap(ref a._Value, ref b._Value);
+                Utility.Swap(ref a._Result, ref b._Result);
+                Utility.Swap(ref a._Evaluated, ref b._Evaluated);
+                Utility.Swap(ref a._Floating, ref b._Floating);
             }
         }
         internal struct HoleData
@@ -2779,7 +2850,7 @@ namespace csx64
             { Hole.OPs.LogAnd, 14 },
             { Hole.OPs.LogOr, 15 }
         };
-        private static readonly List<char> UnaryOps = new List<char>() { '+', '-', '~', '!', '%' };
+        private static readonly List<char> UnaryOps = new List<char>() { '+', '-', '~', '!', '*', '/' };
 
         private static bool TryGetOp(string token, int pos, out Hole.OPs op, out int oplen)
         {
@@ -2910,6 +2981,8 @@ namespace csx64
                             case '-': temp = new Hole() { OP = Hole.OPs.Neg, Left = temp }; break;
                             case '~': temp = new Hole() { OP = Hole.OPs.BitNot, Left = temp }; break;
                             case '!': temp = new Hole() { OP = Hole.OPs.LogNot, Left = temp }; break;
+                            case '*': temp = new Hole() { OP = Hole.OPs.Float, Left = temp }; break;
+                            case '/': temp = new Hole() { OP = Hole.OPs.Int, Left = temp }; break;
 
                             default: throw new NotImplementedException($"unary op \'{uop}\' not implemented");
                         }
@@ -3248,6 +3321,9 @@ namespace csx64
                 Utility.Swap(ref n1, ref n2);
             }
 
+            // now that all that processing is done, we want the base imm to definitely be an integer
+            hole = new Hole() { OP = Hole.OPs.Int, Left = hole };
+
             // if we can evaluate the hole
             if (hole.Evaluate(args.file.Symbols, out UInt64 hole_val, out bool floating, ref err))
             {
@@ -3397,16 +3473,16 @@ namespace csx64
                 if (args.args[i].Length == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Emission encountered empty argument"); return false; }
 
                 // if a multiplier
-                if (args.args[i][0] == 'x')
+                if (args.args[i][0] == '#')
                 {
                     // get the multiplier and ensure is valid
                     if (!TryParseInstantImm(args, args.args[i].Substring(1), out mult, out floating)) return false;
                     if (floating) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Emission multiplier cannot be floating point"); return false; }
-                    if (mult > EmissionMaxMultiplier) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Emission multiplier cannot exceed {EmissionMaxMultiplier}"); return false; }
+                    if (mult > EmissionMaxMultiplier) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Emission multiplier cannot exceed {EmissionMaxMultiplier}. Got {mult}"); return false; }
                     if (mult == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Emission multiplier cannot be zero"); return false; }
 
                     // account for first written value
-                    if (i > 0 && args.args[i - 1][0] != 'x') --mult;
+                    if (i > 0 && args.args[i - 1][0] != '#') --mult;
 
                     for (UInt64 j = 0; j < mult; ++j)
                         if (!TryAppendHole(args, Size(args.sizecode), hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
@@ -3521,37 +3597,6 @@ namespace csx64
             bool floating;
 
             string err = null; // error location for evaluation
-
-
-
-
-
-            /* expression testing
-
-            //"~~--(1+2)*(~-(3+4)+1)"
-            string test = "[((8/2)*(2+2))*($10+$11)]";//"~~--(1+2)*(~-(3+4)+1)";
-            Hole _test;
-            if (!TryParseAddress(args, test, out a, out b, out _test)) MessageBox.Show(args.err.Item2);
-            else
-            {
-                StringBuilder str = new StringBuilder();
-                printimmnew(_test, str);
-
-                MessageBox.Show($"postorder: {str}");
-
-                if (!_test.Evaluate(args.file.Symbols, out UInt64 _val, out bool _float, ref err)) MessageBox.Show(err);
-                else MessageBox.Show(_test.Value);
-                //else MessageBox.Show($"{(_float ? "float" : "int")}: {(_float ? AsDouble(_val).ToString() : _val.MakeSigned().ToString())}");
-            }
-
-            */
-
-
-            
-
-
-
-
 
             if (code.Length == 0) return new Tuple<AssembleError, string>(AssembleError.EmptyFile, "The file was empty");
 
@@ -3954,6 +3999,8 @@ namespace csx64
 
             string err = null; // error location for evaluation
 
+            Hole main = null; // entry point expression
+
             // -------------------------------------------
 
             // merge the files into res
@@ -3971,8 +4018,8 @@ namespace csx64
                 // create temporary symbols dictionary
                 symbols[i] = new Dictionary<string, Hole>(objs[i].Symbols.Count);
 
-                // populate temporary symbols (define #base)
-                foreach (var symbol in objs[i].Symbols) symbols[i].Add(symbol.Key, symbol.Value.Clone("#base", offsets[i].ToString()));
+                // populate local symbols (define #base)
+                foreach (var symbol in objs[i].Symbols) symbols[i].Add(symbol.Key, symbol.Value.Clone("#base", offsets[i], false));
 
                 // merge global symbols
                 foreach (string symbol in objs[i].GlobalSymbols)
@@ -3984,9 +4031,16 @@ namespace csx64
 
                     // add to global symbols
                     G_symbols.Add(symbol, hole);
-                }
 
-                // link this object's holes
+                    // if this is main
+                    if (symbol == "main")
+                    {
+                        // mark as main
+                        main = hole;
+                        // link to local symbols (won't be done later cause it's not a hole) (can't be a hole cause file order is undefined)
+                        main.Evaluate(symbols[i], out val, out floating, ref err);
+                    }
+                }
             }
 
             // for each object file
@@ -3997,10 +4051,10 @@ namespace csx64
                 {
                     Hole hole = entry.Value.Clone(); // create a copy of the hole (so as not to corrupt object file)
 
-                    // fill in the value
+                    // fill in the value (evaluate with local symbols first to ensure they take precedence over globals)
                     if (hole.Evaluate(symbols[i], out val, out floating, ref err) || hole.Evaluate(G_symbols, out val, out floating, ref err))
                     {
-                        /* !! IF MODIFIED HERE, MUST ALSO BE MODIFIED IN LINKER HOLE PATCHING !! */
+                        /* !! IF MODIFIED HERE, MUST ALSO BE MODIFIED IN TRY APPEND HOLE !! */
 
                         // if it's floating-point
                         if (floating)
@@ -4023,7 +4077,7 @@ namespace csx64
             }
 
             // write the header
-            if (!G_symbols.TryGetValue("main", out Hole main)) return new Tuple<LinkError, string>(LinkError.MissingSymbol, "No entry point \"main\"");
+            if (main == null) return new Tuple<LinkError, string>(LinkError.MissingSymbol, "No entry point \"main\"");
             if (!main.Evaluate(G_symbols, out val, out floating, ref err)) return new Tuple<LinkError, string>(LinkError.MissingSymbol, $"Failed to evaluate global symbol \"main\"\n-> {err}");
             if (floating) return new Tuple<LinkError, string>(LinkError.FormatError, "Global symbol \"main\" may not be floating point");
 
