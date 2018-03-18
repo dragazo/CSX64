@@ -2113,40 +2113,45 @@ namespace csx64
         {
             UInt64 a, b, c, d; // parsing temporaries
             Hole hole1, hole2;
+            int off = 0; // token offset (for default size code)
 
-            if (args.tokens.Length != 4) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: Binary OP expected 3 args"); return false; }
-            if (!TryParseSizecode(args, args.tokens[1], out a)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: {op} expected size parameter as first arg\n-> {args.err.Item2}"); return false; }
+            // 4 args specifies explicit size
+            if (args.tokens.Length == 4) { if (!TryParseSizecode(args, args.tokens[1], out a)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: {op} expected size parameter as first arg\n-> {args.err.Item2}"); return false; } }
+            // 3 args uses default size
+            else if (args.tokens.Length == 3) { a = 3; off = -1; }
+            // otherwise, error
+            else { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: {op} expected 2 args (3 for explicit size)"); return false; }
 
             Append(args.file, 1, (UInt64)op);
 
-            if (TryParseRegister(args, args.tokens[2], out b))
+            if (TryParseRegister(args, args.tokens[2 + off], out b))
             {
-                if (TryParseImm(args, args.tokens[3], out hole1))
+                if (TryParseImm(args, args.tokens[3 + off], out hole1))
                 {
                     Append(args.file, 1, (b << 4) | (a << 2) | 0);
                     Append(args.file, Size(a), hole1);
                 }
-                else if (TryParseAddress(args, args.tokens[3], out c, out d, out hole1))
+                else if (TryParseAddress(args, args.tokens[3 + off], out c, out d, out hole1))
                 {
                     Append(args.file, 1, (b << 4) | (a << 2) | 1);
                     AppendAddress(args.file, c, d, hole1);
                 }
-                else if (TryParseRegister(args, args.tokens[3], out c))
+                else if (TryParseRegister(args, args.tokens[3 + off], out c))
                 {
                     Append(args.file, 1, (b << 4) | (a << 2) | 2);
                     Append(args.file, 1, c);
                 }
                 else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Unknown usage of {op}"); return false; }
             }
-            else if (TryParseAddress(args, args.tokens[2], out b, out c, out hole1))
+            else if (TryParseAddress(args, args.tokens[2 + off], out b, out c, out hole1))
             {
-                if (TryParseRegister(args, args.tokens[3], out d))
+                if (TryParseRegister(args, args.tokens[3 + off], out d))
                 {
                     Append(args.file, 1, (a << 2) | 2);
                     Append(args.file, 1, 16 | d);
                     AppendAddress(args.file, b, c, hole1);
                 }
-                else if (TryParseImm(args, args.tokens[3], out hole2))
+                else if (TryParseImm(args, args.tokens[3 + off], out hole2))
                 {
                     Append(args.file, 1, (a << 2) | 3);
                     Append(args.file, Size(a), hole2);
@@ -2162,17 +2167,22 @@ namespace csx64
         {
             UInt64 a, b;
             Hole hole;
+            int off = 0; // token offset (for default size code)
 
-            if (args.tokens.Length != 3) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: Unary OP expected 2 args"); return false; }
-            if (!TryParseSizecode(args, args.tokens[1], out a)) { args.err = new Tuple<AssembleError, string>(AssembleError.MissingSize, $"line {args.line}: {op} expected size parameter as first arg\n-> {args.err.Item2}"); return false; }
+            // 3 args specifies explicit size
+            if (args.tokens.Length == 3) { if (!TryParseSizecode(args, args.tokens[1], out a)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: {op} expected size parameter as first arg\n-> {args.err.Item2}"); return false; } }
+            // 2 args uses default size
+            else if (args.tokens.Length == 2) { a = 3; off = -1; }
+            // otherwise, error
+            else { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: {op} expected 1 arg (2 for explicit size)"); return false; }
 
             Append(args.file, 1, (UInt64)op);
 
-            if (TryParseRegister(args, args.tokens[2], out b))
+            if (TryParseRegister(args, args.tokens[2 + off], out b))
             {
                 Append(args.file, 1, (b << 4) | (a << 2) | 0);
             }
-            else if (TryParseAddress(args, args.tokens[2], out a, out b, out hole))
+            else if (TryParseAddress(args, args.tokens[2 + off], out a, out b, out hole))
             {
                 Append(args.file, 1, (a << 2) | 1);
                 AppendAddress(args.file, a, b, hole);
