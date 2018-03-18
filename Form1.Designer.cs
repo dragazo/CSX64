@@ -37,6 +37,7 @@
             this.StopButton = new System.Windows.Forms.Button();
             this.CodeBox = new System.Windows.Forms.TextBox();
             this.PauseButton = new System.Windows.Forms.Button();
+            this.button1 = new System.Windows.Forms.Button();
             this.SuspendLayout();
             // 
             // TickButton
@@ -130,6 +131,7 @@
             this.CodeBox.ScrollBars = System.Windows.Forms.ScrollBars.Both;
             this.CodeBox.Size = new System.Drawing.Size(528, 291);
             this.CodeBox.TabIndex = 7;
+            this.CodeBox.WordWrap = false;
             this.CodeBox.KeyDown += new System.Windows.Forms.KeyEventHandler(this.CodeBox_KeyDown);
             // 
             // PauseButton
@@ -143,12 +145,24 @@
             this.PauseButton.UseVisualStyleBackColor = true;
             this.PauseButton.Click += new System.EventHandler(this.PauseButton_Click);
             // 
+            // button1
+            // 
+            this.button1.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
+            this.button1.Location = new System.Drawing.Point(284, 381);
+            this.button1.Name = "button1";
+            this.button1.Size = new System.Drawing.Size(75, 23);
+            this.button1.TabIndex = 9;
+            this.button1.Text = "Test";
+            this.button1.UseVisualStyleBackColor = true;
+            this.button1.Click += new System.EventHandler(this.button1_Click);
+            // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.Color.Black;
             this.ClientSize = new System.Drawing.Size(915, 474);
+            this.Controls.Add(this.button1);
             this.Controls.Add(this.PauseButton);
             this.Controls.Add(this.CodeBox);
             this.Controls.Add(this.StopButton);
@@ -178,6 +192,7 @@
         private System.Windows.Forms.Button StopButton;
         private System.Windows.Forms.Button PauseButton;
         private System.Windows.Forms.TextBox CodeBox;
+        private System.Windows.Forms.Button button1;
     }
 }
 

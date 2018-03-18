@@ -46,6 +46,7 @@ namespace csx64
             base.OnPaint(e);
 
             Graphics g = e.Graphics;
+            Computer.FlagsRegister f = C.GetFlags();
 
             float x, y;
             SolidBrush brush = new SolidBrush(Color.LimeGreen);
@@ -54,26 +55,23 @@ namespace csx64
 
             x = 0; y = 0;
             g.DrawString("Registers", font, brush, x, y); y += h;
-            for (ulong i = 0; i < Computer.NRegisters; ++i)
-            {
-                y += h;
-                g.DrawString($"R{i:x}: {C.GetRegister(i).x64:x16}", font, brush, x, y);
-            }
+            for (ulong i = 0; i < 16; ++i)
+                g.DrawString($"R{i:x}: {C.GetRegister(i).x64:x16}", font, brush, x, y += h);
 
             x = 400; y = 0;
-            g.DrawString("Flags", font, brush, x, y); y += h * 2;
-            g.DrawString($"Z: {(C.GetFlags().Z ? 1 : 0)}", font, brush, x, y); y += h;
-            g.DrawString($"S: {(C.GetFlags().S ? 1 : 0)}", font, brush, x, y); y += h;
-            g.DrawString($"P: {(C.GetFlags().P ? 1 : 0)}", font, brush, x, y); y += h;
-            g.DrawString($"O: {(C.GetFlags().O ? 1 : 0)}", font, brush, x, y); y += h;
-            g.DrawString($"C: {(C.GetFlags().C ? 1 : 0)}", font, brush, x, y); y += h;
+            g.DrawString("Flags", font, brush, x, y); y += h;
+            g.DrawString($"Z: {(f.Z ? 1 : 0)}", font, brush, x, y += h);
+            g.DrawString($"S: {(f.S ? 1 : 0)}", font, brush, x, y += h);
+            g.DrawString($"P: {(f.P ? 1 : 0)}", font, brush, x, y += h);
+            g.DrawString($"O: {(f.O ? 1 : 0)}", font, brush, x, y += h);
+            g.DrawString($"C: {(f.C ? 1 : 0)}", font, brush, x, y += h);
 
             x = 550; y = 0;
-            g.DrawString("State", font, brush, x, y); y += h * 2;
-            g.DrawString($"Pos: {C.Pos:x16}", font, brush, x, y); y += h;
-            g.DrawString($"Exe: {(C.Running ? 1 : 0)}", font, brush, x, y); y += h;
-            g.DrawString($"Err: {C.Error}", font, brush, x, y); y += h;
-            g.DrawString($"T  : {Ticks:x16}", font, brush, x, y); y += h;
+            g.DrawString("State", font, brush, x, y); y += h;
+            g.DrawString($"Pos: {C.Pos:x16}", font, brush, x, y += h);
+            g.DrawString($"Exe: {(C.Running ? 1 : 0)}", font, brush, x, y += h);
+            g.DrawString($"Err: {C.Error}", font, brush, x, y += h);
+            g.DrawString($"T  : {Ticks:x16}", font, brush, x, y += h);
         }
 
         private void Tick(ulong n)
@@ -97,18 +95,14 @@ namespace csx64
             if (assemble_res.Item1 != Computer.AssembleError.None) { MessageBox.Show(assemble_res.Item2, "Assemble Error"); return; }
 
             byte[] exe = null;
-            var link_res = Computer.Link(8, ref exe, file);
+            var link_res = Computer.Link(ref exe, file);
             if (link_res.Item1 != Computer.LinkError.None) { MessageBox.Show(link_res.Item2, "Link Error"); return; }
             
-
             /*
             StringBuilder b = new StringBuilder();
             for (int i = 0; i < exe.Length; ++i)
                 b.Append($"{i.ToString().PadLeft(3, '0')}: {exe[i].ToString().PadLeft(3, '0')} - {Convert.ToString(exe[i], 2).PadLeft(8, '0')}\n");
             MessageBox.Show(b.ToString());
-
-            MessageBox.Show($"{Computer.ConvertDouble(Math.PI):x16}");
-
             */
 
             C.Initialize(exe);
@@ -181,6 +175,13 @@ namespace csx64
                 CodeBox.Paste("\r\n" + CodeBox.Text.Substring(start, count));
                 e.SuppressKeyPress = true;
             }
+        }
+
+        private void button1_Click(object sender, EventArgs e)
+        {
+            Computer.FlagsRegister f = C.GetFlags();
+            MessageBox.Show($"a: {(f.a ? 1 : 0)}\nae: {(f.ae ? 1 : 0)}\nb: {(f.b ? 1 : 0)}\nbe: {(f.be ? 1 : 0)}\n" +
+                $"g: {(f.g ? 1 : 0)}\nge: {(f.ge ? 1 : 0)}\nl: {(f.l ? 1 : 0)}\nle: {(f.le ? 1 : 0)}");
         }
     }
 }
