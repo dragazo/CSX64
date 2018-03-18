@@ -60,7 +60,7 @@ namespace csx64
 
             SWAP,
 
-            UEXTEND, SEXTEND,
+            UX, SX,
 
             UMUL, SMUL, UDIV, SDIV,
 
@@ -99,7 +99,7 @@ namespace csx64
 
             LOOP,
 
-            FEXTEND
+            FX
         }
 
         /// <summary>
@@ -418,12 +418,12 @@ namespace csx64
 	        mode = 3: [size: imm]   [address]
 		        M[address] <- imm
         */
-        private bool FetchBinaryOpFormat(ref UInt64 s, ref UInt64 m, ref UInt64 a, ref UInt64 b, int _a_sizecode = -1, int _b_sizecode = -1)
+        private bool FetchBinaryOpFormat(ref UInt64 s, ref UInt64 m, ref UInt64 a, ref UInt64 b, int _b_sizecode = -1)
         {
             // read settings
             if (!GetMemAdv(1, ref s)) return false;
 
-            UInt64 a_sizecode = _a_sizecode == -1 ? (s >> 2) & 3 : (UInt64)_a_sizecode;
+            UInt64 a_sizecode = (s >> 2) & 3;
             UInt64 b_sizecode = _b_sizecode == -1 ? (s >> 2) & 3 : (UInt64)_b_sizecode;
 
             // switch through mode
@@ -460,9 +460,9 @@ namespace csx64
 
             return true;
         }
-        private bool StoreBinaryOpFormat(UInt64 s, UInt64 m, UInt64 res, int _sizecode = -1)
+        private bool StoreBinaryOpFormat(UInt64 s, UInt64 m, UInt64 res)
         {
-            UInt64 sizecode = _sizecode == -1 ? (s >> 2) & 3 : (UInt64)_sizecode;
+            UInt64 sizecode = (s >> 2) & 3;
 
             // switch through mode
             switch (s & 3)
@@ -490,12 +490,12 @@ namespace csx64
 	        mem = 1: [address]
 		        M[address] <- M[address]
         */
-        private bool FetchUnaryOpFormat(ref UInt64 s, ref UInt64 m, ref UInt64 a, int _a_sizecode = -1)
+        private bool FetchUnaryOpFormat(ref UInt64 s, ref UInt64 m, ref UInt64 a)
         {
             // read settings
             if (!GetMemAdv(1, ref s)) return false;
 
-            UInt64 a_sizecode = _a_sizecode == -1 ? (s >> 2) & 3 : (UInt64)_a_sizecode;
+            UInt64 a_sizecode = (s >> 2) & 3;
 
             // switch through mode
             switch (s & 1)
@@ -510,9 +510,9 @@ namespace csx64
 
             return true;
         }
-        private bool StoreUnaryOpFormat(UInt64 s, UInt64 m, UInt64 res, int _sizecode = -1)
+        private bool StoreUnaryOpFormat(UInt64 s, UInt64 m, UInt64 res)
         {
-            UInt64 sizecode = _sizecode == -1 ? (s >> 2) & 3 : (UInt64)_sizecode;
+            UInt64 sizecode = (s >> 2) & 3;
 
             // switch through mode
             switch (s & 1)
@@ -1885,7 +1885,7 @@ namespace csx64
         private bool ProcessBEXTR()
         {
             UInt64 s = 0, m = 0, a = 0, b = 0;
-            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b, -1, 1)) return false;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b, 1)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
             ushort pos = (ushort)((b >> 8) % SizeBits(sizecode));
@@ -2145,8 +2145,8 @@ namespace csx64
 
                 case OPCode.SWAP: return ProcessSWAP();
 
-                case OPCode.UEXTEND: if (!GetMemAdv(1, ref a)) return false; Registers[a >> 4].Set(a & 3, Registers[a >> 4].Get((a >> 2) & 3)); return true;
-                case OPCode.SEXTEND: if (!GetMemAdv(1, ref a)) return false; Registers[a >> 4].Set(a & 3, SignExtend(Registers[a >> 4].Get((a >> 2) & 3), (a >> 2) & 3)); return true;
+                case OPCode.UX: if (!GetMemAdv(1, ref a)) return false; Registers[a >> 4].Set(a & 3, Registers[a >> 4].Get((a >> 2) & 3)); return true;
+                case OPCode.SX: if (!GetMemAdv(1, ref a)) return false; Registers[a >> 4].Set(a & 3, SignExtend(Registers[a >> 4].Get((a >> 2) & 3), (a >> 2) & 3)); return true;
 
                 case OPCode.UMUL: return ProcessUMUL();
                 case OPCode.SMUL: return ProcessSMUL();
@@ -2284,7 +2284,7 @@ namespace csx64
                     if (c != 0) Pos = b;
                     return true;
 
-                case OPCode.FEXTEND:
+                case OPCode.FX:
                     if (!GetMemAdv(1, ref a)) return false;
                     switch ((a >> 2) & 3)
                     {
@@ -2568,12 +2568,12 @@ namespace csx64
                         break;
 
                     case OPs.LogAnd:
-                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
-                        res = (L != 0 && R != 0) ? 1 : 0ul;
+                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || L != 0 && !Right.Evaluate(symbols, out L, out LF, ref err)) return false;
+                        res = L != 0 ? 1 : 0ul;
                         break;
                     case OPs.LogOr:
-                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
-                        res = (L != 0 || R != 0) ? 1 : 0ul;
+                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || L == 0 && !Right.Evaluate(symbols, out L, out LF, ref err)) return false;
+                        res = L != 0 ? 1 : 0ul;
                         break;
 
                     // unary ops
@@ -3339,8 +3339,10 @@ namespace csx64
             }
         }
 
-        private static bool TryParseAddressReg(AssembleArgs args, string label, ref Expr hole, ref UInt64 m, ref bool neg)
+        private static bool TryParseAddressReg(AssembleArgs args, string label, ref Expr hole, out UInt64 m, out bool neg)
         {
+            m = 0; neg = false; // initialize out params
+
             Stack<Expr> path = new Stack<Expr>();
             List<Expr> list = new List<Expr>();
 
@@ -3467,10 +3469,6 @@ namespace csx64
                     }
                 }
 
-                // find the top binary operator in the path
-                //int top;
-                //for (top = list.Count - 1; list[top].OP != Hole.OPs.Add && list[top].OP != Hole.OPs.Sub && list[top].OP != Hole.OPs.None; --top) ;
-
                 // remove the register section from the expression (replace with integral 0)
                 list[1].OP = Expr.OPs.None;
                 list[1].Left = list[1].Right = null;
@@ -3511,7 +3509,9 @@ namespace csx64
             if (token.Length < 3 || token[0] != '[' || token[token.Length - 1] != ']') { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Invalid address format encountered \"{token}\""); return false; }
 
             int pos, end; // parsing positions
-            UInt64 temp;  // parsing location
+
+            UInt64 temp = 0; // parsing temporaries
+            bool btemp = false;
 
             int reg_count = 0; // number of registers parsed
             UInt64 r1 = 0, m1 = 0, r2 = 0, m2 = 0; // final register info
@@ -3519,6 +3519,8 @@ namespace csx64
 
             string preface = $"__{Time():x16}"; // preface used for registers
             string err = string.Empty; // evaluation error
+
+            List<UInt64> regs = new List<UInt64>(); // the registers found in the expression
 
             // until register parsing reaches the end of the token
             while (true)
@@ -3554,19 +3556,32 @@ namespace csx64
                 if (!TryParseRegister(args, token.Substring(pos, end - pos), out temp)) return false;
 
                 // put it in a register slot
-                if (reg_count == 0) { r1 = temp; ++reg_count; } else if (r1 == temp) { r1 = temp; }
-                else if (reg_count == 1) { r2 = temp; ++reg_count; } else if (r2 == temp) { r2 = temp; }
-                else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Can't use more than 2 registers to specify an address"); return false; }
+                if (!regs.Contains(temp)) regs.Add(temp);
 
                 // modify the register label in the expression to be a legal symbol name
                 token = $"{token.Substring(0, pos)}{preface}_{temp}{token.Substring(end)}";
             }
             
             // turn into an expression
-            if (!TryParseImm(args, token.Substring(1, token.Length - 2), out hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse addres expression\n-> {args.err.Item2}"); return false; }
+            if (!TryParseImm(args, token.Substring(1, token.Length - 2), out hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse address expression\n-> {args.err.Item2}"); return false; }
 
-            if (reg_count >= 1 && !TryParseAddressReg(args, $"{preface}_{r1}", ref hole, ref m1, ref n1)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to extract register data\n-> {args.err.Item2}"); return false; }
-            if (reg_count >= 2 && !TryParseAddressReg(args, $"{preface}_{r2}", ref hole, ref m2, ref n2)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to extract register data\n-> {args.err.Item2}"); return false; }
+            // look through each register found
+            foreach (UInt64 reg in regs)
+            {
+                // get the register data
+                if (!TryParseAddressReg(args, $"{preface}_{reg}", ref hole, out temp, out btemp)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to extract register data\n-> {args.err.Item2}"); return false; }
+
+                // if the multiplier was nonzero, the register is really being used
+                if (temp != 0)
+                {
+                    // put it into an available r slot
+                    if (reg_count == 0) { r1 = reg; m1 = temp; n1 = btemp; }
+                    else if (reg_count == 1) { r2 = reg; m2 = temp; n2 = btemp; }
+                    else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Can't use more than 2 registers to specify an address"); return false; }
+
+                    ++reg_count; // mark this slot as filled
+                }
+            }
 
             // make sure only one register is negative
             if (n1 && n2) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Only one register may be negative in an address expression"); return false; }
@@ -3578,15 +3593,8 @@ namespace csx64
                 Utility.Swap(ref n1, ref n2);
             }
 
-            // now that all that processing is done, we want the base imm to definitely be an integer
-            hole = new Expr() { OP = Expr.OPs.Int, Left = hole };
-
-            // if we can evaluate the hole
-            if (hole.Evaluate(args.file.Symbols, out UInt64 hole_val, out bool floating, ref err))
-            {
-                // if it's zero, there is no hole (set to null)
-                if (hole_val == 0) hole = null;
-            }
+            // if we can evaluate the hole to zero, there is no hole (null it)
+            if (hole.Evaluate(args.file.Symbols, out temp, out btemp, ref err) && temp == 0) hole = null;
 
             // -- apply final touches -- //
 
@@ -3715,9 +3723,9 @@ namespace csx64
             // reg
             if (args.args[0][0] == '$')
             {
-                if (!TryParseRegister(args, args.args[0], out b)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[0]}\" as a register\n-> {args.err.Item2}"); return false; }
+                if (!TryParseRegister(args, args.args[0], out a)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[0]}\" as a register\n-> {args.err.Item2}"); return false; }
 
-                AppendVal(args, 1, (b << 4) | (args.sizecode << 2) | 0);
+                AppendVal(args, 1, (a << 4) | (args.sizecode << 2) | 0);
             }
             // mem
             else if (args.args[0][0] == '[')
@@ -3990,8 +3998,8 @@ namespace csx64
                         case "MOVNZ": case "MOVNE": if (!TryProcessBinaryOp(args, OPCode.MOVnz)) return args.err; break;
                         case "MOVS": if (!TryProcessBinaryOp(args, OPCode.MOVs)) return args.err; break;
                         case "MOVNS": if (!TryProcessBinaryOp(args, OPCode.MOVns)) return args.err; break;
-                        case "MOVP": if (!TryProcessBinaryOp(args, OPCode.MOVp)) return args.err; break;
-                        case "MOVNP": if (!TryProcessBinaryOp(args, OPCode.MOVnp)) return args.err; break;
+                        case "MOVP": case "MOVPE": if (!TryProcessBinaryOp(args, OPCode.MOVp)) return args.err; break;
+                        case "MOVNP": case "MOVPO": if (!TryProcessBinaryOp(args, OPCode.MOVnp)) return args.err; break;
                         case "MOVO": if (!TryProcessBinaryOp(args, OPCode.MOVo)) return args.err; break;
                         case "MOVNO": if (!TryProcessBinaryOp(args, OPCode.MOVno)) return args.err; break;
                         case "MOVC": if (!TryProcessBinaryOp(args, OPCode.MOVc)) return args.err; break;
@@ -4002,38 +4010,57 @@ namespace csx64
 
                             AppendVal(args, 1, (UInt64)OPCode.SWAP);
 
-                            if (TryParseRegister(args, args.args[0], out a))
+                            // reg, *
+                            if (args.args[0][0] == '$')
                             {
-                                if (TryParseRegister(args, args.args[1], out b))
+                                if(!TryParseRegister(args, args.args[0], out a)) return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[0]}\" as a register\n-> {args.err.Item2}");
+
+                                // reg, reg
+                                if (args.args[1][0] == '$')
                                 {
+                                    if(!TryParseRegister(args, args.args[1], out b)) return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[1]}\" as a register\n-> {args.err.Item2}");
+
                                     AppendVal(args, 1, (a << 4) | (args.sizecode << 2) | 0);
                                     AppendVal(args, 1, b);
                                 }
-                                else if (TryParseAddress(args, args.args[1], out b, out c, out hole))
+                                // reg, mem
+                                else if (args.args[1][0] == '[')
                                 {
+                                    if(!TryParseAddress(args, args.args[1], out b, out c, out hole)) return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[1]}\" as an address\n-> {args.err.Item2}");
+
                                     AppendVal(args, 1, (a << 4) | (args.sizecode << 2) | 1);
                                     if (!TryAppendAddress(args, b, c, hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}");
                                 }
-                                else return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Unknown usage of SWAP");
+                                // reg, imm
+                                else return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Cannot use SWAP with an imm");
                             }
-                            else if (TryParseAddress(args, args.args[0], out a, out b, out hole))
+                            // mem, *
+                            else if (args.args[0][0] == '[')
                             {
-                                if (TryParseRegister(args, args.args[1], out c))
+                                if(!TryParseAddress(args, args.args[0], out a, out b, out hole)) return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[0]}\" as an address\n-> {args.err.Item2}");
+
+                                // mem, reg
+                                if (args.args[1][0] == '$')
                                 {
+                                    if (!TryParseRegister(args, args.args[1], out c)) return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[1]}\" as a register\n-> {args.err.Item2}");
+
                                     AppendVal(args, 1, (c << 4) | (args.sizecode << 2) | 1);
                                     if (!TryAppendAddress(args, a, b, hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value");
                                 }
-                                else return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Unknown usage of SWAP");
+                                // mem, mem
+                                else if (args.args[1][0] == '[') return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Cannot use SWAP with two memory values");
+                                // mem, imm
+                                else return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Cannot use SWAP with an imm");
                             }
-                            else return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Unknown usage of SWAP");
+                            // imm, *
+                            else return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Cannot use SWAP with an imm");
 
                             break;
 
-                        case "UEXTEND": case "UX": a = (UInt64)OPCode.UEXTEND; goto XEXTEND;
-                        case "SEXTEND":
+                        case "UX": a = (UInt64)OPCode.UX; goto XEXTEND;
                         case "SX":
-                            a = (UInt64)OPCode.SEXTEND;
-                        XEXTEND:
+                            a = (UInt64)OPCode.SX;
+                            XEXTEND:
                             if (args.args.Length != 2) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: XEXTEND expected 2 args");
 
                             if (!TryParseSizecode(args, args.args[0], out b)) return new Tuple<AssembleError, string>(AssembleError.MissingSize, $"line {args.line}: UEXTEND expected size parameter as second arg\n-> {args.err.Item2}");
@@ -4110,8 +4137,8 @@ namespace csx64
                         case "JNZ": case "JNE": if (!TryProcessJump(args, OPCode.Jnz)) return args.err; break;
                         case "JS": if (!TryProcessJump(args, OPCode.Js)) return args.err; break;
                         case "JNS": if (!TryProcessJump(args, OPCode.Jns)) return args.err; break;
-                        case "JP": if (!TryProcessJump(args, OPCode.Jp)) return args.err; break;
-                        case "JNP": if (!TryProcessJump(args, OPCode.Jnp)) return args.err; break;
+                        case "JP": case "JPE": if (!TryProcessJump(args, OPCode.Jp)) return args.err; break;
+                        case "JNP": case "JPO": if (!TryProcessJump(args, OPCode.Jnp)) return args.err; break;
                         case "JO": if (!TryProcessJump(args, OPCode.Jo)) return args.err; break;
                         case "JNO": if (!TryProcessJump(args, OPCode.Jno)) return args.err; break;
                         case "JC": if (!TryProcessJump(args, OPCode.Jc)) return args.err; break;
@@ -4205,7 +4232,7 @@ namespace csx64
                         case "GETF": a = (UInt64)OPCode.GETF; goto GETSETF;
                         case "SETF":
                             a = (UInt64)OPCode.SETF;
-                        GETSETF:
+                            GETSETF:
                             if (args.args.Length != 1) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: GETF expected one arg");
                             if (!TryParseRegister(args, args.args[0], out b)) return new Tuple<AssembleError, string>(AssembleError.UsageError, $"line {args.line}: GETF expected arg one to be a register");
                             if (args.sizecode != 3) return new Tuple<AssembleError, string>(AssembleError.UsageError, $"line {args.line}: GETF does not support the specified size code");
@@ -4246,14 +4273,13 @@ namespace csx64
 
                             break;
 
-                        case "FEXTEND":
                         case "FX":
                             if (args.args.Length != 2) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: XEXTEND expected 2 args");
 
                             if (!TryParseSizecode(args, args.args[0], out a)) return new Tuple<AssembleError, string>(AssembleError.MissingSize, $"line {args.line}: UEXTEND expected size parameter as second arg\n-> {args.err.Item2}");
                             if (!TryParseRegister(args, args.args[1], out b)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: UEXTEND expected register parameter as third arg\n-> {args.err.Item2}");
 
-                            AppendVal(args, 1, (UInt64)OPCode.FEXTEND);
+                            AppendVal(args, 1, (UInt64)OPCode.FX);
                             AppendVal(args, 1, (b << 4) | (a << 2) | args.sizecode);
 
                             break;
