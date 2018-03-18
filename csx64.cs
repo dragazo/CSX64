@@ -19,6 +19,18 @@ namespace csx64
             return val < 0 ? ~(UInt64)(-val) + 1 : (UInt64)val;
         }
     }
+    internal static class Utility
+    {
+        /// <summary>
+        /// Swaps the contents of the specified l-values
+        /// </summary>
+        public static void Swap<T>(ref T a, ref T b)
+        {
+            T temp = a;
+            a = b;
+            b = temp;
+        }
+    }
 
     /// <summary>
     /// Represents a computer executing a binary program (little-endian)
@@ -2298,64 +2310,263 @@ namespace csx64
             None, EmptyResult, SymbolRedefinition, MissingSymbol, FormatError
         }
 
-        internal struct Symbol
-        {
-            public UInt64 Value;
-            public bool IsAddress;
-            public bool IsFloating;
-        }
         internal class Hole
         {
-            public struct Segment
+            public enum OPs
             {
-                public string Symbol;
-                public bool IsNegative;
+                None,
+
+                // binary ops
+
+                Mul, Div, Mod,
+                Add, Sub,
+
+                SL, SR,
+
+                Less, LessE, Great, GreatE,
+                Eq, Neq,
+
+                BitAnd, BitXor, BitOr,
+                LogAnd, LogOr,
+
+                // unary ops
+
+                Neg, BitNot, LogNot, Int, Float
             }
 
-            // -------------------
+            public OPs OP = OPs.None;
 
-            public UInt64 Value = 0;
-            public double FValue = 0;
-            public bool Floating = false;
+            public Hole Parent = null;
+            public Hole Left = null, Right = null;
 
-            public List<Segment> Segments = new List<Segment>();
+            public string Value = null;
 
-            // -------------------
-
-            public bool Append(AssembleArgs args, string sub)
+            public bool Evaluate(Dictionary<string, Hole> symbols, out UInt64 res, out bool floating, ref string err, Stack<string> visited = null)
             {
-                string _sub = sub.Length > 0 && sub[0] == '+' || sub[0] == '-' ? sub.Substring(1) : sub;
-                if (_sub.Length == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Empty label encountered"); return false; }
+                res = 0; // initialize out params
+                floating = false;
 
-                // if we can get a value for it, add it
-                if (TryParseInstantImm(args, sub, out UInt64 temp, out bool floating))
-                {
-                    // add location depends on floating or not
-                    if (floating) { Floating = true; FValue += AsDouble(temp); }
-                    else Value += temp;
-                }
-                // account for the __pos__ symbol (due to being an address, it's value is meaningless until link time)
-                else if (_sub == "__pos__")
-                {
-                    // get the position symbol
-                    Symbol __pos__ = args.file.Symbols["__pos__"];
-                    // create a virtual label name to refer to current value of __pos__
-                    string virt_label = $"{__pos__.Value:x16}";
+                UInt64 L, R; // parsing locations for left and right subtrees
+                bool LF, RF;
 
-                    // create the clone symbol
-                    args.file.Symbols[virt_label] = __pos__;
-                    // add virtual symbol to segments
-                    Segments.Add(new Segment() { Symbol = virt_label, IsNegative = sub[0] == '-' });
-                }
-                // otherwise add a segment if it's a legal label
-                else
+                // switch through op
+                switch (OP)
                 {
-                    if (!MutateLabel(args, ref _sub)) return false;
-                    if (IsValidLabel(_sub)) Segments.Add(new Segment() { Symbol = _sub, IsNegative = sub[0] == '-' });
-                    else { args.err = new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: \"{_sub}\" is not a valid label"); return false; }
+                    // value
+                    case OPs.None:
+                        // try several integral radicies
+                        try
+                        {
+                            // prefixes only allowed for unsigned values (raw from parsing)
+                            if (Value.StartsWith("0x")) res = Convert.ToUInt64(Value.Substring(2), 16);
+                            else if (Value.StartsWith("0b")) res = Convert.ToUInt64(Value.Substring(2), 2);
+                            else if (Value[0] == '0' && Value.Length > 1) res = Convert.ToUInt64(Value.Substring(1), 8);
+                            else res = Convert.ToUInt64(Value, 10);
+                            
+                            return true;
+                        }
+                        catch (Exception) { }
+
+                        // if those fail, try floating-point
+                        if (double.TryParse(Value, out double f)) { res = DoubleAsUInt64(f); floating = true; return true; }
+
+                        // if it's a character
+                        if (Value[0] == '\'')
+                        {
+                            if (Value.Length != 3 || Value[2] != '\'') { err = $"Ill-formed character literal encountered \"{Value}\""; return false; }
+
+                            res = Value[1];
+                            return true;
+                        }
+
+                        // otherwise if it's a defined symbol
+                        if (symbols.TryGetValue(Value, out Hole hole))
+                        {
+                            if (visited == null) visited = new Stack<string>(); // create the visited stack if it wasn't already
+
+                            // fail if looking up a symbol we've already looked up (infinite recursion)
+                            if (visited.Contains(Value)) { err = $"Cyclic dependence on \"{Value}\" encountered"; return false; }
+
+                            visited.Push(Value); // mark value as visited
+
+                            // if we can't evaluate it, fail
+                            if (!hole.Evaluate(symbols, out res, out floating, ref err)) { err = $"Failed to evaluate referenced symbol \"{Value}\"\n-> {err}"; return false; }// error message generated in the recursion
+
+                            visited.Pop(); // unmark value (must be done for diamond expressions i.e. a=b+c, b=d, c=d, d=0)
+
+                            break; // break so we can resolve the reference
+                        }
+
+                        err = $"Failed to parse \"{Value}\" as a number or defined symbol";
+                        return false;
+
+                    // -- operators -- //
+
+                    // binary ops
+
+                    case OPs.Mul:
+                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : L.MakeSigned()) * (RF ? AsDouble(R) : R.MakeSigned())); floating = true; }
+                        else res = L * R;
+                        break;
+                    case OPs.Div:
+                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : L.MakeSigned()) / (RF ? AsDouble(R) : R.MakeSigned())); floating = true; }
+                        else res = (L.MakeSigned() / R.MakeSigned()).MakeUnsigned();
+                        break;
+                    case OPs.Mod:
+                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : L.MakeSigned()) % (RF ? AsDouble(R) : R.MakeSigned())); floating = true; }
+                        else res = (L.MakeSigned() % R.MakeSigned()).MakeUnsigned();
+                        break;
+                    case OPs.Add:
+                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : L.MakeSigned()) + (RF ? AsDouble(R) : R.MakeSigned())); floating = true; }
+                        else res = L + R;
+                        break;
+                    case OPs.Sub:
+                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : L.MakeSigned()) - (RF ? AsDouble(R) : R.MakeSigned())); floating = true; }
+                        else res = L - R;
+                        break;
+
+                    case OPs.SL:
+                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        res = L << (ushort)R; floating = LF || RF;
+                        break;
+                    case OPs.SR:
+                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        res = L >> (ushort)R; floating = LF || RF;
+                        break;
+
+                    case OPs.Less:
+                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        if (LF || RF) res = (LF ? AsDouble(L) : L.MakeSigned()) < (RF ? AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
+                        else res = L.MakeSigned() < R.MakeSigned() ? 1 : 0ul;
+                        break;
+                    case OPs.LessE:
+                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        if (LF || RF) res = (LF ? AsDouble(L) : L.MakeSigned()) <= (RF ? AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
+                        else res = L.MakeSigned() <= R.MakeSigned() ? 1 : 0ul;
+                        break;
+                    case OPs.Great:
+                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        if (LF || RF) res = (LF ? AsDouble(L) : L.MakeSigned()) > (RF ? AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
+                        else res = L.MakeSigned() > R.MakeSigned() ? 1 : 0ul;
+                        break;
+                    case OPs.GreatE:
+                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        if (LF || RF) res = (LF ? AsDouble(L) : L.MakeSigned()) >= (RF ? AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
+                        else res = L.MakeSigned() >= R.MakeSigned() ? 1 : 0ul;
+                        break;
+
+                    case OPs.Eq:
+                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        if (LF || RF) res = (LF ? AsDouble(L) : L.MakeSigned()) == (RF ? AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
+                        else res = L == R ? 1 : 0ul;
+                        break;
+                    case OPs.Neq:
+                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        if (LF || RF) res = (LF ? AsDouble(L) : L.MakeSigned()) != (RF ? AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
+                        else res = L != R ? 1 : 0ul;
+                        break;
+
+                    case OPs.BitAnd:
+                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        res = L & R; floating = LF || RF;
+                        break;
+                    case OPs.BitXor:
+                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        res = L ^ R; floating = LF || RF;
+                        break;
+                    case OPs.BitOr:
+                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        res = L | R; floating = LF || RF;
+                        break;
+
+                    case OPs.LogAnd:
+                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        res = (L != 0 && R != 0) ? 1 : 0ul;
+                        break;
+                    case OPs.LogOr:
+                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        res = (L != 0 || R != 0) ? 1 : 0ul;
+                        break;
+
+                    // unary ops
+
+                    case OPs.Neg:
+                        if (!Left.Evaluate(symbols, out L, out LF, ref err)) return false;
+                        res = LF ? DoubleAsUInt64(-AsDouble(L)) : ~L + 1; floating = LF;
+                        break;
+                    case OPs.BitNot:
+                        if (!Left.Evaluate(symbols, out L, out LF, ref err)) return false;
+                        res = ~L; floating = LF;
+                        break;
+                    case OPs.LogNot:
+                        if (!Left.Evaluate(symbols, out L, out LF, ref err)) return false;
+                        res = L == 0 ? 1 : 0ul;
+                        break;
+                    case OPs.Int:
+                        if (!Left.Evaluate(symbols, out L, out LF, ref err)) return false;
+                        res = ((Int64)AsDouble(L)).MakeUnsigned();
+                        break;
+                    case OPs.Float:
+                        if (!Left.Evaluate(symbols, out L, out LF, ref err)) return false;
+                        res = DoubleAsUInt64((double)L.MakeSigned()); floating = true;
+                        break;
+
+                    default: err = "Unknown operation"; return false;
                 }
+
+                // since we got a value, turn this into a leaf so future accesses are faster
+                OP = OPs.None; Left = Right = null;
+                Value = floating ? AsDouble(res).ToString("e17") : res.ToString();
 
                 return true;
+            }
+
+            public Hole Clone()
+            {
+                return new Hole() { OP = OP, Left = Left?.Clone(), Right = Right?.Clone(), Value = Value };
+            }
+            public Hole Clone(string from, string to)
+            {
+                return new Hole() { OP = OP, Left = Left?.Clone(from, to), Right = Right?.Clone(from, to), Value = from == Value ? to : Value };
+            }
+
+            public bool Find(string value, Stack<Hole> path)
+            {
+                path.Push(this);
+
+                switch (OP)
+                {
+                    case OPs.None: if (value == Value) return true; else { path.Pop(); return false; }
+
+                    case OPs.Neg: case OPs.BitNot: case OPs.LogNot: case OPs.Int:
+                        if (Left.Find(value, path)) return true;
+                        else { path.Pop(); return false; }
+
+                    default:
+                        if (Left.Find(value, path) || Right.Find(value, path)) return true;
+                        else { path.Pop(); return false; }
+                }
+            }
+            public Hole Find(string value)
+            {
+                switch (OP)
+                {
+                    case OPs.None: return Value == value ? this : null;
+
+                    case OPs.Neg:
+                    case OPs.BitNot:
+                    case OPs.LogNot:
+                    case OPs.Int:
+                        return Left.Find(value);
+
+                    default:
+                        return Left.Find(value) ?? Right.Find(value);
+                }
             }
         }
         internal struct HoleData
@@ -2365,7 +2576,7 @@ namespace csx64
         }
         public class ObjectFile
         {
-            internal Dictionary<string, Symbol> Symbols = new Dictionary<string, Symbol>();
+            internal Dictionary<string, Hole> Symbols = new Dictionary<string, Hole>();
             internal Dictionary<HoleData, Hole> Holes = new Dictionary<HoleData, Hole>();
 
             internal List<string> GlobalSymbols = new List<string>();
@@ -2422,27 +2633,29 @@ namespace csx64
             for (ushort i = 0; i < size; ++i)
                 args.file.Data.Add((byte)(val >> (8 * i)));
         }
-        private static bool AppendHole(AssembleArgs args, UInt64 size, Hole hole)
+        private static bool TryAppendHole(AssembleArgs args, UInt64 size, Hole hole)
         {
+            string err = null; // error location for evaluation
+
             // if we can fill it immediately, do so
-            if (hole.Segments.Count == 0)
+            if (hole.Evaluate(args.file.Symbols, out UInt64 val, out bool floating, ref err))
             {
                 /* !! IF MODIFIED HERE, MUST ALSO BE MODIFIED IN LINKER HOLE PATCHING !! */
 
                 // if it's floating-point
-                if (hole.Floating)
+                if (floating)
                 {
                     // only 64-bit and 32-bit are supported
                     switch (size)
                     {
-                        case 8: AppendVal(args, 8, DoubleAsUInt64(hole.Value.MakeSigned() + hole.FValue)); break;
-                        case 4: AppendVal(args, 4, FloatAsUInt64(hole.Value.MakeSigned() + (float)hole.FValue)); break;
+                        case 8: AppendVal(args, 8, val); break;
+                        case 4: AppendVal(args, 4, FloatAsUInt64((float)AsDouble(val))); break;
 
                         default: args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Attempt to use unsupported floating-point size"); return false;
                     }
                 }
                 // otherwise it's integral
-                else AppendVal(args, size, hole.Value);
+                else AppendVal(args, size, val);
             }
             // otherwise there really is a hole
             else
@@ -2455,12 +2668,12 @@ namespace csx64
 
             return true;
         }
-        private static bool AppendAddress(AssembleArgs args, UInt64 a, UInt64 b, Hole hole)
+        private static bool TryAppendAddress(AssembleArgs args, UInt64 a, UInt64 b, Hole hole)
         {
             // [1: literal][3: m1][1: -m2][3: m2]   ([4: r1][4: r2])   ([64: imm])
             AppendVal(args, 1, a);
             if ((a & 0x77) != 0) AppendVal(args, 1, b);
-            if ((a & 0x80) != 0) { if (!AppendHole(args, 8, hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append address base\n-> {args.err.Item2}"); return false; } }
+            if ((a & 0x80) != 0) { if (!TryAppendHole(args, 8, hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append address base\n-> {args.err.Item2}"); return false; } }
 
             return true;
         }
@@ -2540,99 +2753,244 @@ namespace csx64
             return true;
         }
 
-        private static bool TryParseInstantImm(AssembleArgs args, string token, out UInt64 res, out bool floating)
+        private static readonly Dictionary<Hole.OPs, int> Precedence = new Dictionary<Hole.OPs, int>()
         {
-            int pos = 0, end = 0;   // position in token
-            UInt64 temp = 0;        // placeholders for parsing
-            double ftemp, fsum = 0; // floating point parsing temporary and sum
+            { Hole.OPs.Mul, 5 },
+            { Hole.OPs.Div, 5 },
+            { Hole.OPs.Mod, 5 },
 
-            // result initially integral zero
-            res = 0;
-            floating = false;
+            { Hole.OPs.Add, 6 },
+            { Hole.OPs.Sub, 6 },
 
-            if (token.Length == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Empty label encountered"); return false; }
+            { Hole.OPs.SL, 7 },
+            { Hole.OPs.SR, 7 },
+
+            { Hole.OPs.Less, 9 },
+            { Hole.OPs.LessE, 9 },
+            { Hole.OPs.Great, 9 },
+            { Hole.OPs.GreatE, 9 },
+
+            { Hole.OPs.Eq, 10 },
+            { Hole.OPs.Neq, 10 },
+
+            { Hole.OPs.BitAnd, 11 },
+            { Hole.OPs.BitXor, 12 },
+            { Hole.OPs.BitOr, 13 },
+            { Hole.OPs.LogAnd, 14 },
+            { Hole.OPs.LogOr, 15 }
+        };
+        private static readonly List<char> UnaryOps = new List<char>() { '+', '-', '~', '!', '%' };
+
+        private static bool TryGetOp(string token, int pos, out Hole.OPs op, out int oplen)
+        {
+            // default to invalid op
+            op = Hole.OPs.None;
+            oplen = 0;
+
+            // try to take as many characters as possible (greedy)
+            if (pos + 2 <= token.Length)
+            {
+                oplen = 2; // record oplen
+                switch (token.Substring(pos, 2))
+                {
+                    case "<<": op = Hole.OPs.SL; return true;
+                    case ">>": op = Hole.OPs.SR; return true;
+
+                    case "<=": op = Hole.OPs.LessE; return true;
+                    case ">=": op = Hole.OPs.GreatE; return true;
+
+                    case "==": op = Hole.OPs.Eq; return true;
+                    case "!=": op = Hole.OPs.Neq; return true;
+
+                    case "&&": op = Hole.OPs.LogAnd; return true;
+                    case "||": op = Hole.OPs.LogOr; return true;
+                }
+            }
+            if (pos + 1 <= token.Length)
+            {
+                oplen = 1; // record oplen
+                switch (token[pos])
+                {
+                    case '*': op = Hole.OPs.Mul; return true;
+                    case '/': op = Hole.OPs.Div; return true;
+                    case '%': op = Hole.OPs.Mod; return true;
+
+                    case '+': op = Hole.OPs.Add; return true;
+                    case '-': op = Hole.OPs.Sub; return true;
+
+                    case '<': op = Hole.OPs.Less; return true;
+                    case '>': op = Hole.OPs.Great; return true;
+
+                    case '&': op = Hole.OPs.BitAnd; return true;
+                    case '^': op = Hole.OPs.BitXor; return true;
+                    case '|': op = Hole.OPs.BitOr; return true;
+                }
+            }
+
+            // if nothing found, fail
+            return false;
+        }
+        private static bool TryParseImm(AssembleArgs args, string token, out Hole hole)
+        {
+            // hole and current begin null
+            Hole current = hole = null, temp;
+            
+            int pos = 0, end;     // position in token
+            int depth;            // parenthesis depth
+            bool binPair = false; // marker if tree contains complete binary pairs (i.e. N+1 values and N binary ops)
+
+            Hole.OPs op = Hole.OPs.None; // extracted binary op (initialized so compiler doesn't complain)
+            int oplen = 0;               // length of operator found (in characters)
+
+            string err = null; // error location for hole evaluation
+
+            Stack<char> unaryOps = new Stack<char>(8); // holds unary ops for processing
+
+            if (token.Length == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Empty expression encountered"); return false; }
 
             while (pos < token.Length)
             {
-                // find the next separator
-                for (int i = pos + 1; i < token.Length; ++i)
-                    if (token[i] == '+' || token[i] == '-') { end = i; break; }
-                // if nothing found, end is end of token
-                if (pos == end) end = token.Length;
+                // -- read val(op) -- //
 
-                // get subtoken to process
-                string sub = token.Substring(pos, end - pos);
-                string _sub = sub[0] == '+' || sub[0] == '-' ? sub.Substring(1) : sub;
-                if (_sub.Length == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Empty label encountered"); return false; }
+                depth = 0; // initial depth of 0
 
-                // if it's a numeric literal
-                if (char.IsDigit(_sub[0]))
+                // consume unary ops
+                for (; pos < token.Length && UnaryOps.Contains(token[pos]); ++pos) unaryOps.Push(token[pos]);
+                
+                // find next binary op
+                for (end = pos; end < token.Length && (depth > 0 || !TryGetOp(token, end, out op, out oplen)); ++end)
                 {
-                    // try several integral radix conversions
-                    try
+                    if (token[end] == '(') ++depth;
+                    else if (token[end] == ')') --depth;
+
+                    // can't ever have negative depth
+                    if (depth < 0) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Mismatched parenthesis"); return false; }
+                }
+                // if depth isn't back to 0, there was a parens mismatch
+                if (depth != 0) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Mismatched parenthesis"); return false; }
+                // if pos == end we'll have an empty token
+                if (pos == end) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Empty expression encountered"); return false; }
+
+                // -- process value -- //
+                {
+                    // -- convert value to an expression tree --
+
+                    // if sub-expression
+                    if (token[pos] == '(')
                     {
-                        if (_sub.StartsWith("0x")) temp = Convert.ToUInt64(_sub.Substring(2), 16);
-                        else if (_sub.StartsWith("0b")) temp = Convert.ToUInt64(_sub.Substring(2), 2);
-                        else if (_sub[0] == '0' && _sub.Length > 1) temp = Convert.ToUInt64(_sub.Substring(1), 8);
-                        else temp = Convert.ToUInt64(_sub, 10);
-
-                        res += sub[0] == '-' ? ~temp + 1 : temp;
-                        goto aft;
+                        // parse it into temp
+                        if (!TryParseImm(args, token.Substring(pos + 1, end - pos - 2), out temp)) return false;
                     }
-                    catch (Exception) { }
-
-                    // if none of thise worked, try a floating point conversion
-                    if (double.TryParse(sub, out ftemp)) { floating = true; fsum += ftemp; }
-                    else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Unknown numeric literal encountered \"{_sub}\""); return false; }
-                aft:;
-                }
-                // if it's a character
-                else if (_sub[0] == '\'')
-                {
-                    if (_sub[_sub.Length - 1] != '\'') { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Character literal must be enclosed in single quotes"); return false; }
-                    if (_sub.Length != 3) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: character literal must contain exactly one character"); return false; }
-
-                    temp = _sub[1];
-                    res += sub[0] == '-' ? ~temp + 1 : temp;
-                }
-                // if it's an instant symbol
-                else
-                {
-                    if (!MutateLabel(args, ref _sub)) return false;
-                    if (args.file.Symbols.TryGetValue(_sub, out Symbol symbol) && !symbol.IsAddress)
+                    // otherwise is value
+                    else
                     {
-                        // add depending on floating or not
-                        if (symbol.IsFloating) { floating = true; fsum += sub[0] == '-' ? -AsDouble(symbol.Value) : AsDouble(symbol.Value); }
-                        else res += sub[0] == '-' ? ~symbol.Value + 1 : symbol.Value;
+                        // get the value to insert
+                        string val = token.Substring(pos, end - pos);
+
+                        // mutate it
+                        if (!MutateLabel(args, ref val)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse imm \"{token}\"\n-> {args.err.Item2}"); return false; }
+
+                        // create the hole for it
+                        temp = new Hole() { Value = val };
+
+                        // it either needs to be evaluatable or a valid label name
+                        if (!temp.Evaluate(args.file.Symbols, out UInt64 res, out bool floating, ref err) && !IsValidLabel(val))
+                        { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to resolve symbol as a valid imm \"{val}\"\n-> {err}"); return false; }
                     }
-                    // otherwise it's a dud
-                    else { args.err = new Tuple<AssembleError, string>(AssembleError.UnknownSymbol, $"line {args.line}: Undefined instant symbol encountered \"{_sub}\""); return false; }
+
+                    // -- handle unary op by modifying subtree --
+
+                    // handle the unary ops in terms of binary ops (stack provides right-to-left evaluation)
+                    while (unaryOps.Count > 0)
+                    {
+                        char uop = unaryOps.Pop();
+                        switch (uop)
+                        {
+                            case '+': break;
+                            case '-': temp = new Hole() { OP = Hole.OPs.Neg, Left = temp }; break;
+                            case '~': temp = new Hole() { OP = Hole.OPs.BitNot, Left = temp }; break;
+                            case '!': temp = new Hole() { OP = Hole.OPs.LogNot, Left = temp }; break;
+
+                            default: throw new NotImplementedException($"unary op \'{uop}\' not implemented");
+                        }
+                    }
+
+                    // -- append subtree to main tree --
+
+                    // if no tree yet, use this one
+                    if (hole == null) hole = temp;
+                    // otherwise append to current (guaranteed to be defined by second pass)
+                    else
+                    {
+                        if (current.Left == null) current.Left = temp; else current.Right = temp;
+                    }
+
+                    // flag as a valid binary pair
+                    binPair = true;
                 }
 
-                // start of next token includes separator
-                pos = end;
+                // -- process op -- //
+                if (end < token.Length)
+                {
+                    // wind current up to correct precedence (left-to-right evaluation, so also skip equal precedence)
+                    for (; current != null && Precedence[current.OP] <= Precedence[op]; current = current.Parent) ;
+
+                    // if we have a valid current
+                    if (current != null)
+                    {
+                        // splice in the new operator, moving current's right sub-tree to left of new node
+                        current = current.Right = new Hole() { OP = op, Parent = current, Left = current.Right };
+                    }
+                    // otherwise we'll have to move the root
+                    else
+                    {
+                        // splice in the new operator, moving entire tree to left of new node
+                        current = hole = new Hole() { OP = op, Left = hole };
+                    }
+
+                    // flag as invalid binary pair
+                    binPair = false;
+                }
+
+                // pass last delimiter
+                pos = end + oplen;
             }
 
-            // if result is floating, recalculate res as sum of floating and integral components
-            if (floating) res = DoubleAsUInt64(res + fsum);
+            // handle binary pair mismatch
+            if (!binPair) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Expression contained a mismatched binary op: \"{token}\""); return false; }
+
+            return true;
+        }
+        private static bool TryParseInstantImm(AssembleArgs args, string token, out UInt64 res, out bool floating)
+        {
+            string err = null; // error location for evaluation
+
+            if (!TryParseImm(args, token, out Hole hole)) { res = 0; floating = false; return false; }
+            if (!hole.Evaluate(args.file.Symbols, out res, out floating, ref err)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to parse instant imm \"{token}\"\n-> {err}"); return false; }
 
             return true;
         }
 
         private static bool TryParseRegister(AssembleArgs args, string token, out UInt64 res)
         {
-            res = 0;
-            if (token.Length < 2 || token[0] != '$') { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Invalid register format encountered \"{token}\""); return false; }
-            if (!TryParseInstantImm(args, token.Substring(1), out res, out bool floating)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line{args.line}: Failed to parse register \"{token}\"\n-> {args.err.Item2}"); return false; }
+            // registers prefaced with $
+            if (token.Length < 2 || token[0] != '$') { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Invalid register format encountered \"{token}\""); res = 0; return false; }
+
+            // register index must be instant imm
+            if (!TryParseInstantImm(args, token.Substring(1), out res, out bool floating)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to parse register index \"{token.Substring(1)}\"\n-> {args.err.Item2}"); return false; }
+
+            // ensure not floating and in proper range
             if (floating) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Attempt to use floating point value to specify register \"{token}\""); return false; }
-            if (res >= 16) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Register out of range \"{token}\" -> {res}"); return false; }
+            if (res >= 16) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Register index out of range \"{token}\" (evaluated to {res})"); return false; }
 
             return true;
         }
         private static bool TryParseSizecode(AssembleArgs args, string token, out UInt64 res)
         {
-            // must be able ti get an instant imm
+            // size code must be instant imm
             if (!TryParseInstantImm(args, token, out res, out bool floating)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to parse size code \"{token}\"\n-> {args.err.Item2}"); return false; }
+
+            // ensure not floating
             if (floating) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Attempt to use floating point value to specify register size \"{token}\" -> {res}"); return false; }
 
             // convert to size code
@@ -2643,13 +3001,15 @@ namespace csx64
                 case 32: res = 2; return true;
                 case 64: res = 3; return true;
 
-                default: args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Invalid register size {res}"); return false;
+                default: args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Invalid register size: {res}"); return false;
             }
         }
         private static bool TryParseMultcode(AssembleArgs args, string token, out UInt64 res)
         {
-            // must be able ti get an instant imm
-            if (!TryParseInstantImm(args, token, out res, out bool floating)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to parse multiplier \"{token}\"\n-> {args.err.Item2}"); return false; }
+            // mult code must be instant imm
+            if (!TryParseInstantImm(args, token, out res, out bool floating)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to parse mult code \"{token}\"\n-> {args.err.Item2}"); return false; }
+
+            // ensure not floating
             if (floating) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Attempt to use floating point value to specify size multiplier \"{token}\" -> {res}"); return false; }
 
             // convert to mult code
@@ -2664,141 +3024,260 @@ namespace csx64
                 case 32: res = 6; return true;
                 case 64: res = 7; return true;
 
-                default: args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Invalid size multiplier {res}"); return false;
+                default: args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Invalid size multiplier: {res}"); return false;
             }
         }
 
-        private static bool TryParseImm(AssembleArgs args, string token, out Hole hole)
+        private static bool TryParseAddressReg(AssembleArgs args, string label, ref Hole hole, ref UInt64 m, ref bool neg)
         {
-            int pos = 0, end = 0; // position in token
-            hole = new Hole();    // resulting hole
+            Stack<Hole> path = new Stack<Hole>();
+            List<Hole> list = new List<Hole>();
 
-            if (token.Length == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Empty label encountered"); return false; }
+            string err = string.Empty; // evaluation error
 
-            while (pos < token.Length)
+            // while we can find this symbol
+            while (hole.Find(label, path))
             {
-                // find the next separator
-                for (int i = pos + 1; i < token.Length; ++i)
-                    if (token[i] == '+' || token[i] == '-') { end = i; break; }
-                // if nothing found, end is end of token
-                if (pos == end) end = token.Length;
+                // move path into list
+                while (path.Count > 0) list.Add(path.Pop());
 
-                string sub = token.Substring(pos, end - pos);
+                // if it doesn't have a mult section
+                if (list.Count == 1 || list.Count > 1 && list[1].OP != Hole.OPs.Mul)
+                {
+                    // add in a multiplier of 1
+                    list[0].OP = Hole.OPs.Mul;
+                    list[0].Left = new Hole() { Value = "1" };
+                    list[0].Right = new Hole() { Value = list[0].Value };
 
-                // append subtoken to the hole
-                if (!hole.Append(args, sub)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to parse imm \"{token}\"\n-> {args.err.Item2}"); return false; }
+                    // insert new register location as beginning of path
+                    list.Insert(0, list[0].Right);
+                }
 
-                // start of next token includes separator
-                pos = end;
+                // start 2 above (just above regular mult code)
+                for (int i = 2; i < list.Count; )
+                {
+                    switch (list[i].OP)
+                    {
+                        case Hole.OPs.Add: case Hole.OPs.Sub: case Hole.OPs.Neg: ++i; break;
+
+                        case Hole.OPs.Mul:
+                            {
+                                // toward leads to register, mult leads to mult value
+                                Hole toward = list[i - 1], mult = list[i].Left == list[i - 1] ? list[i].Right : list[i].Left;
+
+                                // if pos is add/sub, we need to distribute
+                                if (toward.OP == Hole.OPs.Add || toward.OP == Hole.OPs.Sub)
+                                {
+                                    // swap operators with toward
+                                    list[i].OP = toward.OP;
+                                    toward.OP = Hole.OPs.Mul;
+
+                                    // create the distribution node
+                                    Hole temp = new Hole() { OP = Hole.OPs.Mul, Left = mult };
+
+                                    // compute right and transfer mult to toward
+                                    if (toward.Left == list[i - 2]) { temp.Right = toward.Right; toward.Right = mult; }
+                                    else { temp.Right = toward.Left; toward.Left = mult; }
+
+                                    // add it in
+                                    if (list[i].Left == mult) list[i].Left = temp; else list[i].Right = temp;
+                                }
+                                // if pos is mul, we need to combine with pre-existing mult code
+                                else if (toward.OP == Hole.OPs.Mul)
+                                {
+                                    // create the combination node
+                                    Hole temp = new Hole() { OP = Hole.OPs.Mul, Left = mult, Right = toward.Left == list[i - 2] ? toward.Right : toward.Left };
+
+                                    // add it in
+                                    if (list[i].Left == mult)
+                                    {
+                                        list[i].Left = temp; // replace mult with combination
+                                        list[i].Right = list[i - 2]; // bump up toward
+                                    }
+                                    else
+                                    {
+                                        list[i].Right = temp;
+                                        list[i].Left = list[i - 2];
+                                    }
+
+                                    // remove the skipped list[i - 1]
+                                    list.RemoveAt(i - 1);
+                                }
+                                // if pos is neg, we need to put the negative on the mult
+                                else if (toward.OP == Hole.OPs.Neg)
+                                {
+                                    // create the combinartion node
+                                    Hole temp = new Hole() { OP = Hole.OPs.Neg, Left = mult };
+
+                                    // add it in
+                                    if (list[i].Left == mult)
+                                    {
+                                        list[i].Left = temp; // replace mult with combination
+                                        list[i].Right = list[i - 2]; // bump up toward
+                                    }
+                                    else
+                                    {
+                                        list[i].Right = temp;
+                                        list[i].Left = list[i - 2];
+                                    }
+
+                                    // remove the skipped list[i - 1]
+                                    list.RemoveAt(i - 1);
+                                }
+                                // otherwise something horrible happened (this should never happen, but is left in for sanity-checking and future-proofing)
+                                else throw new ArgumentException($"Unknown address simplification step: {toward.OP}");
+
+                                --i; // decrement i to follow the multiplication all the way down the rabbit hole
+                                if (i < 2) i = 2; // but if it gets under the starting point, reset it
+
+                                break;
+                            }
+
+                        default: args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Register may not be connected by {list[i].OP}"); return false;
+                    }
+                }
+
+                // -- finally done with all the algebra -- //
+                
+                // extract mult code fragment
+                if (!(list[1].Left == list[0] ? list[1].Right : list[1].Left).Evaluate(args.file.Symbols, out UInt64 val, out bool floating, ref err))
+                { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to evaluate register multiplier as an instant imm\n-> {err}"); return false; }
+                // make sure it's not floating-point
+                if (floating) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Register multiplier may not be floating-point"); return false; }
+
+                // look through from top to bottom
+                for (int i = list.Count - 1; i >= 2; --i)
+                {
+                    // if this will negate the register
+                    if (list[i].OP == Hole.OPs.Neg || list[i].OP == Hole.OPs.Sub && list[i].Right == list[i - 1])
+                    {
+                        // negate found partial mult
+                        val = ~val + 1;
+                    }
+                }
+
+                // find the top binary operator in the path
+                //int top;
+                //for (top = list.Count - 1; list[top].OP != Hole.OPs.Add && list[top].OP != Hole.OPs.Sub && list[top].OP != Hole.OPs.None; --top) ;
+
+                // remove the register section from the expression (replace with integral 0)
+                list[1].OP = Hole.OPs.None;
+                list[1].Left = list[1].Right = null;
+                list[1].Value = "0";
+
+                m += val; // add extracted mult to total mult
+                list.Clear(); // clear list for next pass
             }
 
+            // -- final task: get mult code and negative flag -- //
+
+            // if m is pretty big, it's negative
+            if (m > 64) { m = ~m + 1; neg = true; } else neg = false;
+            // only other thing is transforming the multiplier into a mult code
+            switch (m)
+            {
+                case 0: m = 0; break;
+                case 1: m = 1; break;
+                case 2: m = 2; break;
+                case 4: m = 3; break;
+                case 8: m = 4; break;
+                case 16: m = 5; break;
+                case 32: m = 6; break;
+                case 64: m = 7; break;
+
+                default: args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Invalid register multiplier encountered ({m.MakeSigned()})"); return false;
+            }
+
+            // register successfully parsed
             return true;
         }
-
-        private static bool TryParseAddressReg(AssembleArgs args, string token, out UInt64 r, out UInt64 m)
-        {
-            r = m = 0;
-
-            // remove sign
-            string _seg = token[0] == '+' || token[0] == '-' ? token.Substring(1) : token;
-            if (_seg.Length == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Empty symbol encountered"); return false; }
-
-            // split on multiplication
-            string[] _r = _seg.Split(new char[] { '*' });
-
-            // if 1 token, is a register
-            if (_r.Length == 1)
-            {
-                m = 1;
-                return TryParseRegister(args, _r[0], out r);
-            }
-            // if 2 tokens, has a multcode
-            else if (_r.Length == 2)
-            {
-                if ((!TryParseRegister(args, _r[0], out r) || !TryParseMultcode(args, _r[1], out m)) && (!TryParseRegister(args, _r[1], out r) || !TryParseMultcode(args, _r[0], out m)))
-                { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Invalid multiplier-register pair encountered \"{token}\""); return false; }
-            }
-            // otherwise is illegal
-            else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Cannot use more than one multiplier and one register per address register subtoken"); return false; }
-
-            return true;
-        }
-        // [1: literal][3: m1][1: -m2][3: m2]   ([4: r1][4: r2])   ([64: imm])
         private static bool TryParseAddress(AssembleArgs args, string token, out UInt64 a, out UInt64 b, out Hole hole)
         {
             a = b = 0;
             hole = new Hole();
 
             // must be of [*] format
-            if (token.Length < 3 || token[0] != '[' || token[token.Length - 1] != ']')
-            { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Invalid address format encountered \"{token}\""); return false; }
+            if (token.Length < 3 || token[0] != '[' || token[token.Length - 1] != ']') { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Invalid address format encountered \"{token}\""); return false; }
 
-            string r1_seg = null, r2_seg = null; // register parsing temporaries
+            int pos, end; // parsing positions
+            UInt64 temp;  // parsing location
 
-            int pos = 1, end = 1; // position in token
-            while (pos < token.Length - 1)
+            int reg_count = 0; // number of registers parsed
+            UInt64 r1 = 0, m1 = 0, r2 = 0, m2 = 0; // final register info
+            bool n1 = false, n2 = false;
+
+            string preface = $"__{Time():x16}"; // preface used for registers
+            string err = string.Empty; // evaluation error
+
+            // until register parsing reaches the end of the token
+            while (true)
             {
-                // find the next separator
-                for (int i = pos + 1; i < token.Length; ++i)
-                    if (token[i] == '+' || token[i] == '-') { end = i; break; }
-                // if nothing found, end is end of token
-                if (pos == end) end = token.Length - 1;
+                // find the next register marker
+                for (pos = 1; pos < token.Length && token[pos] != '$'; ++pos) ;
+                // find its end (take all legal number/symbol chars)
+                for (end = pos + 1; end < token.Length && (char.IsLetterOrDigit(token[end]) || token[end] == '_'); ++end) ;
 
-                // get subtoken to process
-                string sub = token.Substring(pos, end - pos);
+                // break out if we've reached the end
+                if (pos >= token.Length) break;
 
-                // if it's a register
-                if (sub.Contains('$'))
-                {
-                    // if negative register
-                    if (sub[0] == '-')
-                    {
-                        // if r2 empty, put it there
-                        if (r2_seg == null) r2_seg = sub;
-                        // otherwise fail
-                        else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Address cannot have more than one negative register"); return false; }
-                    }
-                    // otherwise positive
-                    else
-                    {
-                        // if r1 empty, put it there
-                        if (r1_seg == null) r1_seg = sub;
-                        // otherwise try r2
-                        else if (r2_seg == null) r2_seg = sub;
-                        // otherwise fail
-                        else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Address may only use one register"); return false; }
-                    }
-                }
-                // otherwise tack it onto the hole
-                else if (!hole.Append(args, sub)) return false;
+                // parse this as a register
+                if (!TryParseRegister(args, token.Substring(pos, end - pos), out temp)) return false;
 
-                // start of next token includes separator
-                pos = end;
+                // put it in a register slot
+                if (reg_count == 0) { r1 = temp; ++reg_count; } else if (r1 == temp) { r1 = temp; }
+                else if (reg_count == 1) { r2 = temp; ++reg_count; } else if (r2 == temp) { r2 = temp; }
+                else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Can't use more than 2 registers to specify an address"); return false; }
+
+                // modify the register label in the expression to be a legal symbol name
+                token = $"{token.Substring(0, pos)}{preface}_{temp}{token.Substring(end)}";
+            }
+            
+            // turn into an expression
+            if (!TryParseImm(args, token.Substring(1, token.Length - 2), out hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse addres expression\n-> {args.err.Item2}"); return false; }
+
+            if (reg_count >= 1 && !TryParseAddressReg(args, $"{preface}_{r1}", ref hole, ref m1, ref n1)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to extract register data\n-> {args.err.Item2}"); return false; }
+            if (reg_count >= 2 && !TryParseAddressReg(args, $"{preface}_{r2}", ref hole, ref m2, ref n2)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to extract register data\n-> {args.err.Item2}"); return false; }
+
+            // make sure only one register is negative
+            if (n1 && n2) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Only one register may be negative in an address expression"); return false; }
+            // if the negative register is r1, swap with r2
+            if (n1)
+            {
+                Utility.Swap(ref r1, ref r2);
+                Utility.Swap(ref m1, ref m2);
+                Utility.Swap(ref n1, ref n2);
             }
 
-            // register parsing temporaries
-            UInt64 r1 = 0, r2 = 0, m1 = 0, m2 = 0;
+            // if we can evaluate the hole
+            if (hole.Evaluate(args.file.Symbols, out UInt64 hole_val, out bool floating, ref err))
+            {
+                // make sure it's not floating-point
+                if (floating) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Address base cannot be floating-point"); return false; }
+                // if it's zero, there is no hole (set to null)
+                if (hole_val == 0) hole = null;
+            }
 
-            // process regs
-            if (r1_seg != null && !TryParseAddressReg(args, r1_seg, out r1, out m1)) return false;
-            if (r2_seg != null && !TryParseAddressReg(args, r2_seg, out r2, out m2)) return false;
-
-            // if there was no hole, null it
-            if (hole.Value == 0 && hole.FValue == 0 && hole.Segments.Count == 0) hole = null;
+            // -- apply final touches -- //
 
             // [1: literal][3: m1][1: -m2][3: m2]   [4: r1][4: r2]   ([64: imm])
-            a = (hole != null ? 128 : 0ul) | (m1 << 4) | (r2_seg != null && r2_seg[0] == '-' ? 8 : 0ul) | m2;
+            a = (hole != null ? 128 : 0ul) | (m1 << 4) | (n2 ? 8 : 0ul) | m2;
             b = (r1 << 4) | r2;
 
+            // address successfully parsed
             return true;
         }
 
         private static bool IsValidLabel(string token)
         {
+            // can't be nothing
             if (token.Length == 0) return false;
+
+            // first char is underscore or letter
             if (token[0] != '_' && !char.IsLetter(token[0])) return false;
+            // all other chars may additionally be numbers
             for (int i = 1; i < token.Length; ++i)
                 if (token[i] != '_' && !char.IsLetterOrDigit(token[i])) return false;
+
             return true;
         }
         private static bool MutateLabel(AssembleArgs args, ref string label)
@@ -2837,12 +3316,12 @@ namespace csx64
                 if (TryParseImm(args, args.args[1], out hole1))
                 {
                     AppendVal(args, 1, (a << 4) | (args.sizecode << 2) | 0);
-                    if (!AppendHole(args, Size(b_sizecode), hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
+                    if (!TryAppendHole(args, Size(b_sizecode), hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
                 }
                 else if (TryParseAddress(args, args.args[1], out b, out c, out hole1))
                 {
                     AppendVal(args, 1, (a << 4) | (args.sizecode << 2) | 1);
-                    if (!AppendAddress(args, b, c, hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
+                    if (!TryAppendAddress(args, b, c, hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
                 }
                 else if (TryParseRegister(args, args.args[1], out b))
                 {
@@ -2857,13 +3336,13 @@ namespace csx64
                 {
                     AppendVal(args, 1, (args.sizecode << 2) | 2);
                     AppendVal(args, 1, 16 | c);
-                    if (!AppendAddress(args, a, b, hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; };
+                    if (!TryAppendAddress(args, a, b, hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; };
                 }
                 else if (TryParseImm(args, args.args[1], out hole2))
                 {
                     AppendVal(args, 1, (args.sizecode << 2) | 3);
-                    if (!AppendHole(args, Size(b_sizecode), hole2)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
-                    if (!AppendAddress(args, a, b, hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
+                    if (!TryAppendHole(args, Size(b_sizecode), hole2)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
+                    if (!TryAppendAddress(args, a, b, hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
                 }
                 else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Couldn't parse \"{args.args[1]}\" as a register or imm"); return false; }
             }
@@ -2888,7 +3367,7 @@ namespace csx64
             else if (TryParseAddress(args, args.args[0], out a, out b, out hole))
             {
                 AppendVal(args, 1, (args.sizecode << 2) | 1);
-                if (!AppendAddress(args, a, b, hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
+                if (!TryAppendAddress(args, a, b, hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
             }
             else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Couldn't parse \"{args.args[0]}\" as a register or address"); return false; }
 
@@ -2901,7 +3380,7 @@ namespace csx64
             if (!TryParseAddress(args, args.args[0], out UInt64 a, out UInt64 b, out Hole hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Jump expected address as first arg\n-> {args.err.Item2}"); return false; }
 
             AppendVal(args, 1, (UInt64)op);
-            if (!AppendAddress(args, a, b, hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
+            if (!TryAppendAddress(args, a, b, hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
 
             return true;
         }
@@ -2930,7 +3409,7 @@ namespace csx64
                     if (i > 0 && args.args[i - 1][0] != 'x') --mult;
 
                     for (UInt64 j = 0; j < mult; ++j)
-                        if (!AppendHole(args, Size(args.sizecode), hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
+                        if (!TryAppendHole(args, Size(args.sizecode), hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
                 }
                 // if a string
                 else if (args.args[i][0] == '"' || args.args[i][0] == '\'')
@@ -2953,7 +3432,7 @@ namespace csx64
                     if (!TryParseImm(args, args.args[i], out hole)) return false;
 
                     // make one of them
-                    if (!AppendHole(args, Size(args.sizecode), hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
+                    if (!TryAppendHole(args, Size(args.sizecode), hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
                 }
             }
 
@@ -2971,7 +3450,7 @@ namespace csx64
             if (TryParseImm(args, args.args[0], out hole))
             {
                 AppendVal(args, 1, (args.sizecode << 2) | 0);
-                if (!AppendHole(args, Size(args.sizecode), hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
+                if (!TryAppendHole(args, Size(args.sizecode), hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
             }
             else if (TryParseRegister(args, args.args[0], out a))
             {
@@ -2980,13 +3459,30 @@ namespace csx64
             else if (TryParseAddress(args, args.args[0], out a, out b, out hole))
             {
                 AppendVal(args, 1, (args.sizecode << 2) | 2);
-                if (!AppendAddress(args, a, b, hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
+                if (!TryAppendAddress(args, a, b, hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
             }
             else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Couldn't parse \"{args.args[0]}\" as an imm, register, or address"); return false; }
 
             return true;
         }
 
+        private /* REMOVE THIS LATER */ static void printimmnew(Hole hole, StringBuilder b)
+        {
+            if (hole.OP == 0) b.Append($"({hole.Value})");
+            else
+            {
+                printimmnew(hole.Left, b);
+                if(hole.Right != null) printimmnew(hole.Right, b);
+
+                b.Append(hole.OP);
+            }
+        }
+        private /* REMOVE THIS LATER */ static string print(Hole hole)
+        {
+            StringBuilder b = new StringBuilder();
+            printimmnew(hole, b);
+            return b.ToString();
+        }
         public static Tuple<AssembleError, string> Assemble(string code, out ObjectFile file)
         {
             file = new ObjectFile();
@@ -3000,21 +3496,21 @@ namespace csx64
             };
 
             // predefined symbols
-            args.file.Symbols = new Dictionary<string, Symbol>()
+            args.file.Symbols = new Dictionary<string, Hole>()
             {
-                ["__time__"] = new Symbol() { Value = Time(), IsAddress = false, IsFloating = false },
-                ["__version__"] = new Symbol() { Value = Version, IsAddress = false, IsFloating = false },
+                ["__time__"] = new Hole() { Value = Time().ToString() },
+                ["__version__"] = new Hole() { Value = Version.ToString() },
 
-                ["__pinf__"] = new Symbol() { Value = DoubleAsUInt64(double.PositiveInfinity), IsAddress = false, IsFloating = true },
-                ["__ninf__"] = new Symbol() { Value = DoubleAsUInt64(double.NegativeInfinity), IsAddress = false, IsFloating = true },
-                ["__nan__"] = new Symbol() { Value = DoubleAsUInt64(double.NaN), IsAddress = false, IsFloating = true },
+                ["__pinf__"] = new Hole() { Value = double.PositiveInfinity.ToString("e17") },
+                ["__ninf__"] = new Hole() { Value = double.NegativeInfinity.ToString("e17") },
+                ["__nan__"] = new Hole() { Value = double.NaN.ToString("e17") },
 
-                ["__fmax__"] = new Symbol() { Value = DoubleAsUInt64(double.MaxValue), IsAddress = false, IsFloating = true },
-                ["__fmin__"] = new Symbol() { Value = DoubleAsUInt64(double.MinValue), IsAddress = false, IsFloating = true },
-                ["__fepsilon__"] = new Symbol() { Value = DoubleAsUInt64(double.Epsilon), IsAddress = false, IsFloating = true },
+                ["__fmax__"] = new Hole() { Value = double.MaxValue.ToString("e17") },
+                ["__fmin__"] = new Hole() { Value = double.MinValue.ToString("e17") },
+                ["__fepsilon__"] = new Hole() { Value = double.Epsilon.ToString("e17") },
 
-                ["__pi__"] = new Symbol() { Value = DoubleAsUInt64(Math.PI), IsAddress = false, IsFloating = true },
-                ["__e__"] = new Symbol() { Value = DoubleAsUInt64(Math.E), IsAddress = false, IsFloating = true }
+                ["__pi__"] = new Hole() { Value = Math.PI.ToString("e17") },
+                ["__e__"] = new Hole() { Value = Math.E.ToString("e17") },
             };
 
             int pos = 0, end = 0; // position in code
@@ -3023,6 +3519,39 @@ namespace csx64
             UInt64 a = 0, b = 0, c = 0, d = 0;
             Hole hole;
             bool floating;
+
+            string err = null; // error location for evaluation
+
+
+
+
+
+            /* expression testing
+
+            //"~~--(1+2)*(~-(3+4)+1)"
+            string test = "[((8/2)*(2+2))*($10+$11)]";//"~~--(1+2)*(~-(3+4)+1)";
+            Hole _test;
+            if (!TryParseAddress(args, test, out a, out b, out _test)) MessageBox.Show(args.err.Item2);
+            else
+            {
+                StringBuilder str = new StringBuilder();
+                printimmnew(_test, str);
+
+                MessageBox.Show($"postorder: {str}");
+
+                if (!_test.Evaluate(args.file.Symbols, out UInt64 _val, out bool _float, ref err)) MessageBox.Show(err);
+                else MessageBox.Show(_test.Value);
+                //else MessageBox.Show($"{(_float ? "float" : "int")}: {(_float ? AsDouble(_val).ToString() : _val.MakeSigned().ToString())}");
+            }
+
+            */
+
+
+            
+
+
+
+
 
             if (code.Length == 0) return new Tuple<AssembleError, string>(AssembleError.EmptyFile, "The file was empty");
 
@@ -3035,7 +3564,7 @@ namespace csx64
                 // split the line
                 args.rawline = code.Substring(pos, end - pos);
                 if (!SplitLine(args)) return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse line\n-> {args.err.Item2}");
-                // if the separator was a comment character, consume the rest of the line as well as noop
+                // if the separator was a comment character, consume the rest of the line as well as no-op
                 if (end < code.Length && code[end] == '#')
                     for (; end < code.Length && code[end] != '\n'; ++end) ;
 
@@ -3051,31 +3580,42 @@ namespace csx64
                     if (!IsValidLabel(label)) return new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Symbol name \"{label}\" invalid");
                     if (file.Symbols.ContainsKey(label)) return new Tuple<AssembleError, string>(AssembleError.SymbolRedefinition, $"line {args.line}: Symbol \"{label}\" was already defined");
 
-                    // add the symbol as an address
-                    file.Symbols.Add(label, new Symbol() { Value = (UInt64)file.Data.LongCount(), IsAddress = true, IsFloating = false });
+                    // add the symbol as an address (uses illegal symbol #base, which will be defined at link time)
+                    file.Symbols.Add(label, new Hole() { OP = Hole.OPs.Add, Left = new Hole() { Value = "#base" }, Right = new Hole() { Value = file.Data.LongCount().MakeUnsigned().ToString() } });
                 }
 
                 // empty lines are ignored
                 if (args.op != string.Empty)
                 {
-                    // update compile-time symbols (for modifications, also update TryParseImm())
-                    file.Symbols["__line__"] = new Symbol() { Value = (UInt64)args.line, IsAddress = false, IsFloating = false };
-                    file.Symbols["__pos__"] = new Symbol() { Value = (UInt64)file.Data.LongCount(), IsAddress = true, IsFloating = false };
-
                     switch (args.op.ToUpper())
                     {
                         case "GLOBAL":
                             if (args.args.Length != 1) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: GLOBAL expected 1 arg");
+
+                            // test name for legality
                             if (!IsValidLabel(args.args[0])) return new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Invalid label name \"{args.args[0]}\"");
+
+                            // don't add to global table twice
+                            if (file.GlobalSymbols.Contains(args.args[0])) return new Tuple<AssembleError, string>(AssembleError.SymbolRedefinition, $"line {args.line}: Attempt to export symbol \"{args.args[0]}\" multiple times");
+
+                            // add it to the globals list
                             file.GlobalSymbols.Add(args.args[0]);
                             break;
                         case "DEF":
                             if (args.args.Length != 2) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: DEF expected 2 args");
+
+                            // mutate and test name for legality
                             if (!MutateLabel(args, ref args.args[0])) return args.err;
                             if (!IsValidLabel(args.args[0])) return new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Invalid label name \"{args.args[0]}\"");
-                            if (!TryParseInstantImm(args, args.args[1], out a, out floating)) return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: DEF expected a number as third arg\n-> {args.err.Item2}");
+
+                            // get the expression
+                            if (!TryParseImm(args, args.args[1], out hole)) return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: DEF expected an expression as third arg\n-> {args.err.Item2}");
+
+                            // don't redefine a symbol
                             if (file.Symbols.ContainsKey(args.args[0])) return new Tuple<AssembleError, string>(AssembleError.SymbolRedefinition, $"line {args.line}: Symbol \"{args.args[0]}\" was already defined");
-                            file.Symbols.Add(args.args[0], new Symbol() { Value = a, IsAddress = false, IsFloating = floating });
+
+                            // add it to the dictionary
+                            file.Symbols.Add(args.args[0], hole);
                             break;
 
                         case "EMIT": if (!TryProcessEmission(args)) return args.err; break;
@@ -3136,7 +3676,7 @@ namespace csx64
                                 else if (TryParseAddress(args, args.args[1], out b, out c, out hole))
                                 {
                                     AppendVal(args, 1, (a << 4) | (args.sizecode << 2) | 1);
-                                    if (!AppendAddress(args, b, c, hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}");
+                                    if (!TryAppendAddress(args, b, c, hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}");
                                 }
                                 else return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Unknown usage of SWAP");
                             }
@@ -3145,7 +3685,7 @@ namespace csx64
                                 if (TryParseRegister(args, args.args[1], out c))
                                 {
                                     AppendVal(args, 1, (c << 4) | (args.sizecode << 2) | 1);
-                                    if (!AppendAddress(args, a, b, hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value");
+                                    if (!TryAppendAddress(args, a, b, hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value");
                                 }
                                 else return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Unknown usage of SWAP");
                             }
@@ -3213,7 +3753,7 @@ namespace csx64
 
                             AppendVal(args, 1, (UInt64)OPCode.LA);
                             AppendVal(args, 1, a);
-                            if (!AppendAddress(args, b, c, hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}");
+                            if (!TryAppendAddress(args, b, c, hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}");
 
                             break;
 
@@ -3286,7 +3826,7 @@ namespace csx64
                             if (TryParseImm(args, args.args[0], out hole))
                             {
                                 AppendVal(args, 1, (args.sizecode << 2) | 0);
-                                if (!AppendHole(args, Size(args.sizecode), hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}");
+                                if (!TryAppendHole(args, Size(args.sizecode), hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}");
                             }
                             else if (TryParseRegister(args, args.args[0], out a))
                             {
@@ -3309,7 +3849,7 @@ namespace csx64
                             if (!TryParseAddress(args, args.args[0], out a, out b, out hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: CALL expected address as first arg\n-> {args.err.Item2}");
 
                             AppendVal(args, 1, (UInt64)OPCode.CALL);
-                            if (!AppendAddress(args, a, b, hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}");
+                            if (!TryAppendAddress(args, a, b, hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}");
 
                             break;
                         case "RET":
@@ -3366,7 +3906,7 @@ namespace csx64
 
                             AppendVal(args, 1, (UInt64)OPCode.LOOP);
                             AppendVal(args, 1, (b << 4) | (args.sizecode << 2) | a);
-                            if (!AppendAddress(args, c, d, hole)) return args.err;
+                            if (!TryAppendAddress(args, c, d, hole)) return args.err;
 
                             break;
 
@@ -3378,6 +3918,15 @@ namespace csx64
                 pos = end + 1;
             }
 
+            // make sure all global symbols were actually defined prior to link-time
+            foreach (string str in file.GlobalSymbols)
+                if (!file.Symbols.ContainsKey(str)) return new Tuple<AssembleError, string>(AssembleError.UnknownSymbol, $"Global symbol \"{str}\" was never defined");
+
+            // evaluate each symbol and hole to link all internal symbols (object file should then only be dependent on external symbols)
+            foreach (Hole _hole in file.Symbols.Select(h => h.Value).Union(file.Holes.Select(h => h.Value)))
+                _hole.Evaluate(file.Symbols, out a, out floating, ref err);
+
+            // return no error
             return new Tuple<AssembleError, string>(AssembleError.None, string.Empty);
         }
         public static Tuple<LinkError, string> Link(ref byte[] res, params ObjectFile[] objs)
@@ -3391,12 +3940,19 @@ namespace csx64
             res = new byte[filesize + 10]; // give it enough memory to write the whole file plus a header
             filesize = 10;                 // set size to after header (points to writing position)
 
-            UInt64[] offsets = new UInt64[objs.Length];     // offsets for where an object file begins in the resulting exe
+            UInt64[] offsets = new UInt64[objs.Length]; // offsets for where an object file begins in the resulting exe
+            var symbols = new Dictionary<string, Hole>[objs.Length]; // processed symbols for each object file
+
             // create a combined symbols table with predefined values
-            var symbols = new Dictionary<string, Symbol>()
+            var G_symbols = new Dictionary<string, Hole>()
             {
-                ["__prog_end__"] = new Symbol() { Value = (UInt64)res.LongLength, IsAddress = true, IsFloating = false }
+                ["__prog_end__"] = new Hole() { Value = res.LongLength.MakeUnsigned().ToString() }
             };
+
+            UInt64 val; // parsing locations
+            bool floating;
+
+            string err = null; // error location for evaluation
 
             // -------------------------------------------
 
@@ -3409,73 +3965,71 @@ namespace csx64
                 filesize += (UInt64)objs[i].Data.LongCount(); // advance write cursor
             }
 
-            // merge symbols
+            // for each file
             for (int i = 0; i < objs.Length; ++i)
+            {
+                // create temporary symbols dictionary
+                symbols[i] = new Dictionary<string, Hole>(objs[i].Symbols.Count);
+
+                // populate temporary symbols (define #base)
+                foreach (var symbol in objs[i].Symbols) symbols[i].Add(symbol.Key, symbol.Value.Clone("#base", offsets[i].ToString()));
+
+                // merge global symbols
                 foreach (string symbol in objs[i].GlobalSymbols)
                 {
-                    if (symbols.ContainsKey(symbol)) return new Tuple<LinkError, string>(LinkError.SymbolRedefinition, $"Symbol \"{symbol}\" was already defined");
-                    if (!objs[i].Symbols.TryGetValue(symbol, out Symbol _symbol)) return new Tuple<LinkError, string>(LinkError.MissingSymbol, $"Global symbol \"{symbol}\" undefined");
-                    symbols.Add(symbol, new Symbol() { Value = _symbol.IsAddress ? offsets[i] + _symbol.Value : _symbol.Value, IsAddress = _symbol.IsAddress, IsFloating = _symbol.IsFloating });
+                    // don't redefine the same symbol
+                    if (G_symbols.ContainsKey(symbol)) return new Tuple<LinkError, string>(LinkError.SymbolRedefinition, $"Global symbol \"{symbol}\" was already defined");
+                    // make sure the symbol exists in locals dictionary (if using built-in assembler above, this should never happen with valid object files)
+                    if (!symbols[i].TryGetValue(symbol, out Hole hole)) return new Tuple<LinkError, string>(LinkError.MissingSymbol, $"Global symbol \"{symbol}\" undefined");
+
+                    // add to global symbols
+                    G_symbols.Add(symbol, hole);
                 }
 
-            // patch holes
+                // link this object's holes
+            }
+
+            // for each object file
             for (int i = 0; i < objs.Length; ++i)
-                foreach (var hole in objs[i].Holes)
+            {
+                // patch all the holes
+                foreach (var entry in objs[i].Holes)
                 {
-                    // compute the hole value
-                    UInt64 value = hole.Value.Value;
-                    double fvalue = hole.Value.FValue;
-                    bool floating = hole.Value.Floating;
+                    Hole hole = entry.Value.Clone(); // create a copy of the hole (so as not to corrupt object file)
 
-                    Symbol symbol;
-                    foreach (Hole.Segment seg in hole.Value.Segments)
+                    // fill in the value
+                    if (hole.Evaluate(symbols[i], out val, out floating, ref err) || hole.Evaluate(G_symbols, out val, out floating, ref err))
                     {
-                        // prefer static definitions
-                        if (objs[i].Symbols.TryGetValue(seg.Symbol, out symbol))
-                        {
-                            if (symbol.IsFloating) { floating = true; fvalue += seg.IsNegative ? -AsDouble(symbol.Value) : AsDouble(symbol.Value); }
-                            else
-                            {
-                                UInt64 temp = symbol.IsAddress ? symbol.Value + offsets[i] : symbol.Value;
-                                value += seg.IsNegative ? ~temp + 1 : temp;
-                            }
-                        }
-                        else if (symbols.TryGetValue(seg.Symbol, out symbol))
-                        {
-                            if (symbol.IsFloating) { floating = true; fvalue += seg.IsNegative ? -AsDouble(symbol.Value) : AsDouble(symbol.Value); }
-                            else value += seg.IsNegative ? ~symbol.Value + 1 : symbol.Value;
-                        }
-                        else return new Tuple<LinkError, string>(LinkError.MissingSymbol, $"Symbol \"{seg.Symbol}\" undefined");
-                    }
-
-                    // fill it in
-                    {
-                        /* !! IF MODIFIED HERE, MUST ALSO BE MODIFIED IN AppendHole() !! */
+                        /* !! IF MODIFIED HERE, MUST ALSO BE MODIFIED IN LINKER HOLE PATCHING !! */
 
                         // if it's floating-point
                         if (floating)
                         {
                             // only 64-bit and 32-bit are supported
-                            switch (hole.Key.Size)
+                            switch (entry.Key.Size)
                             {
-                                case 8: Write(res, hole.Key.Address + offsets[i], 8, DoubleAsUInt64(value.MakeSigned() + fvalue)); break;
-                                case 4: Write(res, hole.Key.Address + offsets[i], 4, FloatAsUInt64(value.MakeSigned() + (float)fvalue)); break;
+                                case 8: Write(res, entry.Key.Address + offsets[i], 8, val); break;
+                                case 4: Write(res, entry.Key.Address + offsets[i], 4, FloatAsUInt64((float)AsDouble(val))); break;
 
                                 default: return new Tuple<LinkError, string>(LinkError.FormatError, $"Attempt to use unsupported floating-point size");
                             }
                         }
                         // otherwise it's integral
-                        else Write(res, hole.Key.Address + offsets[i], hole.Key.Size, value);
+                        else Write(res, entry.Key.Address + offsets[i], entry.Key.Size, val);
                     }
-                    // fill it in
-                    Write(res, hole.Key.Address + offsets[i], hole.Key.Size, floating ? DoubleAsUInt64(value.MakeSigned() + fvalue) : value);
+                    // if any holes fail, link fails
+                    else return new Tuple<LinkError, string>(LinkError.MissingSymbol, $"Failed to evaluate expression\n-> {err}");
                 }
+            }
 
             // write the header
-            if (!symbols.TryGetValue("main", out Symbol main) || !main.IsAddress) return new Tuple<LinkError, string>(LinkError.MissingSymbol, "No entry point");
+            if (!G_symbols.TryGetValue("main", out Hole main)) return new Tuple<LinkError, string>(LinkError.MissingSymbol, "No entry point \"main\"");
+            if (!main.Evaluate(G_symbols, out val, out floating, ref err)) return new Tuple<LinkError, string>(LinkError.MissingSymbol, $"Failed to evaluate global symbol \"main\"\n-> {err}");
+            if (floating) return new Tuple<LinkError, string>(LinkError.FormatError, "Global symbol \"main\" may not be floating point");
+
             Write(res, 0, 1, (UInt64)OPCode.JMP);
             Write(res, 1, 1, 0x80);
-            Write(res, 2, 8, main.Value);
+            Write(res, 2, 8, val);
 
             // linked successfully
             return new Tuple<LinkError, string>(LinkError.None, string.Empty);
