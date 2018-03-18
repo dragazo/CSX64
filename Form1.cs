@@ -38,6 +38,7 @@ namespace csx64
             InitializeComponent();
 
             CInitialized = false;
+            CodeBox.Font = new Font(FontFamily.GenericMonospace, 14);
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -98,12 +99,16 @@ namespace csx64
             byte[] exe = null;
             var link_res = Computer.Link(8, ref exe, file);
             if (link_res.Item1 != Computer.LinkError.None) { MessageBox.Show(link_res.Item2, "Link Error"); return; }
+            
 
             /*
             StringBuilder b = new StringBuilder();
             for (int i = 0; i < exe.Length; ++i)
                 b.Append($"{i.ToString().PadLeft(3, '0')}: {exe[i].ToString().PadLeft(3, '0')} - {Convert.ToString(exe[i], 2).PadLeft(8, '0')}\n");
             MessageBox.Show(b.ToString());
+
+            MessageBox.Show($"{Computer.ConvertDouble(Math.PI):x16}");
+
             */
 
             C.Initialize(exe);
@@ -143,6 +148,39 @@ namespace csx64
             while (PauseButton.Enabled) await Task.Delay(1);
 
             CInitialized = false;
+        }
+
+        private void CodeBox_KeyDown(object sender, KeyEventArgs e)
+        {
+            // support for select all
+            if (e.Control && e.KeyCode == Keys.A)
+            {
+                CodeBox.SelectAll();
+                e.SuppressKeyPress = true;
+            }
+            // replace tabs with spaces
+            else if (e.KeyCode == Keys.Tab)
+            {
+                CodeBox.Paste("    ");
+                e.SuppressKeyPress = true;
+            }
+            // copy current line spacing on return
+            else if (e.KeyCode == Keys.Return)
+            {
+                int end = CodeBox.SelectionStart;
+                int start = 0, count;
+
+                if (end > 0)
+                {
+                    for (start = end - 1; start > 0 && CodeBox.Text[start] != '\n'; --start) ;
+                    if (CodeBox.Text[start] == '\n') ++start;
+                }
+
+                for (count = 0; start + count < end && CodeBox.Text[start + count] == ' '; ++count) ;
+
+                CodeBox.Paste("\r\n" + CodeBox.Text.Substring(start, count));
+                e.SuppressKeyPress = true;
+            }
         }
     }
 }
