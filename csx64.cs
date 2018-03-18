@@ -376,35 +376,123 @@ namespace csx64
 
         // -- op utilities --
 
-        // [8: binary op]   [4: dest][2: size][2: mode]   (mode = 0: [size: imm]   mode = 1: [4:][4: r]   mode = 2: [address]   mode = 3: UND)
-        private bool ParseBinaryOpFormat(ref UInt64 s, ref UInt64 a, ref UInt64 b)
+        /*
+        [8: binary op]   [4: dest][2: size][2: mode]
+	        mode = 0: [size: imm]
+		        dest <- imm
+	        mode = 1: [address]
+		        dest <- M[address]
+	        mode = 2: [3:][1: mode2][4: src]
+		        mode2 = 0:
+			        dest <- src
+		        mode2 = 1: [address]
+			        M[address] <- src
+	        mode = 3: [size: imm]   [address]
+		        M[address] <- imm
+        */
+        private bool FetchBinaryOpFormat(ref UInt64 s, ref UInt64 m, ref UInt64 a, ref UInt64 b)
         {
             // read settings
             if (!GetMem(1, ref s)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
 
-            // get b
+            // switch through mode
             switch (s & 3)
             {
-                case 0: if (!GetMem(Size((s >> 2) & 3), ref b)) return false; break;
-                case 1: if (!GetMem(1, ref b)) return false; b = Registers[b & 15].Get((s >> 2) & 3); break;
-                case 2: if (!GetAddress(ref b) || !GetMem(b, Size((s >> 2) & 3), ref b)) return false; break;
-
-                // otherwise undefined
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                case 0:
+                    a = Registers[s >> 4].Get(sizecode);
+                    if (!GetMem(Size(sizecode), ref b)) return false;
+                    break;
+                case 1:
+                    a = Registers[s >> 4].Get(sizecode);
+                    if (!GetAddress(ref b) || !GetMem(b, Size(sizecode), ref b)) return false;
+                    break;
+                case 2:
+                    if (!GetMem(1, ref b)) return false;
+                    switch ((b >> 4) & 1)
+                    {
+                        case 0:
+                            a = Registers[s >> 4].Get(sizecode);
+                            b = Registers[b & 15].Get(sizecode);
+                            break;
+                        case 1:
+                            if (!GetAddress(ref m) || !GetMem(m, Size(sizecode), ref a)) return false;
+                            b = Registers[b & 15].Get(sizecode);
+                            s |= 256;
+                            break;
+                    }
+                    break;
+                case 3:
+                    if (!GetMem(Size(sizecode), ref b)) return false;
+                    if (!GetAddress(ref m) || !GetMem(m, Size(sizecode), ref a)) return false;
+                    break;
             }
-
-            // get a
-            a = Registers[s >> 4].Get((s >> 2) & 3);
 
             return true;
         }
-        // [8: unary op]   [4: dest][2:][2: size]
-        private bool ParseUnaryOpFormat(ref UInt64 s, ref UInt64 a)
+        private bool StoreBinaryOpFormat(UInt64 s, UInt64 m, UInt64 res)
         {
-            // get settings
-            if (!GetMem(1, ref s)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
 
-            a = Registers[s >> 4].Get(s & 3);
+            // switch through mode
+            switch (s & 3)
+            {
+                case 0:
+                case 1:
+                reg:
+                    Registers[s >> 4].Set(sizecode, res);
+                    break;
+                case 2:
+                    if (s < 256) goto reg; else goto mem;
+                case 3:
+                mem:
+                    if (!SetMem(m, Size(sizecode), res)) return false;
+                    break;
+            }
+
+            return true;
+        }
+
+        /*
+        [8: unary op]   [4: dest][2: size][1:][1: mem]
+	        mem = 0:
+		        dest <- dest
+	        mem = 1: [address]
+		        M[address] <- M[address]
+        */
+        private bool FetchUnaryOpFormat(ref UInt64 s, ref UInt64 m, ref UInt64 a)
+        {
+            // read settings
+            if (!GetMem(1, ref s)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
+
+            // switch through mode
+            switch (s & 1)
+            {
+                case 0:
+                    a = Registers[s >> 4].Get(sizecode);
+                    break;
+                case 1:
+                    if (!GetAddress(ref m) || !GetMem(m, Size(sizecode), ref a)) return false;
+                    break;
+            }
+
+            return true;
+        }
+        private bool StoreUnaryOpFormat(UInt64 s, UInt64 m, UInt64 res)
+        {
+            UInt64 sizecode = (s >> 2) & 3;
+
+            // switch through mode
+            switch (s & 1)
+            {
+                case 0:
+                    Registers[s >> 4].Set(sizecode, res);
+                    break;
+                case 1:
+                    if (!SetMem(m, Size(sizecode), res)) return false;
+                    break;
+            }
 
             return true;
         }
@@ -431,738 +519,304 @@ namespace csx64
             Flags.C = double.IsNaN(value);
         }
 
+        // -- special ops --
+
+        private bool ProcessMov(bool apply = true)
+        {
+            UInt64 s = 0, m = 0, a = 0, b = 0;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
+
+            return apply ? StoreBinaryOpFormat(s, m, b) : true;
+        }
+
         // -- integral ops --
 
-        /* -- ADD --
-
-        Description:
-            Computes the addition of two integers.
-            The destination must be a register, but the value to add may be an imm, reg, or value from memory.
-
-        Operation:
-            byte:  byte  dest <- byte  dest + byte  val
-            word:  word  dest <- word  dest + word  val
-            dword: dword dest <- dword dest + dword val
-            qword: qword dest <- qword dest + qword val
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative (high bit set), and cleared otherwise.
-            PF is set if the result has even parity in the low 8 bits, and cleared otherwise.
-            
-            CF is set if the addition caused a carry out from the high bit, and cleared otherwise.
-            OF is set if the addition resulted in arithmetic over/underflow, and cleared otherwise.
-
-        OPCode Format: [8: add]   [4: dest][2: size][2: mode]   (mode = 0: [size: imm]   mode = 1: [4:][4: r]   mode = 2: [address]   mode = 3: UND)
-        */
         private bool ProcessAdd()
         {
-            UInt64 s = 0, a = 0, b = 0;
-            if (!ParseBinaryOpFormat(ref s, ref a, ref b)) return false;
+            UInt64 s = 0, m = 0, a = 0, b = 0;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
             UInt64 res = Truncate(a + b, sizecode);
-            Registers[s >> 4].Set(sizecode, res);
 
             UpdateFlagsI(res, sizecode);
             Flags.C = res < a && res < b; // if overflow is caused, some of one value must go toward it, so the truncated result must necessarily be less than both args
             Flags.O = Positive(a, sizecode) == Positive(b, sizecode) && Positive(a, sizecode) != Positive(res, sizecode);
 
-            return true;
+            return StoreBinaryOpFormat(s, m, res);
         }
-        /* -- SUB --
-
-        Description:
-            Computes the subtraction of two integers.
-            The destination must be a register, but the value to add may be an imm, reg, or value from memory.
-            This operation sets the flags in such a way as to make conditional ops reflect their respective conditions for the two values (e.g. ja = dest u> val, jge = dest s>= val, etc.).
-
-        Operation:
-            byte:  byte  dest <- byte  dest - byte  val
-            word:  word  dest <- word  dest - word  val
-            dword: dword dest <- dword dest - dword val
-            qword: qword dest <- qword dest - qword val
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative (high bit set), and cleared otherwise.
-            PF is set if the result has even parity in the low 8 bits, and cleared otherwise.
-            
-            CF is set if the addition caused a borrow from the high bit, and cleared otherwise.
-            OF is set if the addition resulted in arithmetic over/underflow, and cleared otherwise.
-
-        OPCode Format: [8: sub]   [4: dest][2: size][2: mode]   (mode = 0: [size: imm]   mode = 1: [4:][4: r]   mode = 2: [address]   mode = 3: UND)
-        */
         private bool ProcessSub(bool apply = true)
         {
-            UInt64 s = 0, a = 0, b = 0;
-            if (!ParseBinaryOpFormat(ref s, ref a, ref b)) return false;
+            UInt64 s = 0, m = 0, a = 0, b = 0;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
             UInt64 res = Truncate(a - b, sizecode);
-            if (apply) Registers[s >> 4].Set(sizecode, res);
 
             UpdateFlagsI(res, sizecode);
             Flags.C = a < b; // if a < b, a borrow was taken from the highest bit
             Flags.O = Positive(a, sizecode) != Positive(b, sizecode) && Positive(a, sizecode) != Positive(res, sizecode);
 
-            return true;
+            return apply ? StoreBinaryOpFormat(s, m, res) : true;
         }
 
-        /* -- BMUL --
-
-        Description:
-            Computes the multiplication of two integers, keeping only the low half of the result.
-            The destination must be a register, but the value to add may be an imm, reg, or value from memory.
-
-        Operation:
-            byte:  byte  dest <- byte  dest * byte  val
-            word:  word  dest <- word  dest * word  val
-            dword: dword dest <- dword dest * dword val
-            qword: qword dest <- qword dest * qword val
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative (high bit set), and cleared otherwise.
-            PF is set if the result has even parity in the low 8 bits, and cleared otherwise.
-
-        OPCode Format: [8: bmul]   [4: dest][2: size][2: mode]   (mode = 0: [size: imm]   mode = 1: [4:][4: r]   mode = 2: [address]   mode = 3: UND)
-        */
         private bool ProcessBmul()
         {
-            UInt64 s = 0, a = 0, b = 0;
-            if (!ParseBinaryOpFormat(ref s, ref a, ref b)) return false;
+            UInt64 s = 0, m = 0, a = 0, b = 0;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
             UInt64 res = Truncate(a * b, sizecode);
-            Registers[s >> 4].Set(sizecode, res);
 
             UpdateFlagsI(res, sizecode);
 
-            return true;
+            return StoreBinaryOpFormat(s, m, res);
         }
 
-        /* -- BUDIV --
-
-        Description:
-            Computes the division of two unsigned integers.
-            The destination must be a register, but the value to add may be an imm, reg, or value from memory.
-            Causes an arithmetic error on division by zero.
-
-        Operation:
-            byte:  byte  dest <- byte  dest / byte  val
-            word:  word  dest <- word  dest / word  val
-            dword: dword dest <- dword dest / dword val
-            qword: qword dest <- qword dest / qword val
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative (high bit set), and cleared otherwise.
-            PF is set if the result has even parity in the low 8 bits, and cleared otherwise.
-
-        OPCode Format: [8: budiv]   [4: dest][2: size][2: mode]   (mode = 0: [size: imm]   mode = 1: [4:][4: r]   mode = 2: [address]   mode = 3: UND)
-        */
         private bool ProcessBudiv()
         {
-            UInt64 s = 0, a = 0, b = 0;
-            if (!ParseBinaryOpFormat(ref s, ref a, ref b)) return false;
+            UInt64 s = 0, m = 0, a = 0, b = 0;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
             if (b == 0) { Fail(ErrorCode.ArithmeticError); return false; }
 
             UInt64 res = Truncate(a / b, sizecode);
-            Registers[s >> 4].Set(sizecode, res);
 
             UpdateFlagsI(res, sizecode);
 
-            return true;
+            return StoreBinaryOpFormat(s, m, res);
         }
-        /* -- BUMOD --
-
-        Description:
-            Computes the remainder of division of two unsigned integers.
-            The destination must be a register, but the value to add may be an imm, reg, or value from memory.
-            Causes an arithmetic error on division by zero.
-
-        Operation:
-            byte:  byte  dest <- byte  dest % byte  val
-            word:  word  dest <- word  dest % word  val
-            dword: dword dest <- dword dest % dword val
-            qword: qword dest <- qword dest % qword val
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative (high bit set), and cleared otherwise.
-            PF is set if the result has even parity in the low 8 bits, and cleared otherwise.
-
-        OPCode Format: [8: bumod]   [4: dest][2: size][2: mode]   (mode = 0: [size: imm]   mode = 1: [4:][4: r]   mode = 2: [address]   mode = 3: UND)
-        */
         private bool ProcessBumod()
         {
-            UInt64 s = 0, a = 0, b = 0;
-            if (!ParseBinaryOpFormat(ref s, ref a, ref b)) return false;
+            UInt64 s = 0, m = 0, a = 0, b = 0;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
             if (b == 0) { Fail(ErrorCode.ArithmeticError); return false; }
 
             UInt64 res = Truncate(a % b, sizecode);
-            Registers[s >> 4].Set(sizecode, res);
 
             UpdateFlagsI(res, sizecode);
 
-            return true;
+            return StoreBinaryOpFormat(s, m, res);
         }
 
-        /* -- BSDIV --
-
-        Description:
-            Computes the division of two signed integers.
-            The destination must be a register, but the value to add may be an imm, reg, or value from memory.
-            Causes an arithmetic error on division by zero.
-
-        Operation:
-            byte:  byte  dest <- byte  dest / byte  val
-            word:  word  dest <- word  dest / word  val
-            dword: dword dest <- dword dest / dword val
-            qword: qword dest <- qword dest / qword val
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative (high bit set), and cleared otherwise.
-            PF is set if the result has even parity in the low 8 bits, and cleared otherwise.
-
-        OPCode Format: [8: bsdiv]   [4: dest][2: size][2: mode]   (mode = 0: [size: imm]   mode = 1: [4:][4: r]   mode = 2: [address]   mode = 3: UND)
-        */
         private bool ProcessBsdiv()
         {
-            UInt64 s = 0, a = 0, b = 0;
-            if (!ParseBinaryOpFormat(ref s, ref a, ref b)) return false;
+            UInt64 s = 0, m = 0, a = 0, b = 0;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
             if (b == 0) { Fail(ErrorCode.ArithmeticError); return false; }
 
             UInt64 res = Truncate((SignExtend(a, sizecode).MakeSigned() / SignExtend(b, sizecode).MakeSigned()).MakeUnsigned(), sizecode);
-            Registers[s >> 4].Set(sizecode, res);
 
             UpdateFlagsI(res, sizecode);
 
-            return true;
+            return StoreBinaryOpFormat(s, m, res);
         }
-        /* -- BSMOD --
-
-        Description:
-            Computes the remainder of division of two signed integers.
-            The destination must be a register, but the value to add may be an imm, reg, or value from memory.
-            Causes an arithmetic error on division by zero.
-            If dest or val is negative, the result is platform-dependent.
-
-        Operation:
-            byte:  byte  dest <- byte  dest % byte  val
-            word:  word  dest <- word  dest % word  val
-            dword: dword dest <- dword dest % dword val
-            qword: qword dest <- qword dest % qword val
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative (high bit set), and cleared otherwise.
-            PF is set if the result has even parity in the low 8 bits, and cleared otherwise.
-
-        OPCode Format: [8: bsmod]   [4: dest][2: size][2: mode]   (mode = 0: [size: imm]   mode = 1: [4:][4: r]   mode = 2: [address]   mode = 3: UND)
-        */
         private bool ProcessBsmod()
         {
-            UInt64 s = 0, a = 0, b = 0;
-            if (!ParseBinaryOpFormat(ref s, ref a, ref b)) return false;
+            UInt64 s = 0, m = 0, a = 0, b = 0;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
             if (b == 0) { Fail(ErrorCode.ArithmeticError); return false; }
 
             UInt64 res = Truncate((SignExtend(a, sizecode).MakeSigned() % SignExtend(b, sizecode).MakeSigned()).MakeUnsigned(), sizecode);
-            Registers[s >> 4].Set(sizecode, res);
 
             UpdateFlagsI(res, sizecode);
 
-            return true;
+            return StoreBinaryOpFormat(s, m, res);
         }
 
-        /* -- SL --
-
-        Description:
-            Computes a logical left shift of an unsigned integer by an unsigned integer.
-            The destination must be a register, but the value to add may be an imm, reg, or value from memory.
-            Shifting an n-bit value is performed in modulo-n.
-            Low-order shifted bits are filled with 0.
-
-        Operation:
-            byte:  byte  dest <- byte  dest << byte  val
-            word:  word  dest <- word  dest << word  val
-            dword: dword dest <- dword dest << dword val
-            qword: qword dest <- qword dest << qword val
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative (high bit set), and cleared otherwise.
-            PF is set if the result has even parity in the low 8 bits, and cleared otherwise.
-
-        OPCode Format: [8: sl]   [4: dest][2: size][2: mode]   (mode = 0: [size: imm]   mode = 1: [4:][4: r]   mode = 2: [address]   mode = 3: UND)
-        */
         private bool ProcessSL()
         {
-            UInt64 s = 0, a = 0, b = 0;
-            if (!ParseBinaryOpFormat(ref s, ref a, ref b)) return false;
+            UInt64 s = 0, m = 0, a = 0, b = 0;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
             UInt16 sh = (UInt16)(b % SizeBits(sizecode));
             UInt64 res = Truncate(a << sh, sizecode);
-            Registers[s >> 4].Set(sizecode, res);
 
             UpdateFlagsI(res, sizecode);
 
-            return true;
+            return StoreBinaryOpFormat(s, m, res);
         }
-        /* -- SR --
-
-        Description:
-            Computes a logical right shift of an unsigned integer by an unsigned integer.
-            The destination must be a register, but the value to add may be an imm, reg, or value from memory.
-            Shifting an n-bit value is performed in modulo-n.
-            High-order shifted bits are filled with 0.
-
-        Operation:
-            byte:  byte  dest <- byte  dest >> byte  val
-            word:  word  dest <- word  dest >> word  val
-            dword: dword dest <- dword dest >> dword val
-            qword: qword dest <- qword dest >> qword val
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative (high bit set), and cleared otherwise.
-            PF is set if the result has even parity in the low 8 bits, and cleared otherwise.
-
-        OPCode Format: [8: sr]   [4: dest][2: size][2: mode]   (mode = 0: [size: imm]   mode = 1: [4:][4: r]   mode = 2: [address]   mode = 3: UND)
-        */
         private bool ProcessSR()
         {
-            UInt64 s = 0, a = 0, b = 0;
-            if (!ParseBinaryOpFormat(ref s, ref a, ref b)) return false;
+            UInt64 s = 0, m = 0, a = 0, b = 0;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
             UInt16 sh = (UInt16)(b % SizeBits(sizecode));
             UInt64 res = a >> sh;
-            Registers[s >> 4].Set(sizecode, res);
 
             UpdateFlagsI(res, sizecode);
 
-            return true;
+            return StoreBinaryOpFormat(s, m, res);
         }
 
-        /* -- SAL --
-
-        Description:
-            Computes an arithmetic left shift of a signed integer by an unsigned integer.
-            The destination must be a register, but the value to add may be an imm, reg, or value from memory.
-            Shifting an n-bit value is performed in modulo-n.
-            Low-order shifted bits are filled with 0.
-
-        Operation:
-            byte:  byte  dest <- byte  dest << byte  val
-            word:  word  dest <- word  dest << word  val
-            dword: dword dest <- dword dest << dword val
-            qword: qword dest <- qword dest << qword val
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative (high bit set), and cleared otherwise.
-            PF is set if the result has even parity in the low 8 bits, and cleared otherwise.
-
-        OPCode Format: [8: sal]   [4: dest][2: size][2: mode]   (mode = 0: [size: imm]   mode = 1: [4:][4: r]   mode = 2: [address]   mode = 3: UND)
-        */
         private bool ProcessSAL()
         {
-            UInt64 s = 0, a = 0, b = 0;
-            if (!ParseBinaryOpFormat(ref s, ref a, ref b)) return false;
+            UInt64 s = 0, m = 0, a = 0, b = 0;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
             UInt16 sh = (UInt16)(b % SizeBits(sizecode));
             UInt64 res = Truncate((SignExtend(a, sizecode).MakeSigned() << sh).MakeUnsigned(), sizecode);
-            Registers[s >> 4].Set(sizecode, res);
 
             UpdateFlagsI(res, sizecode);
 
-            return true;
+            return StoreBinaryOpFormat(s, m, res);
         }
-        /* -- SL --
-
-        Description:
-            Computes an arithmetic right shift of a signed integer by an unsigned integer.
-            The destination must be a register, but the value to add may be an imm, reg, or value from memory.
-            Shifting an n-bit value is performed in modulo-n.
-            High-order shifted bits are filled with the sign bit.
-
-        Operation:
-            byte:  byte  dest <- byte  dest >> byte  val
-            word:  word  dest <- word  dest >> word  val
-            dword: dword dest <- dword dest >> dword val
-            qword: qword dest <- qword dest >> qword val
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative (high bit set), and cleared otherwise.
-            PF is set if the result has even parity in the low 8 bits, and cleared otherwise.
-
-        OPCode Format: [8: sar]   [4: dest][2: size][2: mode]   (mode = 0: [size: imm]   mode = 1: [4:][4: r]   mode = 2: [address]   mode = 3: UND)
-        */
         private bool ProcessSAR()
         {
-            UInt64 s = 0, a = 0, b = 0;
-            if (!ParseBinaryOpFormat(ref s, ref a, ref b)) return false;
+            UInt64 s = 0, m = 0, a = 0, b = 0;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
             UInt16 sh = (UInt16)(b % SizeBits(sizecode));
             UInt64 res = Truncate((SignExtend(a, sizecode).MakeSigned() >> sh).MakeUnsigned(), sizecode);
-            Registers[s >> 4].Set(sizecode, res);
 
             UpdateFlagsI(res, sizecode);
 
-            return true;
+            return StoreBinaryOpFormat(s, m, res);
         }
 
-        /* -- RL --
-
-        Description:
-            Computes a logical left rotation of an unsigned integer by an unsigned integer.
-            The destination must be a register, but the value to add may be an imm, reg, or value from memory.
-            Shifting an n-bit value is performed in modulo-n.
-
-        Operation:
-            byte:  byte  dest <- byte  dest <<r byte  val
-            word:  word  dest <- word  dest <<r word  val
-            dword: dword dest <- dword dest <<r dword val
-            qword: qword dest <- qword dest <<r qword val
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative (high bit set), and cleared otherwise.
-            PF is set if the result has even parity in the low 8 bits, and cleared otherwise.
-
-        OPCode Format: [8: rl]   [4: dest][2: size][2: mode]   (mode = 0: [size: imm]   mode = 1: [4:][4: r]   mode = 2: [address]   mode = 3: UND)
-        */
         private bool ProcessRL()
         {
-            UInt64 s = 0, a = 0, b = 0;
-            if (!ParseBinaryOpFormat(ref s, ref a, ref b)) return false;
+            UInt64 s = 0, m = 0, a = 0, b = 0;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
             UInt16 sh = (UInt16)(b % SizeBits(sizecode));
             UInt64 res = Truncate((a << sh) | (a >> ((UInt16)SizeBits(sizecode) - sh)), sizecode);
-            Registers[s >> 4].Set(sizecode, res);
 
             UpdateFlagsI(res, sizecode);
 
-            return true;
+            return StoreBinaryOpFormat(s, m, res);
         }
-        /* -- RR --
-
-        Description:
-            Computes a logical right rotation of an unsigned integer by an unsigned integer.
-            The destination must be a register, but the value to add may be an imm, reg, or value from memory.
-            Shifting an n-bit value is performed in modulo-n.
-
-        Operation:
-            byte:  byte  dest <- byte  dest >>r byte  val
-            word:  word  dest <- word  dest >>r word  val
-            dword: dword dest <- dword dest >>r dword val
-            qword: qword dest <- qword dest >>r qword val
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative (high bit set), and cleared otherwise.
-            PF is set if the result has even parity in the low 8 bits, and cleared otherwise.
-
-        OPCode Format: [8: rr]   [4: dest][2: size][2: mode]   (mode = 0: [size: imm]   mode = 1: [4:][4: r]   mode = 2: [address]   mode = 3: UND)
-        */
         private bool ProcessRR()
         {
-            UInt64 s = 0, a = 0, b = 0;
-            if (!ParseBinaryOpFormat(ref s, ref a, ref b)) return false;
+            UInt64 s = 0, m = 0, a = 0, b = 0;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
             UInt16 sh = (UInt16)(b % SizeBits(sizecode));
             UInt64 res = Truncate((a >> sh) | (a << ((UInt16)SizeBits(sizecode) - sh)), sizecode);
-            Registers[s >> 4].Set(sizecode, res);
 
             UpdateFlagsI(res, sizecode);
 
-            return true;
+            return StoreBinaryOpFormat(s, m, res);
         }
 
-        /* -- AND --
-
-        Description:
-            Computes the logical and of two unsigned integers.
-            The destination must be a register, but the value to add may be an imm, reg, or value from memory.
-
-        Operation:
-            byte:  byte  dest <- byte  dest and byte  val
-            word:  word  dest <- word  dest and word  val
-            dword: dword dest <- dword dest and dword val
-            qword: qword dest <- qword dest and qword val
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative (high bit set), and cleared otherwise.
-            PF is set if the result has even parity in the low 8 bits, and cleared otherwise.
-
-        OPCode Format: [8: and]   [4: dest][2: size][2: mode]   (mode = 0: [size: imm]   mode = 1: [4:][4: r]   mode = 2: [address]   mode = 3: UND)
-        */
         private bool ProcessAnd(bool apply = true)
         {
-            UInt64 s = 0, a = 0, b = 0;
-            if (!ParseBinaryOpFormat(ref s, ref a, ref b)) return false;
+            UInt64 s = 0, m = 0, a = 0, b = 0;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
             UInt64 res = a & b;
-            if (apply) Registers[s >> 4].Set(sizecode, res);
 
             UpdateFlagsI(res, sizecode);
 
-            return true;
+            return apply ? StoreBinaryOpFormat(s, m, res) : true;
         }
-        /* -- OR --
-
-        Description:
-            Computes the logical or of two unsigned integers.
-            The destination must be a register, but the value to add may be an imm, reg, or value from memory.
-
-        Operation:
-            byte:  byte  dest <- byte  dest or byte  val
-            word:  word  dest <- word  dest or word  val
-            dword: dword dest <- dword dest or dword val
-            qword: qword dest <- qword dest or qword val
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative (high bit set), and cleared otherwise.
-            PF is set if the result has even parity in the low 8 bits, and cleared otherwise.
-
-        OPCode Format: [8: or]   [4: dest][2: size][2: mode]   (mode = 0: [size: imm]   mode = 1: [4:][4: r]   mode = 2: [address]   mode = 3: UND)
-        */
         private bool ProcessOr()
         {
-            UInt64 s = 0, a = 0, b = 0;
-            if (!ParseBinaryOpFormat(ref s, ref a, ref b)) return false;
+            UInt64 s = 0, m = 0, a = 0, b = 0;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
             UInt64 res = a | b;
-            Registers[s >> 4].Set(sizecode, res);
 
             UpdateFlagsI(res, sizecode);
 
-            return true;
+            return StoreBinaryOpFormat(s, m, res);
         }
-        /* -- XOR --
-
-        Description:
-            Computes the logical exclusive or of two unsigned integers.
-            The destination must be a register, but the value to add may be an imm, reg, or value from memory.
-
-        Operation:
-            byte:  byte  dest <- byte  dest xor byte  val
-            word:  word  dest <- word  dest xor word  val
-            dword: dword dest <- dword dest xor dword val
-            qword: qword dest <- qword dest xor qword val
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative (high bit set), and cleared otherwise.
-            PF is set if the result has even parity in the low 8 bits, and cleared otherwise.
-
-        OPCode Format: [8: xor]   [4: dest][2: size][2: mode]   (mode = 0: [size: imm]   mode = 1: [4:][4: r]   mode = 2: [address]   mode = 3: UND)
-        */
         private bool ProcessXor()
         {
-            UInt64 s = 0, a = 0, b = 0;
-            if (!ParseBinaryOpFormat(ref s, ref a, ref b)) return false;
+            UInt64 s = 0, m = 0, a = 0, b = 0;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
             UInt64 res = a ^ b;
-            Registers[s >> 4].Set(sizecode, res);
 
             UpdateFlagsI(res, sizecode);
 
-            return true;
+            return StoreBinaryOpFormat(s, m, res);
         }
 
-        /* -- INC --
-
-        Description:
-            Equivalent to using ADD with a value of 1.
-
-        Operation:
-            byte:  byte  dest <- byte  dest + 1
-            word:  word  dest <- word  dest + 1
-            dword: dword dest <- dword dest + 1
-            qword: qword dest <- qword dest + 1
-
-        Flags Affected:
-            Equivalent to using ADD with a value of 1
-
-        OPCode Format: [8: inc]   [4: dest][2:][2: size]
-        */
         private bool ProcessInc()
         {
-            UInt64 s = 0, a = 0;
-            if (!ParseUnaryOpFormat(ref s, ref a)) return false;
-            UInt64 sizecode = s & 3;
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
 
             UInt64 res = Truncate(a + 1, sizecode);
-            Registers[s >> 4].Set(sizecode, res);
 
             UpdateFlagsI(res, sizecode);
             Flags.C = res == 0; // carry results in zero
             Flags.O = Positive(a, sizecode) && Negative(res, sizecode); // + -> - is overflow
 
-            return true;
+            return StoreUnaryOpFormat(s, m, res);
         }
-        /* -- INC --
-
-        Description:
-            Equivalent to using SUB with a value of 1.
-
-        Operation:
-            byte:  byte  dest <- byte  dest - 1
-            word:  word  dest <- word  dest - 1
-            dword: dword dest <- dword dest - 1
-            qword: qword dest <- qword dest - 1
-
-        Flags Affected:
-            Equivalent to using SUB with a value of 1
-
-        OPCode Format: [8: dec]   [4: dest][2:][2: size]
-        */
         private bool ProcessDec()
         {
-            UInt64 s = 0, a = 0;
-            if (!ParseUnaryOpFormat(ref s, ref a)) return false;
-            UInt64 sizecode = s & 3;
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
 
             UInt64 res = Truncate(a - 1, sizecode);
-            Registers[s >> 4].Set(sizecode, res);
 
             UpdateFlagsI(res, sizecode);
             Flags.C = a == 0; // a = 0 results in borrow from high bit (carry)
             Flags.O = Negative(a, sizecode) && Positive(res, sizecode); // - -> + is overflow
 
-            return true;
+            return StoreUnaryOpFormat(s, m, res);
         }
-        /* -- NOT --
-
-        Description:
-            Computes the bitwise not of an unsigned integer.
-            Must be performed on a register.
-
-        Operation:
-            byte:  byte  dest <- ~ byte  dest
-            word:  word  dest <- ~ word  dest
-            dword: dword dest <- ~ dword dest
-            qword: qword dest <- ~ qword dest
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative (high bit set), and cleared otherwise.
-            PF is set if the result has even parity in the low 8 bits, and cleared otherwise.
-
-        OPCode Format: [8: not]   [4: dest][2:][2: size]
-        */
         private bool ProcessNot()
         {
-            UInt64 s = 0, a = 0;
-            if (!ParseUnaryOpFormat(ref s, ref a)) return false;
-            UInt64 sizecode = s & 3;
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
 
             UInt64 res = Truncate(~a, sizecode);
-            Registers[s >> 4].Set(sizecode, res);
 
             UpdateFlagsI(res, sizecode);
 
-            return true;
+            return StoreUnaryOpFormat(s, m, res);
         }
-        /* -- NEG --
-
-        Description:
-            Computes the negative of a signed integer.
-            Must be performed on a register.
-
-        Operation:
-            byte:  byte  dest <- - byte  dest
-            word:  word  dest <- - word  dest
-            dword: dword dest <- - dword dest
-            qword: qword dest <- - qword dest
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative (high bit set), and cleared otherwise.
-            PF is set if the result has even parity in the low 8 bits, and cleared otherwise.
-
-        OPCode Format: [8: neg]   [4: dest][2:][2: size]
-        */
         private bool ProcessNeg()
         {
-            UInt64 s = 0, a = 0;
-            if (!ParseUnaryOpFormat(ref s, ref a)) return false;
-            UInt64 sizecode = s & 3;
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
 
             UInt64 res = Truncate(~a + 1, sizecode);
-            Registers[s >> 4].Set(sizecode, res);
 
             UpdateFlagsI(res, sizecode);
 
-            return true;
+            return StoreUnaryOpFormat(s, m, res);
         }
-        /* -- ABS --
-
-        Description:
-            Computes the absolute value of a signed integer.
-            Must be performed on a register.
-            Because 2's complement has more negative numbers than positive numbers, the result may be negative (e.g. byte -128 -> byte -128).
-
-        Operation:
-            byte:  byte  dest <- |byte  dest|
-            word:  word  dest <- |word  dest|
-            dword: dword dest <- |dword dest|
-            qword: qword dest <- |qword dest|
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative (high bit set), and cleared otherwise.
-            PF is set if the result has even parity in the low 8 bits, and cleared otherwise.
-
-        OPCode Format: [8: abs]   [4: dest][2:][2: size]
-        */
         private bool ProcessAbs()
         {
-            UInt64 s = 0, a = 0;
-            if (!ParseUnaryOpFormat(ref s, ref a)) return false;
-            UInt64 sizecode = s & 3;
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
 
             UInt64 res = Positive(a, sizecode) ? a : Truncate(~a + 1, sizecode);
-            Registers[s >> 4].Set(sizecode, res);
 
             UpdateFlagsI(res, sizecode);
 
-            return true;
+            return StoreUnaryOpFormat(s, m, res);
         }
-        /* -- CMP0 --
-
-        Description:
-            Equivalent to comparing a register to an integral 0.
-
-        OPCode Format: [8: cmp0]   [4: dest][2:][2: size]
-        */
         private bool ProcessCmp0()
         {
-            UInt64 s = 0, a = 0;
-            if (!ParseUnaryOpFormat(ref s, ref a)) return false;
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
             UpdateFlagsI(a, sizecode);
@@ -1173,328 +827,134 @@ namespace csx64
 
         // -- floatint point ops --
 
-        /* -- FADD --
-
-        Description:
-            Computes the addition of two floating point numbers.
-            The destination must be a register, but the value to add may be an imm, reg, or value from memory.
-
-        Operation: qword dest <- qword dest + qword val
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative, and cleared otherwise.
-            OF is set if the result is positive or negative infinity, and cleared otherwise.
-            CF is set if the result is nan, and cleared otherwise.
-
-        OPCode Format: [8: fadd]   [4: dest][2:][2: mode]   (mode = 0: [64: imm]   mode = 1: [4:][4: r]   mode = 2: [address]   mode = 3: UND)
-        */
         private bool ProcessFadd()
         {
-            UInt64 s = 0, a = 0, b = 0;
-            if (!ParseBinaryOpFormat(ref s, ref a, ref b)) return false;
+            UInt64 s = 0, m = 0, a = 0, b = 0;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
 
             double res = AsDouble(a) + AsDouble(b);
-            Registers[s >> 4].x64 = AsUInt64(res);
 
             UpdateFlagsF(res);
 
-            return true;
+            return StoreBinaryOpFormat(s, m, AsUInt64(res));
         }
-        /* -- FSUB --
-
-        Description:
-            Computes the subtraction of two floating point numbers.
-            The destination must be a register, but the value to add may be an imm, reg, or value from memory.
-
-        Operation: qword dest <- qword dest - qword val
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative, and cleared otherwise.
-            OF is set if the result is positive or negative infinity, and cleared otherwise.
-            CF is set if the result is nan, and cleared otherwise.
-
-        OPCode Format: [8: fsub]   [4: dest][2:][2: mode]   (mode = 0: [64: imm]   mode = 1: [4:][4: r]   mode = 2: [address]   mode = 3: UND)
-        */
         private bool ProcessFsub(bool apply = true)
         {
-            UInt64 s = 0, a = 0, b = 0;
-            if (!ParseBinaryOpFormat(ref s, ref a, ref b)) return false;
+            UInt64 s = 0, m = 0, a = 0, b = 0;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
 
             double res = AsDouble(a) - AsDouble(b);
-            if (apply) Registers[s >> 4].x64 = AsUInt64(res);
 
             UpdateFlagsF(res);
 
-            return true;
+            return apply ? StoreBinaryOpFormat(s, m, AsUInt64(res)) : true;
         }
 
-        /* -- FMUL --
-
-        Description:
-            Computes the multiplication of two floating point numbers.
-            The destination must be a register, but the value to add may be an imm, reg, or value from memory.
-
-        Operation: qword dest <- qword dest * qword val
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative, and cleared otherwise.
-            OF is set if the result is positive or negative infinity, and cleared otherwise.
-            CF is set if the result is nan, and cleared otherwise.
-
-        OPCode Format: [8: fmul]   [4: dest][2:][2: mode]   (mode = 0: [64: imm]   mode = 1: [4:][4: r]   mode = 2: [address]   mode = 3: UND)
-        */
         private bool ProcessFmul()
         {
-            UInt64 s = 0, a = 0, b = 0;
-            if (!ParseBinaryOpFormat(ref s, ref a, ref b)) return false;
+            UInt64 s = 0, m = 0, a = 0, b = 0;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
 
             double res = AsDouble(a) * AsDouble(b);
-            Registers[s >> 4].x64 = AsUInt64(res);
 
             UpdateFlagsF(res);
 
-            return true;
+            return StoreBinaryOpFormat(s, m, AsUInt64(res));
         }
 
-        /* -- FDIV --
-
-        Description:
-            Computes the division of two floating point numbers.
-            The destination must be a register, but the value to add may be an imm, reg, or value from memory.
-
-        Operation: qword dest <- qword dest / qword val
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative, and cleared otherwise.
-            OF is set if the result is positive or negative infinity, and cleared otherwise.
-            CF is set if the result is nan, and cleared otherwise.
-
-        OPCode Format: [8: fdiv]   [4: dest][2:][2: mode]   (mode = 0: [64: imm]   mode = 1: [4:][4: r]   mode = 2: [address]   mode = 3: UND)
-        */
         private bool ProcessFdiv()
         {
-            UInt64 s = 0, a = 0, b = 0;
-            if (!ParseBinaryOpFormat(ref s, ref a, ref b)) return false;
+            UInt64 s = 0, m = 0, a = 0, b = 0;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
 
             double res = AsDouble(a) / AsDouble(b);
-            Registers[s >> 4].x64 = AsUInt64(res);
 
             UpdateFlagsF(res);
 
-            return true;
+            return StoreBinaryOpFormat(s, m, AsUInt64(res));
         }
-        /* -- FMOD --
-
-        Description:
-            Computes the remainder of division of two floating point numbers.
-            The destination must be a register, but the value to add may be an imm, reg, or value from memory.
-
-        Operation: qword dest <- qword dest % qword val
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative, and cleared otherwise.
-            OF is set if the result is positive or negative infinity, and cleared otherwise.
-            CF is set if the result is nan, and cleared otherwise.
-
-        OPCode Format: [8: fmod]   [4: dest][2:][2: mode]   (mode = 0: [64: imm]   mode = 1: [4:][4: r]   mode = 2: [address]   mode = 3: UND)
-        */
         private bool ProcessFmod()
         {
-            UInt64 s = 0, a = 0, b = 0;
-            if (!ParseBinaryOpFormat(ref s, ref a, ref b)) return false;
+            UInt64 s = 0, m = 0, a = 0, b = 0;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
 
             double res = AsDouble(a) % AsDouble(b);
-            Registers[s >> 4].x64 = AsUInt64(res);
 
             UpdateFlagsF(res);
 
-            return true;
+            return StoreBinaryOpFormat(s, m, AsUInt64(res));
         }
 
-        /* -- FPOW --
-
-        Description:
-            Computes the exponentiation of a floating point vlue by a floating point value.
-            The destination must be a register, but the value to add may be an imm, reg, or value from memory.
-
-        Operation: qword dest <- qword dest ^ qword val
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative, and cleared otherwise.
-            OF is set if the result is positive or negative infinity, and cleared otherwise.
-            CF is set if the result is nan, and cleared otherwise.
-
-        OPCode Format: [8: fpow]   [4: dest][2:][2: mode]   (mode = 0: [64: imm]   mode = 1: [4:][4: r]   mode = 2: [address]   mode = 3: UND)
-        */
         private bool ProcessFpow()
         {
-            UInt64 s = 0, a = 0, b = 0;
-            if (!ParseBinaryOpFormat(ref s, ref a, ref b)) return false;
+            UInt64 s = 0, m = 0, a = 0, b = 0;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
 
             double res = Math.Pow(AsDouble(a), AsDouble(b));
-            Registers[s >> 4].x64 = AsUInt64(res);
 
             UpdateFlagsF(res);
 
-            return true;
+            return StoreBinaryOpFormat(s, m, AsUInt64(res));
         }
-        /* -- FSQRT --
-
-        Description:
-            Computes the square root of a floating point value.
-            Must be performed on a register.
-
-        Operation: qword dest <- sqrt(qword dest)
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative, and cleared otherwise.
-            OF is set if the result is positive or negative infinity, and cleared otherwise.
-            CF is set if the result is nan, and cleared otherwise.
-
-        OPCode Format: [8: fsqrt]   [4: dest][4:]
-        */
         private bool ProcessFsqrt()
         {
-            UInt64 s = 0, a = 0;
-            if (!ParseUnaryOpFormat(ref s, ref a)) return false;
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
             double res = Math.Sqrt(AsDouble(a));
-            Registers[s >> 4].x64 = AsUInt64(res);
 
             UpdateFlagsF(res);
 
-            return true;
+            return StoreUnaryOpFormat(s, m, AsUInt64(res));
         }
-        /* -- FEXP --
-
-        Description:
-            Computes e raised to a floating point value.
-            Must be performed on a register.
-
-        Operation: qword dest <- e ^ qword dest
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative, and cleared otherwise.
-            OF is set if the result is positive or negative infinity, and cleared otherwise.
-            CF is set if the result is nan, and cleared otherwise.
-
-        OPCode Format: [8: fexp]   [4: dest][2:][2: size]
-        */
         private bool ProcessFexp()
         {
-            UInt64 s = 0, a = 0;
-            if (!ParseUnaryOpFormat(ref s, ref a)) return false;
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
             double res = Math.Exp(AsDouble(a));
-            Registers[s >> 4].x64 = AsUInt64(res);
 
             UpdateFlagsF(res);
 
-            return true;
+            return StoreUnaryOpFormat(s, m, AsUInt64(res));
         }
-        /* -- FLN --
-
-        Description:
-            Computes the natural logarithm (base e) of a floating point value.
-            Must be performed on a register.
-
-        Operation: qword dest <- ln(qword dest)
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative, and cleared otherwise.
-            OF is set if the result is positive or negative infinity, and cleared otherwise.
-            CF is set if the result is nan, and cleared otherwise.
-
-        OPCode Format: [8: fln]   [4: dest][2:][2: size]
-        */
         private bool ProcessFln()
         {
-            UInt64 s = 0, a = 0;
-            if (!ParseUnaryOpFormat(ref s, ref a)) return false;
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
             double res = Math.Log(AsDouble(a));
-            Registers[s >> 4].x64 = AsUInt64(res);
 
             UpdateFlagsF(res);
 
-            return true;
+            return StoreUnaryOpFormat(s, m, AsUInt64(res));
         }
-        /* -- FNEG --
-
-        Description:
-            Computes the negative of a floating point value.
-            Must be performed on a register.
-
-        Operation: qword dest <- - qword dest
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative, and cleared otherwise.
-            OF is set if the result is positive or negative infinity, and cleared otherwise.
-            CF is set if the result is nan, and cleared otherwise.
-
-        OPCode Format: [8: fneg]   [4: dest][2:][2: size]
-        */
         private bool ProcessFneg()
         {
-            UInt64 s = 0, a = 0;
-            if (!ParseUnaryOpFormat(ref s, ref a)) return false;
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
             double res = -AsDouble(a);
-            Registers[s >> 4].x64 = AsUInt64(res);
 
             UpdateFlagsF(res);
 
-            return true;
+            return StoreUnaryOpFormat(s, m, AsUInt64(res));
         }
-        /* -- FABS --
-
-        Description:
-            Computes the absolute value of a floating point value.
-            Must be performed on a register.
-
-        Operation: qword dest <- |qword dest|
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative, and cleared otherwise.
-            OF is set if the result is positive or negative infinity, and cleared otherwise.
-            CF is set if the result is nan, and cleared otherwise.
-
-        OPCode Format: [8: fabs]   [4: dest][2:][2: size]
-        */
         private bool ProcessFabs()
         {
-            UInt64 s = 0, a = 0;
-            if (!ParseUnaryOpFormat(ref s, ref a)) return false;
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
             double res = Math.Abs(AsDouble(a));
-            Registers[s >> 4].x64 = AsUInt64(res);
 
             UpdateFlagsF(res);
 
-            return true;
+            return StoreUnaryOpFormat(s, m, AsUInt64(res));
         }
-        /* -- FCMP0 --
-
-        Description:
-            Equivalent to a floating point comparison to 0.0.
-
-        OPCode Format: [8: fcmp0]   [4: dest][2:][2: size]
-        */
         private bool ProcessFcmp0()
         {
-            UInt64 s = 0, a = 0;
-            if (!ParseUnaryOpFormat(ref s, ref a)) return false;
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
             double res = AsDouble(a);
 
@@ -1503,477 +963,181 @@ namespace csx64
             return true;
         }
 
-        /* -- FSIN --
-
-        Description:
-            Computes the sine of a floating point value.
-            Must be performed on a register.
-            Angles are in radians.
-
-        Operation: qword dest <- sin(qword dest)
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative, and cleared otherwise.
-            OF is set if the result is positive or negative infinity, and cleared otherwise.
-            CF is set if the result is nan, and cleared otherwise.
-
-        OPCode Format: [8: fsin]   [4: dest][2:][2: size]
-        */
         private bool ProcessFsin()
         {
-            UInt64 s = 0, a = 0;
-            if (!ParseUnaryOpFormat(ref s, ref a)) return false;
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
             double res = Math.Sin(AsDouble(a));
-            Registers[s >> 4].x64 = AsUInt64(res);
 
             UpdateFlagsF(res);
 
-            return true;
+            return StoreUnaryOpFormat(s, m, AsUInt64(res));
         }
-        /* -- FCOS --
-
-        Description:
-            Computes the cosine of a floating point value.
-            Must be performed on a register.
-            Angles are in radians.
-
-        Operation: qword dest <- cos(qword dest)
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative, and cleared otherwise.
-            OF is set if the result is positive or negative infinity, and cleared otherwise.
-            CF is set if the result is nan, and cleared otherwise.
-
-        OPCode Format: [8: fcos]   [4: dest][2:][2: size]
-        */
         private bool ProcessFcos()
         {
-            UInt64 s = 0, a = 0;
-            if (!ParseUnaryOpFormat(ref s, ref a)) return false;
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
             double res = Math.Cos(AsDouble(a));
-            Registers[s >> 4].x64 = AsUInt64(res);
 
             UpdateFlagsF(res);
 
-            return true;
+            return StoreUnaryOpFormat(s, m, AsUInt64(res));
         }
-        /* -- FTAN --
-
-        Description:
-            Computes the tangent of a floating point value.
-            Must be performed on a register.
-            Angles are in radians.
-
-        Operation: qword dest <- tan(qword dest)
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative, and cleared otherwise.
-            OF is set if the result is positive or negative infinity, and cleared otherwise.
-            CF is set if the result is nan, and cleared otherwise.
-
-        OPCode Format: [8: ftan]   [4: dest][2:][2: size]
-        */
         private bool ProcessFtan()
         {
-            UInt64 s = 0, a = 0;
-            if (!ParseUnaryOpFormat(ref s, ref a)) return false;
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
             double res = Math.Tan(AsDouble(a));
-            Registers[s >> 4].x64 = AsUInt64(res);
 
             UpdateFlagsF(res);
 
-            return true;
+            return StoreUnaryOpFormat(s, m, AsUInt64(res));
         }
 
-        /* -- FSINH --
-
-        Description:
-            Computes the hyperbolic sine of a floating point value.
-            Must be performed on a register.
-            Angles are in radians.
-
-        Operation: qword dest <- sinh(qword dest)
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative, and cleared otherwise.
-            OF is set if the result is positive or negative infinity, and cleared otherwise.
-            CF is set if the result is nan, and cleared otherwise.
-
-        OPCode Format: [8: fsinh]   [4: dest][2:][2: size]
-        */
         private bool ProcessFsinh()
         {
-            UInt64 s = 0, a = 0;
-            if (!ParseUnaryOpFormat(ref s, ref a)) return false;
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
             double res = Math.Sinh(AsDouble(a));
-            Registers[s >> 4].x64 = AsUInt64(res);
 
             UpdateFlagsF(res);
 
-            return true;
+            return StoreUnaryOpFormat(s, m, AsUInt64(res));
         }
-        /* -- FCOSH --
-
-        Description:
-            Computes the hyperbolic cosine of a floating point value.
-            Must be performed on a register.
-            Angles are in radians.
-
-        Operation: qword dest <- cosh(qword dest)
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative, and cleared otherwise.
-            OF is set if the result is positive or negative infinity, and cleared otherwise.
-            CF is set if the result is nan, and cleared otherwise.
-
-        OPCode Format: [8: fcosh]   [4: dest][2:][2: size]
-        */
         private bool ProcessFcosh()
         {
-            UInt64 s = 0, a = 0;
-            if (!ParseUnaryOpFormat(ref s, ref a)) return false;
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
             double res = Math.Cosh(AsDouble(a));
-            Registers[s >> 4].x64 = AsUInt64(res);
 
             UpdateFlagsF(res);
 
-            return true;
+            return StoreUnaryOpFormat(s, m, AsUInt64(res));
         }
-        /* -- FTANH --
-
-        Description:
-            Computes the hyperbolic tangent of a floating point value.
-            Must be performed on a register.
-            Angles are in radians.
-
-        Operation: qword dest <- tanh(qword dest)
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative, and cleared otherwise.
-            OF is set if the result is positive or negative infinity, and cleared otherwise.
-            CF is set if the result is nan, and cleared otherwise.
-
-        OPCode Format: [8: ftanh]   [4: dest][2:][2: size]
-        */
         private bool ProcessFtanh()
         {
-            UInt64 s = 0, a = 0;
-            if (!ParseUnaryOpFormat(ref s, ref a)) return false;
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
             double res = Math.Tanh(AsDouble(a));
-            Registers[s >> 4].x64 = AsUInt64(res);
 
             UpdateFlagsF(res);
 
-            return true;
+            return StoreUnaryOpFormat(s, m, AsUInt64(res));
         }
 
-        /* -- FASIN --
-
-        Description:
-            Computes the arcsine of a floating point value.
-            Must be performed on a register.
-            Angles are in radians.
-
-        Operation: qword dest <- asin(qword dest)
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative, and cleared otherwise.
-            OF is set if the result is positive or negative infinity, and cleared otherwise.
-            CF is set if the result is nan, and cleared otherwise.
-
-        OPCode Format: [8: fasin]   [4: dest][2:][2: size]
-        */
         private bool ProcessFasin()
         {
-            UInt64 s = 0, a = 0;
-            if (!ParseUnaryOpFormat(ref s, ref a)) return false;
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
             double res = Math.Asin(AsDouble(a));
-            Registers[s >> 4].x64 = AsUInt64(res);
 
             UpdateFlagsF(res);
 
-            return true;
+            return StoreUnaryOpFormat(s, m, AsUInt64(res));
         }
-        /* -- FACOS --
-
-        Description:
-            Computes the arccosine of a floating point value.
-            Must be performed on a register.
-            Angles are in radians.
-
-        Operation: qword dest <- acos(qword dest)
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative, and cleared otherwise.
-            OF is set if the result is positive or negative infinity, and cleared otherwise.
-            CF is set if the result is nan, and cleared otherwise.
-
-        OPCode Format: [8: facos]   [4: dest][2:][2: size]
-        */
         private bool ProcessFacos()
         {
-            UInt64 s = 0, a = 0;
-            if (!ParseUnaryOpFormat(ref s, ref a)) return false;
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
             double res = Math.Acos(AsDouble(a));
-            Registers[s >> 4].x64 = AsUInt64(res);
 
             UpdateFlagsF(res);
 
-            return true;
+            return StoreUnaryOpFormat(s, m, AsUInt64(res));
         }
-        /* -- FATAN --
-
-        Description:
-            Computes the arctangent of a floating point value.
-            Must be performed on a register.
-            Angles are in radians.
-
-        Operation: qword dest <- atan(qword dest)
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative, and cleared otherwise.
-            OF is set if the result is positive or negative infinity, and cleared otherwise.
-            CF is set if the result is nan, and cleared otherwise.
-
-        OPCode Format: [8: fatan]   [4: dest][2:][2: size]
-        */
         private bool ProcessFatan()
         {
-            UInt64 s = 0, a = 0;
-            if (!ParseUnaryOpFormat(ref s, ref a)) return false;
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
             double res = Math.Atan(AsDouble(a));
-            Registers[s >> 4].x64 = AsUInt64(res);
 
             UpdateFlagsF(res);
 
-            return true;
+            return StoreUnaryOpFormat(s, m, AsUInt64(res));
         }
-        /* -- FATAN2 --
-
-        Description:
-            Computes the arctangent of two floating point values, where y = dest and x = val
-            The destination must be a register, but the value to add may be an imm, reg, or value from memory.
-            Angles are in radians.
-
-        Operation: qword dest <- atan2(qword dest, qword val)
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative, and cleared otherwise.
-            OF is set if the result is positive or negative infinity, and cleared otherwise.
-            CF is set if the result is nan, and cleared otherwise.
-
-        OPCode Format: [8: fatan2]   [4: dest][2:][2: mode]   (mode = 0: [64: imm]   mode = 1: [4:][4: r]   mode = 2: [address]   mode = 3: UND)
-        */
         private bool ProcessFatan2()
         {
-            UInt64 s = 0, a = 0, b = 0;
-            if (!ParseBinaryOpFormat(ref s, ref a, ref b)) return false;
+            UInt64 s = 0, m = 0, a = 0, b = 0;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
 
             double res = Math.Atan2(AsDouble(a), AsDouble(b));
-            Registers[s >> 4].x64 = AsUInt64(res);
 
             UpdateFlagsF(res);
 
-            return true;
+            return StoreBinaryOpFormat(s, m, AsUInt64(res));
         }
 
-        /* -- FFLOOR --
-
-        Description:
-            Computes the floor of a floating point value.
-            Must be performed on a register.
-            Result is still floating point.
-
-        Operation: qword dest <- floor(qword dest)
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative, and cleared otherwise.
-            OF is set if the result is positive or negative infinity, and cleared otherwise.
-            CF is set if the result is nan, and cleared otherwise.
-
-        OPCode Format: [8: ffloor]   [4: dest][2:][2: size]
-        */
         private bool ProcessFfloor()
         {
-            UInt64 s = 0, a = 0;
-            if (!ParseUnaryOpFormat(ref s, ref a)) return false;
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
             double res = Math.Floor(AsDouble(a));
-            Registers[s >> 4].x64 = AsUInt64(res);
 
             UpdateFlagsF(res);
 
-            return true;
+            return StoreUnaryOpFormat(s, m, AsUInt64(res));
         }
-        /* -- FCEIL --
-
-        Description:
-            Computes the ceiling of a floating point value.
-            Must be performed on a register.
-            Result is still floating point.
-
-        Operation: qword dest <- ceil(qword dest)
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative, and cleared otherwise.
-            OF is set if the result is positive or negative infinity, and cleared otherwise.
-            CF is set if the result is nan, and cleared otherwise.
-
-        OPCode Format: [8: fceil]   [4: dest][2:][2: size]
-        */
         private bool ProcessFceil()
         {
-            UInt64 s = 0, a = 0;
-            if (!ParseUnaryOpFormat(ref s, ref a)) return false;
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
             double res = Math.Ceiling(AsDouble(a));
-            Registers[s >> 4].x64 = AsUInt64(res);
 
             UpdateFlagsF(res);
 
-            return true;
+            return StoreUnaryOpFormat(s, m, AsUInt64(res));
         }
-        /* -- FROUND --
-
-        Description:
-            Rounds the floating point value to the nearest integer.
-            Must be performed on a register.
-            Result is still floating point.
-
-        Operation: qword dest <- round(qword dest)
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative, and cleared otherwise.
-            OF is set if the result is positive or negative infinity, and cleared otherwise.
-            CF is set if the result is nan, and cleared otherwise.
-
-        OPCode Format: [8: fround]   [4: dest][2:][2: size]
-        */
         private bool ProcessFround()
         {
-            UInt64 s = 0, a = 0;
-            if (!ParseUnaryOpFormat(ref s, ref a)) return false;
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
             double res = Math.Round(AsDouble(a));
-            Registers[s >> 4].x64 = AsUInt64(res);
 
             UpdateFlagsF(res);
 
-            return true;
+            return StoreUnaryOpFormat(s, m, AsUInt64(res));
         }
-        /* -- FTRUNC --
-
-        Description:
-            Rounds a floating point value toward zero by removing the decimal portion.
-            Must be performed on a register.
-            Result is still floating point.
-
-        Operation: qword dest <- trunc(qword dest)
-
-        Flags Affected:
-            ZF is set if the result is zero, and cleared otherwise.
-            SF is set if the result is negative, and cleared otherwise.
-            OF is set if the result is positive or negative infinity, and cleared otherwise.
-            CF is set if the result is nan, and cleared otherwise.
-
-        OPCode Format: [8: ftrunc]   [4: dest][2:][2: size]
-        */
         private bool ProcessFtrunc()
         {
-            UInt64 s = 0, a = 0;
-            if (!ParseUnaryOpFormat(ref s, ref a)) return false;
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
             double res = Math.Truncate(AsDouble(a));
-            Registers[s >> 4].x64 = AsUInt64(res);
 
             UpdateFlagsF(res);
 
-            return true;
+            return StoreUnaryOpFormat(s, m, AsUInt64(res));
         }
 
-        /* -- FTOI --
-
-        Description:
-            Converts a floating point value into a signed integer after truncation.
-            Must be performed on a register.
-
-        Operation: qword dest <- qword dest as integer
-
-        Flags Affected: None
-
-        OPCode Format: [8: fround]   [4: dest][2:][2: size]
-        */
         private bool ProcessFTOI()
         {
-            UInt64 s = 0, a = 0;
-            if (!ParseUnaryOpFormat(ref s, ref a)) return false;
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
-            Registers[s >> 4].x64 = ((Int64)a).MakeUnsigned();
-
-            return true;
+            return StoreUnaryOpFormat(s, m, ((Int64)a).MakeUnsigned());
         }
-        /* -- ITOF --
-
-        Description:
-            Converts a signed integer into a floating point value.
-            Must be performed on a register.
-
-        Operation: qword dest <- qword dest as floating point
-
-        Flags Affected: None
-
-        OPCode Format: [8: fround]   [4: dest][2:][2: size]
-        */
         private bool ProcessITOF()
         {
-            UInt64 s = 0, a = 0;
-            if (!ParseUnaryOpFormat(ref s, ref a)) return false;
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
-            Registers[s >> 4].x64 = AsUInt64((double)a.MakeSigned());
-
-            return true;
+            return StoreUnaryOpFormat(s, m, AsUInt64((double)a.MakeSigned()));
         }
 
         // -- extended register ops --
 
-        /* -- UMUL --
-
-            Description:
-                Computes the full product of multiplying two unsigned values.
-
-            Operation:
-                byte:  word      R0 <- byte  R0 * byte  val
-                word:  dword     R0 <- word  R0 * word  val
-                dword: qword     R0 <- dword R0 * dword val
-                qword: dqword R1:R0 <- qword R0 * qword val
-
-            Flags Affected:
-                OF and CF are both set if the high bits of the product are non-zero, and cleard otherwise.
-
-            OPCode Format: [8: umul]   [4: reg][2: size][2: mode]   (mode = 0: [size: imm]   mode = 1: use reg   mode = 2: [address]   mode = 3: UND)
-        */
         private bool ProcessUMUL()
         {
             UInt64 a = 0, b = 0;
@@ -2014,23 +1178,6 @@ namespace csx64
 
             return true;
         }
-        /* -- SMUL --
-
-            Description:
-                Computes the full product of multiplying two signed values.
-
-            Operation:
-                byte:  word      R0 <- byte  R0 * byte  val
-                word:  dword     R0 <- word  R0 * word  val
-                dword: qword     R0 <- dword R0 * dword val
-                qword: dqword R1:R0 <- qword R0 * qword val
-
-            Flags Affected:
-                OF and CF are both set if there are significant bits in the high portion of the product (i.e. truncation yields a different value), and cleared otherwise.
-                SF is set if the resulting value is negative (i.e. the highest bit of the result is set).
-
-            OPCode Format: [8: smul]   [4: reg][2: size][2: mode]   (mode = 0: [size: imm]   mode = 1: use reg   mode = 2: [address]   mode = 3: UND)
-        */
         private bool ProcessSMUL()
         {
             UInt64 a = 0, b = 0;
@@ -2092,35 +1239,6 @@ namespace csx64
             return true;
         }
 
-        /* -- UDIV --
-
-            Description:
-                Computes the quotient and remainder of the division of two unsigned values.
-                Dividing by zero or producing a quotient that cannot be stored in the operand register produces an arithmetic error.
-
-            Operation:
-                byte:
-                    word R0 / byte val
-                    byte R0 <- quotient
-                    byte R1 <- remainder
-                word:
-                    dword R0 / word val
-                    word  R0 <- quotient
-                    word  R1 <- remainder
-                dword:
-                    qword R0 / dword val
-                    dword R0 <- quotient
-                    dword R1 <- remainder
-                qword:
-                    dqword R1:R0 / qword val
-                    qword  R0 <- quotient
-                    qword  R1 <- remainder
-
-            Flags Affected:
-                CF is set if the resulting remainder is nonzero, and cleared otherwise.
-
-            OPCode Format: [8: udiv]   [4: reg][2: size][2: mode]   (mode = 0: [size: imm]   mode = 1: use reg   mode = 2: [address]   mode = 3: UND)
-        */
         private bool ProcessUDIV()
         {
             UInt64 a = 0, b = 0, full;
@@ -2177,36 +1295,6 @@ namespace csx64
 
             return true;
         }
-        /* -- UDIV --
-
-            Description:
-                Computes the quotient and remainder of the division of two signed values.
-                Dividing by zero or producing a quotient that cannot be stored in the operand register produces an arithmetic error.
-
-            Operation:
-                byte:
-                    word R0 / byte val
-                    byte R0 <- quotient
-                    byte R1 <- remainder
-                word:
-                    dword R0 / word val
-                    word  R0 <- quotient
-                    word  R1 <- remainder
-                dword:
-                    qword R0 / dword val
-                    dword R0 <- quotient
-                    dword R1 <- remainder
-                qword:
-                    dqword R1:R0 / qword val
-                    qword  R0 <- quotient
-                    qword  R1 <- remainder
-
-            Flags Affected:
-                CF is set if the resulting remainder is nonzero, and cleared otherwise.
-                SF is set if the resulting quotient is negative (i.e. highest bit of quotient is set), and cleared otherwise.
-
-            OPCode Format: [8: sdiv]   [4: reg][2: size][2: mode]   (mode = 0: [size: imm]   mode = 1: use reg   mode = 2: [address]   mode = 3: UND)
-        */
         private bool ProcessSDIV()
         {
             UInt64 a = 0, b = 0;
@@ -2399,7 +1487,7 @@ namespace csx64
         protected virtual bool Syscall() { return false; }
 
         // [8: mov]   [4: source/dest][2: size][2: mode]   (mode = 0: load imm [size: imm]   mode = 1: load register [4:][4: source]   mode = 2: load memory [address]   mode = 3: store register [address])
-        private bool ProcessMove(bool keep = true)
+        /*private bool ProcessMove(bool keep = true)
         {
             UInt64 a = 0, b = 0;
 
@@ -2426,7 +1514,7 @@ namespace csx64
             }
 
             return true;
-        }
+        }*/
 
         /// <summary>
         /// Performs a single operation. Returns true if successful
@@ -2448,28 +1536,28 @@ namespace csx64
                 case OPCode.Stop: Running = false; return true;
                 case OPCode.Syscall: if (Syscall()) return true; Fail(ErrorCode.UnhandledSyscall); return false;
 
-                case OPCode.Mov: return ProcessMove();
+                case OPCode.Mov: return ProcessMov();
 
-                case OPCode.MOVa: return ProcessMove(Flags.a);
-                case OPCode.MOVae: return ProcessMove(Flags.ae);
-                case OPCode.MOVb: return ProcessMove(Flags.b);
-                case OPCode.MOVbe: return ProcessMove(Flags.be);
+                case OPCode.MOVa: return ProcessMov(Flags.a);
+                case OPCode.MOVae: return ProcessMov(Flags.ae);
+                case OPCode.MOVb: return ProcessMov(Flags.b);
+                case OPCode.MOVbe: return ProcessMov(Flags.be);
 
-                case OPCode.MOVg: return ProcessMove(Flags.g);
-                case OPCode.MOVge: return ProcessMove(Flags.ge);
-                case OPCode.MOVl: return ProcessMove(Flags.l);
-                case OPCode.MOVle: return ProcessMove(Flags.le);
+                case OPCode.MOVg: return ProcessMov(Flags.g);
+                case OPCode.MOVge: return ProcessMov(Flags.ge);
+                case OPCode.MOVl: return ProcessMov(Flags.l);
+                case OPCode.MOVle: return ProcessMov(Flags.le);
 
-                case OPCode.MOVz: return ProcessMove(Flags.Z);
-                case OPCode.MOVnz: return ProcessMove(!Flags.Z);
-                case OPCode.MOVs: return ProcessMove(Flags.S);
-                case OPCode.MOVns: return ProcessMove(!Flags.S);
-                case OPCode.MOVp: return ProcessMove(Flags.P);
-                case OPCode.MOVnp: return ProcessMove(!Flags.P);
-                case OPCode.MOVo: return ProcessMove(Flags.O);
-                case OPCode.MOVno: return ProcessMove(!Flags.O);
-                case OPCode.MOVc: return ProcessMove(Flags.C);
-                case OPCode.MOVnc: return ProcessMove(!Flags.C);
+                case OPCode.MOVz: return ProcessMov(Flags.Z);
+                case OPCode.MOVnz: return ProcessMov(!Flags.Z);
+                case OPCode.MOVs: return ProcessMov(Flags.S);
+                case OPCode.MOVns: return ProcessMov(!Flags.S);
+                case OPCode.MOVp: return ProcessMov(Flags.P);
+                case OPCode.MOVnp: return ProcessMov(!Flags.P);
+                case OPCode.MOVo: return ProcessMov(Flags.O);
+                case OPCode.MOVno: return ProcessMov(!Flags.O);
+                case OPCode.MOVc: return ProcessMov(Flags.C);
+                case OPCode.MOVnc: return ProcessMov(!Flags.C);
 
                 // [8: swap]   [4: r1][4: r2]
                 case OPCode.Swap:
@@ -3044,45 +2132,73 @@ namespace csx64
 
         private static bool TryProcessBinaryOp(ObjectFile file, string[] tokens, int line, OPCode op, string last_static_label, ref Tuple<AssembleError, string> err)
         {
-            // [8: binary op]   [4: dest][2: size][2: mode]   (mode = 0: [size: imm]   mode = 1: [4:][4: r]   mode = 2: [address]   mode = 3: UND)
-
             UInt64 a, b, c, d; // parsing temporaries
-            Hole hole;
+            Hole hole1, hole2;
 
             if (tokens.Length != 4) { err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {line}: Binary OP expected 3 args"); return false; }
-            if (!TryParseSizecode(file, tokens[1], out a, last_static_label, line, ref err)) { err = new Tuple<AssembleError, string>(AssembleError.MissingSize, $"line {line}: Binary OP expected size parameter as first arg\n-> {err.Item2}"); return false; }
-            if (!TryParseRegister(file, tokens[2], out b, last_static_label, line, ref err)) { err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {line}: Binary OP expected register parameter as second arg\n-> {err.Item2}"); return false; }
+            if (!TryParseSizecode(file, tokens[1], out a, last_static_label, line, ref err)) { err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {line}: {op} expected size parameter as first arg\n-> {err.Item2}"); return false; }
 
             Append(file, 1, (UInt64)op);
-            if (TryParseImm(file, tokens[3], out hole, last_static_label, line, ref err))
+
+            if (TryParseRegister(file, tokens[2], out b, last_static_label, line, ref err))
             {
-                Append(file, 1, (b << 4) | (a << 2) | 0);
-                Append(file, Size(a), hole);
+                if (TryParseImm(file, tokens[3], out hole1, last_static_label, line, ref err))
+                {
+                    Append(file, 1, (b << 4) | (a << 2) | 0);
+                    Append(file, Size(a), hole1);
+                }
+                else if (TryParseAddress(file, tokens[3], out c, out d, out hole1, last_static_label, line, ref err))
+                {
+                    Append(file, 1, (b << 4) | (a << 2) | 1);
+                    AppendAddress(file, c, d, hole1);
+                }
+                else if (TryParseRegister(file, tokens[3], out c, last_static_label, line, ref err))
+                {
+                    Append(file, 1, (b << 4) | (a << 2) | 2);
+                    Append(file, 1, c);
+                }
+                else { err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {line}: Unknown usage of {op}"); return false; }
             }
-            else if (TryParseRegister(file, tokens[3], out c, last_static_label, line, ref err))
+            else if (TryParseAddress(file, tokens[2], out b, out c, out hole1, last_static_label, line, ref err))
             {
-                Append(file, 1, (b << 4) | (a << 2) | 1);
-                Append(file, 1, c);
+                if (TryParseRegister(file, tokens[3], out d, last_static_label, line, ref err))
+                {
+                    Append(file, 1, (a << 2) | 2);
+                    Append(file, 1, 16 | d);
+                    AppendAddress(file, b, c, hole1);
+                }
+                else if (TryParseImm(file, tokens[3], out hole2, last_static_label, line, ref err))
+                {
+                    Append(file, 1, (a << 2) | 3);
+                    Append(file, Size(a), hole2);
+                    AppendAddress(file, b, c, hole1);
+                }
+                else { err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {line}: Unknown usage of {op}"); return false; }
             }
-            else if (TryParseAddress(file, tokens[3], out c, out d, out hole, last_static_label, line, ref err))
-            {
-                Append(file, 1, (b << 4) | (a << 2) | 2);
-                AppendAddress(file, c, d, hole);
-            }
-            else { err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {line}: Unknown binary OP format"); return false; }
+            else { err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {line}: Unknown usage of {op}"); return false; }
 
             return true;
         }
         private static bool TryProcessUnaryOp(ObjectFile file, string[] tokens, int line, OPCode op, string last_static_label, ref Tuple<AssembleError, string> err)
         {
-            // [8: unary op]   [4: dest][2:][2: size]
+            UInt64 a, b;
+            Hole hole;
 
             if (tokens.Length != 3) { err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {line}: Unary OP expected 2 args"); return false; }
-            if (!TryParseSizecode(file, tokens[1], out UInt64 sizecode, last_static_label, line, ref err)) { err = new Tuple<AssembleError, string>(AssembleError.MissingSize, $"line {line}: Unary OP expected size parameter as first arg\n-> {err.Item2}"); return false; }
-            if (!TryParseRegister(file, tokens[2], out UInt64 reg, last_static_label, line, ref err)) { err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {line}: Unary OP expected register parameter as second arg\n-> {err.Item2}"); return false; }
+            if (!TryParseSizecode(file, tokens[1], out a, last_static_label, line, ref err)) { err = new Tuple<AssembleError, string>(AssembleError.MissingSize, $"line {line}: {op} expected size parameter as first arg\n-> {err.Item2}"); return false; }
 
             Append(file, 1, (UInt64)op);
-            Append(file, 1, (reg << 4) | sizecode);
+
+            if (TryParseRegister(file, tokens[2], out b, last_static_label, line, ref err))
+            {
+                Append(file, 1, (b << 4) | (a << 2) | 0);
+            }
+            else if (TryParseAddress(file, tokens[2], out a, out b, out hole, last_static_label, line, ref err))
+            {
+                Append(file, 1, (a << 2) | 1);
+                AppendAddress(file, a, b, hole);
+            }
+            else { err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {line}: Unknown format of {op}"); return false; }
 
             return true;
         }
@@ -3330,7 +2446,7 @@ namespace csx64
                             Append(file, 1, (UInt64)OPCode.Syscall); break;
 
                         // [8: MOVcc]   [4: source/dest][2: size][2: mode]   (mode = 0: load imm [size: imm]   mode = 1: load register [4:][4: source]   mode = 2: load memory [address]   mode = 3: store register [address])
-                        case "MOV": if (!TryProcessMove(file, tokens, line, OPCode.Mov, last_static_label, ref err)) return err; break;
+                        case "MOV": if (!TryProcessBinaryOp(file, tokens, line, OPCode.Mov, last_static_label, ref err)) return err; break;
 
                         case "MOVA": case "MOVNBE": if (!TryProcessMove(file, tokens, line, OPCode.MOVa, last_static_label, ref err)) return err; break;
                         case "MOVAE": case "MOVNB": if (!TryProcessMove(file, tokens, line, OPCode.MOVae, last_static_label, ref err)) return err; break;
