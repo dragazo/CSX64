@@ -10,7 +10,7 @@ using System.Windows.Forms;
 
 namespace csx64
 {
-    public partial class Form1 : Form
+    public partial class ProcessorView : Form
     {
         private CSX64 C = new CSX64();
         private ulong Ticks = 0;
@@ -33,7 +33,7 @@ namespace csx64
             }
         }
 
-        public Form1()
+        public ProcessorView()
         {
             InitializeComponent();
 

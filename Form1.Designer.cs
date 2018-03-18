@@ -1,6 +1,6 @@
 ﻿namespace csx64
 {
-    partial class Form1
+    partial class ProcessorView
     {
         /// <summary>
         /// Required designer variable.
@@ -168,7 +168,7 @@
             this.GraphicalButton.UseVisualStyleBackColor = true;
             this.GraphicalButton.Click += new System.EventHandler(this.GraphicalButton_Click);
             // 
-            // Form1
+            // ProcessorView
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
@@ -187,8 +187,8 @@
             this.Controls.Add(this.TickButton);
             this.DoubleBuffered = true;
             this.MinimumSize = new System.Drawing.Size(935, 513);
-            this.Name = "Form1";
-            this.Text = "Form1";
+            this.Name = "ProcessorView";
+            this.Text = "Processor View";
             this.ResumeLayout(false);
             this.PerformLayout();
 

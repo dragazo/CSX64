@@ -19,8 +19,11 @@ namespace csx64
         {
             InitializeComponent();
 
-
-            OnResize(EventArgs.Empty);
+            // create the images
+            C.RenderImage = new Bitmap(DisplayRectangle.Width, DisplayRectangle.Height);
+            C.DisplayImage = new Bitmap(DisplayRectangle.Width, DisplayRectangle.Height);
+            // store size settings
+            C.ImageSize = DisplayRectangle.Size;
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -28,17 +31,23 @@ namespace csx64
             base.OnPaint(e);
 
             // render the graphics object over the display surface
-            e.Graphics.DrawImage(C.GraphicSurface, Point.Empty);
+            e.Graphics.DrawImage(C.DisplayImage, Point.Empty);
         }
         protected override void OnResize(EventArgs e)
         {
             base.OnResize(e);
 
-            // create a new graphic surface
-            C.GraphicSurface?.Dispose();
-            C.GraphicSurface = new Bitmap(DisplayRectangle.Width, DisplayRectangle.Height);
-
+            C.ImageSize = DisplayRectangle.Size; // update size settings
             C.NeedsRender = true; // mark that we need a render
+
+            Invalidate();
+        }
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+
+            // update computer mouse pos
+            C.MousePos = e.Location;
         }
 
         public event Action<UInt64> OnTickCycle = null;
@@ -46,28 +55,22 @@ namespace csx64
         {
             Text = "Running";
             Random r = new Random();
+
             while (C.Running)
             {
                 await Task.Delay(10);
 
                 // tick processor
-                int i;
-                for (i = 0; i < 10000; ++i)
+                UInt64 i;
+                for (i = 0; i < 10000 && C.Tick(); ++i) ;
+                Ticks += i;
+
+                // acount for re-rendering
+                if (C.Invalidated)
                 {
-                    C.Tick();
-
-                    // acount for re-rendering
-                    if (C.Invalidated)
-                    {
-                        // mark render requests as filled
-                        C.Invalidated = false;
-                        C.NeedsRender = false;
-
-                        // redraw the form
-                        Invalidate();
-                    }
+                    C.Invalidated = false; // mark invalidation as filled
+                    Invalidate(); // redraw the form
                 }
-                Ticks += (UInt64)i;
 
                 OnTickCycle?.Invoke(Ticks);
             }
@@ -78,8 +81,10 @@ namespace csx64
 
     public class GraphicalComputer : CSX64
     {
-        // the surface to render
-        public Bitmap GraphicSurface = null;
+        public Bitmap RenderImage = null, DisplayImage = null;
+
+        public Size ImageSize = System.Drawing.Size.Empty; //new Size(100, 100); // size to use for making new images
+        public Point MousePos = Point.Empty; // mouse position
 
         public bool Invalidated = false; // flag for if the processor has finished re-rendering
         public bool NeedsRender = false; // flag for if the virtual operating system recommends re-rendering
@@ -87,7 +92,7 @@ namespace csx64
         protected override bool Syscall()
         {
             UInt64 val = 0; // parsing destination
-
+            
             Brush brush = null; // brush to use for filling
             Pen pen = null;     // pen to use for drawing
             Font font = null;   // font to use for drawing strings
@@ -102,51 +107,66 @@ namespace csx64
             switch (GetRegister(0).x64)
             {
                 case 0: // get graphic surface dimensions
-                    GetRegister(1).x64 = (UInt64)GraphicSurface.Width;
-                    GetRegister(2).x64 = (UInt64)GraphicSurface.Height;
+                    GetRegister(1).x64 = (UInt64)RenderImage.Width;
+                    GetRegister(2).x64 = (UInt64)RenderImage.Height;
                     break;
                 case 1: // ask if render needed (e.g. window resize)
                     GetRegister(1).x8 = NeedsRender ? 1 : 0ul;
                     break;
                 case 2: // render
-                    Invalidated = true;
+                    {
+                        // display the new render
+                        DisplayImage?.Dispose();
+                        DisplayImage = RenderImage;
+                        // make a new image to render
+                        RenderImage = new Bitmap(ImageSize.Width, ImageSize.Height);
+                    }
+                    Invalidated = true;  // flag as invalidated
+                    NeedsRender = false; // mark that we rendered
+                    break;
+                case 3: // mouse pos
+                    GetRegister(1).x64 = (UInt64)MousePos.X;
+                    GetRegister(2).x64 = (UInt64)MousePos.Y;
                     break;
 
                 // -- drawing utilities --
 
-                case 3: // clear ($1 32:color)
-                    if (GraphicSurface == null || !GetMem(GetRegister(1).x64, 4, ref val)) { ret = false; break; }
-                    using (Graphics g = Graphics.FromImage(GraphicSurface)) g.Clear(Color.FromArgb((int)val));
+                case 4: // clear ($1 32:color)
+                    if (RenderImage == null || !GetMem(GetRegister(1).x64, 4, ref val)) { ret = false; break; }
+                    using (Graphics g = Graphics.FromImage(RenderImage)) g.Clear(Color.FromArgb((int)val));
                     break;
 
-                case 4: // fill rect ($1 brush) ($2 rect)
-                    if (GraphicSurface == null || !GetBrush(GetRegister(1).x64, ref brush) || !GetRect(GetRegister(2).x64, ref rect)) { ret = false; break; }
-                    using (Graphics g = Graphics.FromImage(GraphicSurface)) g.FillRectangle(brush, rect);
+                case 5: // fill rect ($1 brush) ($2 rect)
+                    if (RenderImage == null || !GetBrush(GetRegister(1).x64, ref brush) || !GetRect(GetRegister(2).x64, ref rect)) { ret = false; break; }
+                    using (Graphics g = Graphics.FromImage(RenderImage)) g.FillRectangle(brush, rect);
                     break;
-                case 5: // draw rect ($1 pen) ($2 rect)
-                    if (GraphicSurface == null || !GetPen(GetRegister(1).x64, ref pen) || !GetRect(GetRegister(2).x64, ref rect)) { ret = false; break; }
-                    using (Graphics g = Graphics.FromImage(GraphicSurface)) g.DrawRectangle(pen, rect);
-                    break;
-
-                case 6: // fill ellipse ($1 brush) ($2 rect)
-                    if (GraphicSurface == null || !GetBrush(GetRegister(1).x64, ref brush) || !GetRect(GetRegister(2).x64, ref rect)) { ret = false; break; }
-                    using (Graphics g = Graphics.FromImage(GraphicSurface)) g.FillEllipse(brush, rect);
-                    break;
-                case 7: // draw ellipse ($1 pen) ($2 rect)
-                    if (GraphicSurface == null || !GetPen(GetRegister(1).x64, ref pen) || !GetRect(GetRegister(2).x64, ref rect)) { ret = false; break; }
-                    using (Graphics g = Graphics.FromImage(GraphicSurface)) g.DrawEllipse(pen, rect);
+                case 6: // draw rect ($1 pen) ($2 rect)
+                    if (RenderImage == null || !GetPen(GetRegister(1).x64, ref pen) || !GetRect(GetRegister(2).x64, ref rect)) { ret = false; break; }
+                    using (Graphics g = Graphics.FromImage(RenderImage)) g.DrawRectangle(pen, rect);
                     break;
 
-                case 8: // draw string ($1 brush) ($2 font) ($3 point) ($4 string) ($5 length)
-                    if (GraphicSurface == null || !GetBrush(GetRegister(1).x64, ref brush) || !GetFont(GetRegister(2).x64, ref font)
+                case 7: // fill ellipse ($1 brush) ($2 rect)
+                    if (RenderImage == null || !GetBrush(GetRegister(1).x64, ref brush) || !GetRect(GetRegister(2).x64, ref rect)) { ret = false; break; }
+                    using (Graphics g = Graphics.FromImage(RenderImage)) g.FillEllipse(brush, rect);
+                    break;
+                case 8: // draw ellipse ($1 pen) ($2 rect)
+                    if (RenderImage == null || !GetPen(GetRegister(1).x64, ref pen) || !GetRect(GetRegister(2).x64, ref rect)) { ret = false; break; }
+                    using (Graphics g = Graphics.FromImage(RenderImage)) g.DrawEllipse(pen, rect);
+                    break;
+
+                case 9: // draw string ($1 brush) ($2 font) ($3 point) ($4 string) ($5 length)
+                    if (RenderImage == null || !GetBrush(GetRegister(1).x64, ref brush) || !GetFont(GetRegister(2).x64, ref font)
                         || !GetPoint(GetRegister(3).x64, ref point) || !GetString(GetRegister(4).x64, GetRegister(5).x64, ref str)) { ret = false; break; }
-                    using (Graphics g = Graphics.FromImage(GraphicSurface)) g.DrawString(str, font, brush, point);
+                    using (Graphics g = Graphics.FromImage(RenderImage)) g.DrawString(str, font, brush, point);
+                    MessageBox.Show(str);
                     break;
-                case 9: // draw string ($1 brush) ($2 font) ($3 rect) ($4 string) ($5 length)
-                    if (GraphicSurface == null || !GetBrush(GetRegister(1).x64, ref brush) || !GetFont(GetRegister(2).x64, ref font)
+                case 10: // draw string ($1 brush) ($2 font) ($3 rect) ($4 string) ($5 length)
+                    if (RenderImage == null || !GetBrush(GetRegister(1).x64, ref brush) || !GetFont(GetRegister(2).x64, ref font)
                         || !GetRect(GetRegister(3).x64, ref rect) || !GetString(GetRegister(4).x64, GetRegister(5).x64, ref str)) { ret = false; break; }
-                    using (Graphics g = Graphics.FromImage(GraphicSurface)) g.DrawString(str, font, brush, rect);
+                    using (Graphics g = Graphics.FromImage(RenderImage)) g.DrawString(str, font, brush, rect);
                     break;
+
+                    
 
                 // otherwise refer to parent
                 default:

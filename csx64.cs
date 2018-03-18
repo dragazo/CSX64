@@ -28,7 +28,7 @@ namespace csx64
         /// <summary>
         /// Version number
         /// </summary>
-        public const UInt64 Version = 0x0311;
+        public const UInt64 Version = 0x0314;
 
         // -----------
         // -- Types --
@@ -2256,7 +2256,7 @@ namespace csx64
                     Registers[a >> 4].Set((a >> 2) & 3, b);
                     return true;
                 case OPCode.CALL:
-                    if (!GetAddressAdv(ref a) || !Push(8, a)) return false;
+                    if (!GetAddressAdv(ref a) || !Push(8, Pos)) return false;
                     Pos = a; return true;
                 case OPCode.RET:
                     if (!Pop(8, ref a)) return false;
@@ -3343,7 +3343,7 @@ namespace csx64
                             // 2 args default step
                             if (args.args.Length == 2) a = 0;
                             // 3 args explicit step
-                            else if (args.args.Length == 2)
+                            else if (args.args.Length == 3)
                             {
                                 if (!TryParseInstantImm(args, args.args[2], out a, out floating))
                                     return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: LOOP third argument (explicit step) expected an instant imm");
