@@ -97,7 +97,9 @@ namespace csx64
 
             GETF, SETF,
 
-            LOOP
+            LOOP,
+
+            FEXTEND
         }
 
         /// <summary>
@@ -191,33 +193,33 @@ namespace csx64
                 set { Flags = (Flags & 0xfe) | (value ? 0x01 : 0ul); }
             }
             /// <summary>
-            /// The Sign flag
-            /// </summary>
-            public bool S
-            {
-                get { return (Flags & 0x02) != 0; }
-                set { Flags = (Flags & 0xfd) | (value ? 0x02 : 0ul); }
-            }
-            /// <summary>
             /// The Parity flag
             /// </summary>
             public bool P
             {
-                get { return (Flags & 0x04) != 0; }
-                set { Flags = (Flags & 0xfb) | (value ? 0x04 : 0ul); }
+                get { return (Flags & 0x02) != 0; }
+                set { Flags = (Flags & 0xfd) | (value ? 0x02 : 0ul); }
             }
             /// <summary>
             /// The Overflow flag
             /// </summary>
             public bool O
             {
-                get { return (Flags & 0x08) != 0; }
-                set { Flags = (Flags & 0xf7) | (value ? 0x08 : 0ul); }
+                get { return (Flags & 0x04) != 0; }
+                set { Flags = (Flags & 0xfb) | (value ? 0x04 : 0ul); }
             }
             /// <summary>
             /// The Carry flag
             /// </summary>
             public bool C
+            {
+                get { return (Flags & 0x08) != 0; }
+                set { Flags = (Flags & 0xf7) | (value ? 0x08 : 0ul); }
+            }
+            /// <summary>
+            /// The Sign flag
+            /// </summary>
+            public bool S
             {
                 get { return (Flags & 0x10) != 0; }
                 set { Flags = (Flags & 0xef) | (value ? 0x10 : 0ul); }
@@ -526,8 +528,8 @@ namespace csx64
             return true;
         }
 
-        // updates the ZSP flags for integral ops
-        private void UpdateFlagsI(UInt64 value, UInt64 sizecode)
+        // updates the ZSP flags for integral ops (identical for most integral ops)
+        private void UpdateFlagsInt(UInt64 value, UInt64 sizecode)
         {
             Flags.Z = value == 0;
             Flags.S = Negative(value, sizecode);
@@ -538,27 +540,29 @@ namespace csx64
                 if (((value >> i) & 1) != 0) parity = !parity;
             Flags.P = parity;
         }
-        // updates the ZSOC flags for floating point ops
+        // updates the flags for floating point ops
         private void UpdateFlagsDouble(double value)
         {
             Flags.Z = value == 0;
             Flags.S = value < 0;
+            Flags.O = false;
 
-            Flags.O = double.IsInfinity(value);
-            Flags.C = double.IsNaN(value);
+            Flags.C = double.IsInfinity(value);
+            Flags.P = double.IsNaN(value);
         }
         private void UpdateFlagsFloat(float value)
         {
             Flags.Z = value == 0;
             Flags.S = value < 0;
+            Flags.O = false;
 
-            Flags.O = float.IsInfinity(value);
-            Flags.C = float.IsNaN(value);
+            Flags.C = float.IsInfinity(value);
+            Flags.P = float.IsNaN(value);
         }
 
         // -- special ops --
 
-        private bool ProcessMov(bool apply = true)
+        private bool ProcessMOV(bool apply = true)
         {
             UInt64 s = 0, m = 0, a = 0, b = 0;
             if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
@@ -576,7 +580,7 @@ namespace csx64
 
             UInt64 res = Truncate(a + b, sizecode);
 
-            UpdateFlagsI(res, sizecode);
+            UpdateFlagsInt(res, sizecode);
             Flags.C = res < a && res < b; // if overflow is caused, some of one value must go toward it, so the truncated result must necessarily be less than both args
             Flags.O = Positive(a, sizecode) == Positive(b, sizecode) && Positive(a, sizecode) != Positive(res, sizecode);
 
@@ -590,7 +594,7 @@ namespace csx64
 
             UInt64 res = Truncate(a - b, sizecode);
 
-            UpdateFlagsI(res, sizecode);
+            UpdateFlagsInt(res, sizecode);
             Flags.C = a < b; // if a < b, a borrow was taken from the highest bit
             Flags.O = Positive(a, sizecode) != Positive(b, sizecode) && Positive(a, sizecode) != Positive(res, sizecode);
 
@@ -605,7 +609,7 @@ namespace csx64
 
             UInt64 res = Truncate(a * b, sizecode);
 
-            UpdateFlagsI(res, sizecode);
+            UpdateFlagsInt(res, sizecode);
 
             return StoreBinaryOpFormat(s, m, res);
         }
@@ -620,7 +624,7 @@ namespace csx64
 
             UInt64 res = Truncate(a / b, sizecode);
 
-            UpdateFlagsI(res, sizecode);
+            UpdateFlagsInt(res, sizecode);
 
             return StoreBinaryOpFormat(s, m, res);
         }
@@ -634,7 +638,7 @@ namespace csx64
 
             UInt64 res = Truncate(a % b, sizecode);
 
-            UpdateFlagsI(res, sizecode);
+            UpdateFlagsInt(res, sizecode);
 
             return StoreBinaryOpFormat(s, m, res);
         }
@@ -649,7 +653,7 @@ namespace csx64
 
             UInt64 res = Truncate((SignExtend(a, sizecode).MakeSigned() / SignExtend(b, sizecode).MakeSigned()).MakeUnsigned(), sizecode);
 
-            UpdateFlagsI(res, sizecode);
+            UpdateFlagsInt(res, sizecode);
 
             return StoreBinaryOpFormat(s, m, res);
         }
@@ -663,7 +667,7 @@ namespace csx64
 
             UInt64 res = Truncate((SignExtend(a, sizecode).MakeSigned() % SignExtend(b, sizecode).MakeSigned()).MakeUnsigned(), sizecode);
 
-            UpdateFlagsI(res, sizecode);
+            UpdateFlagsInt(res, sizecode);
 
             return StoreBinaryOpFormat(s, m, res);
         }
@@ -677,7 +681,7 @@ namespace csx64
             UInt16 sh = (UInt16)(b % SizeBits(sizecode));
             UInt64 res = Truncate(a << sh, sizecode);
 
-            UpdateFlagsI(res, sizecode);
+            UpdateFlagsInt(res, sizecode);
 
             return StoreBinaryOpFormat(s, m, res);
         }
@@ -690,7 +694,7 @@ namespace csx64
             UInt16 sh = (UInt16)(b % SizeBits(sizecode));
             UInt64 res = a >> sh;
 
-            UpdateFlagsI(res, sizecode);
+            UpdateFlagsInt(res, sizecode);
 
             return StoreBinaryOpFormat(s, m, res);
         }
@@ -704,7 +708,7 @@ namespace csx64
             UInt16 sh = (UInt16)(b % SizeBits(sizecode));
             UInt64 res = Truncate((SignExtend(a, sizecode).MakeSigned() << sh).MakeUnsigned(), sizecode);
 
-            UpdateFlagsI(res, sizecode);
+            UpdateFlagsInt(res, sizecode);
 
             return StoreBinaryOpFormat(s, m, res);
         }
@@ -717,7 +721,7 @@ namespace csx64
             UInt16 sh = (UInt16)(b % SizeBits(sizecode));
             UInt64 res = Truncate((SignExtend(a, sizecode).MakeSigned() >> sh).MakeUnsigned(), sizecode);
 
-            UpdateFlagsI(res, sizecode);
+            UpdateFlagsInt(res, sizecode);
 
             return StoreBinaryOpFormat(s, m, res);
         }
@@ -731,7 +735,7 @@ namespace csx64
             UInt16 sh = (UInt16)(b % SizeBits(sizecode));
             UInt64 res = Truncate((a << sh) | (a >> ((UInt16)SizeBits(sizecode) - sh)), sizecode);
 
-            UpdateFlagsI(res, sizecode);
+            UpdateFlagsInt(res, sizecode);
 
             return StoreBinaryOpFormat(s, m, res);
         }
@@ -744,7 +748,7 @@ namespace csx64
             UInt16 sh = (UInt16)(b % SizeBits(sizecode));
             UInt64 res = Truncate((a >> sh) | (a << ((UInt16)SizeBits(sizecode) - sh)), sizecode);
 
-            UpdateFlagsI(res, sizecode);
+            UpdateFlagsInt(res, sizecode);
 
             return StoreBinaryOpFormat(s, m, res);
         }
@@ -757,7 +761,7 @@ namespace csx64
 
             UInt64 res = a & b;
 
-            UpdateFlagsI(res, sizecode);
+            UpdateFlagsInt(res, sizecode);
 
             return apply ? StoreBinaryOpFormat(s, m, res) : true;
         }
@@ -769,7 +773,7 @@ namespace csx64
 
             UInt64 res = a | b;
 
-            UpdateFlagsI(res, sizecode);
+            UpdateFlagsInt(res, sizecode);
 
             return StoreBinaryOpFormat(s, m, res);
         }
@@ -781,7 +785,7 @@ namespace csx64
 
             UInt64 res = a ^ b;
 
-            UpdateFlagsI(res, sizecode);
+            UpdateFlagsInt(res, sizecode);
 
             return StoreBinaryOpFormat(s, m, res);
         }
@@ -794,7 +798,7 @@ namespace csx64
 
             UInt64 res = Truncate(a + 1, sizecode);
 
-            UpdateFlagsI(res, sizecode);
+            UpdateFlagsInt(res, sizecode);
             Flags.C = res == 0; // carry results in zero
             Flags.O = Positive(a, sizecode) && Negative(res, sizecode); // + -> - is overflow
 
@@ -808,7 +812,7 @@ namespace csx64
 
             UInt64 res = Truncate(a - 1, sizecode);
 
-            UpdateFlagsI(res, sizecode);
+            UpdateFlagsInt(res, sizecode);
             Flags.C = a == 0; // a = 0 results in borrow from high bit (carry)
             Flags.O = Negative(a, sizecode) && Positive(res, sizecode); // - -> + is overflow
 
@@ -822,7 +826,7 @@ namespace csx64
 
             UInt64 res = Truncate(~a, sizecode);
 
-            UpdateFlagsI(res, sizecode);
+            UpdateFlagsInt(res, sizecode);
 
             return StoreUnaryOpFormat(s, m, res);
         }
@@ -834,7 +838,7 @@ namespace csx64
 
             UInt64 res = Truncate(~a + 1, sizecode);
 
-            UpdateFlagsI(res, sizecode);
+            UpdateFlagsInt(res, sizecode);
 
             return StoreUnaryOpFormat(s, m, res);
         }
@@ -846,7 +850,7 @@ namespace csx64
 
             UInt64 res = Positive(a, sizecode) ? a : Truncate(~a + 1, sizecode);
 
-            UpdateFlagsI(res, sizecode);
+            UpdateFlagsInt(res, sizecode);
 
             return StoreUnaryOpFormat(s, m, res);
         }
@@ -856,7 +860,7 @@ namespace csx64
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
-            UpdateFlagsI(a, sizecode);
+            UpdateFlagsInt(a, sizecode);
             Flags.C = Flags.O = false;
 
             return true;
@@ -1581,14 +1585,8 @@ namespace csx64
 
             switch ((s >> 2) & 3)
             {
-                case 3:
-                    {
-                        return StoreBinaryOpFormat(s, m, ((Int64)AsDouble(a)).MakeUnsigned());
-                    }
-                case 2:
-                    {
-                        return StoreBinaryOpFormat(s, m, ((Int64)AsFloat(a)).MakeUnsigned());
-                    }
+                case 3: return StoreBinaryOpFormat(s, m, ((Int64)AsDouble(a)).MakeUnsigned());
+                case 2: return StoreBinaryOpFormat(s, m, ((Int64)AsFloat(a)).MakeUnsigned());
 
                 default: Fail(ErrorCode.UndefinedBehavior); return false;
             }
@@ -1600,14 +1598,8 @@ namespace csx64
 
             switch ((s >> 2) & 3)
             {
-                case 3:
-                    {
-                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(a.MakeSigned()));
-                    }
-                case 2:
-                    {
-                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(SignExtend(a, 2).MakeSigned()));
-                    }
+                case 3: return StoreBinaryOpFormat(s, m, DoubleAsUInt64(a.MakeSigned()));
+                case 2: return StoreBinaryOpFormat(s, m, FloatAsUInt64(SignExtend(a, 2).MakeSigned()));
 
                 default: Fail(ErrorCode.UndefinedBehavior); return false;
             }
@@ -1943,7 +1935,7 @@ namespace csx64
 
             UInt64 res = a & ~b;
 
-            UpdateFlagsI(res, sizecode);
+            UpdateFlagsInt(res, sizecode);
 
             return StoreUnaryOpFormat(s, m, res);
         }
@@ -2128,28 +2120,28 @@ namespace csx64
                 case OPCode.STOP: Running = false; return true;
                 case OPCode.SYSCALL: if (Syscall()) return true; Fail(ErrorCode.UnhandledSyscall); return false;
 
-                case OPCode.MOV: return ProcessMov();
+                case OPCode.MOV: return ProcessMOV();
 
-                case OPCode.MOVa: return ProcessMov(Flags.a);
-                case OPCode.MOVae: return ProcessMov(Flags.ae);
-                case OPCode.MOVb: return ProcessMov(Flags.b);
-                case OPCode.MOVbe: return ProcessMov(Flags.be);
+                case OPCode.MOVa: return ProcessMOV(Flags.a);
+                case OPCode.MOVae: return ProcessMOV(Flags.ae);
+                case OPCode.MOVb: return ProcessMOV(Flags.b);
+                case OPCode.MOVbe: return ProcessMOV(Flags.be);
 
-                case OPCode.MOVg: return ProcessMov(Flags.g);
-                case OPCode.MOVge: return ProcessMov(Flags.ge);
-                case OPCode.MOVl: return ProcessMov(Flags.l);
-                case OPCode.MOVle: return ProcessMov(Flags.le);
+                case OPCode.MOVg: return ProcessMOV(Flags.g);
+                case OPCode.MOVge: return ProcessMOV(Flags.ge);
+                case OPCode.MOVl: return ProcessMOV(Flags.l);
+                case OPCode.MOVle: return ProcessMOV(Flags.le);
 
-                case OPCode.MOVz: return ProcessMov(Flags.Z);
-                case OPCode.MOVnz: return ProcessMov(!Flags.Z);
-                case OPCode.MOVs: return ProcessMov(Flags.S);
-                case OPCode.MOVns: return ProcessMov(!Flags.S);
-                case OPCode.MOVp: return ProcessMov(Flags.P);
-                case OPCode.MOVnp: return ProcessMov(!Flags.P);
-                case OPCode.MOVo: return ProcessMov(Flags.O);
-                case OPCode.MOVno: return ProcessMov(!Flags.O);
-                case OPCode.MOVc: return ProcessMov(Flags.C);
-                case OPCode.MOVnc: return ProcessMov(!Flags.C);
+                case OPCode.MOVz: return ProcessMOV(Flags.Z);
+                case OPCode.MOVnz: return ProcessMOV(!Flags.Z);
+                case OPCode.MOVs: return ProcessMOV(Flags.S);
+                case OPCode.MOVns: return ProcessMOV(!Flags.S);
+                case OPCode.MOVp: return ProcessMOV(Flags.P);
+                case OPCode.MOVnp: return ProcessMOV(!Flags.P);
+                case OPCode.MOVo: return ProcessMOV(Flags.O);
+                case OPCode.MOVno: return ProcessMOV(!Flags.O);
+                case OPCode.MOVc: return ProcessMOV(Flags.C);
+                case OPCode.MOVnc: return ProcessMOV(!Flags.C);
 
                 case OPCode.SWAP: return ProcessSWAP();
 
@@ -2292,6 +2284,32 @@ namespace csx64
                     if (c != 0) Pos = b;
                     return true;
 
+                case OPCode.FEXTEND:
+                    if (!GetMemAdv(1, ref a)) return false;
+                    switch ((a >> 2) & 3)
+                    {
+                        case 2:
+                            switch (a & 3)
+                            {
+                                case 2: return true;
+                                case 3: Registers[a >> 4].x64 = DoubleAsUInt64((double)AsFloat(Registers[a >> 4].x32)); return true;
+
+                                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                            }
+                            
+                        case 3:
+                            switch (a & 3)
+                            {
+                                case 2: Registers[a >> 4].x32 = FloatAsUInt64((float)AsDouble(Registers[a >> 4].x64)); return true;
+                                case 3: return true;
+
+                                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                            }
+
+                        default: Fail(ErrorCode.UndefinedBehavior); return false;
+                    }
+
+
                 // otherwise, unknown opcode
                 default: Fail(ErrorCode.UndefinedBehavior); return false;
             }
@@ -2314,7 +2332,10 @@ namespace csx64
             None, Unevaluated, Error
         }
 
-        internal class Hole
+        /// <summary>
+        /// Represents an expression used to compute a value, with options for using a symbol table for lookup
+        /// </summary>
+        internal class Expr
         {
             public enum OPs
             {
@@ -2338,9 +2359,12 @@ namespace csx64
                 Neg, BitNot, LogNot, Int, Float
             }
 
+            /// <summary>
+            /// The operation used to compute the value (or None if leaf)
+            /// </summary>
             public OPs OP = OPs.None;
 
-            public Hole Left = null, Right = null;
+            public Expr Left = null, Right = null;
 
             private string _Value = null;
             private UInt64 _Result = 0;
@@ -2359,7 +2383,7 @@ namespace csx64
                 }
             }
             /// <summary>
-            /// Assigns this hole to be an evaluated integer
+            /// Assigns this expression to be an evaluated integer
             /// </summary>
             public UInt64 IntResult
             {
@@ -2371,7 +2395,7 @@ namespace csx64
                 }
             }
             /// <summary>
-            /// Assigns this hole to be an evaluated floating-point value
+            /// Assigns this expression to be an evaluated floating-point value
             /// </summary>
             public double FloatResult
             {
@@ -2391,7 +2415,7 @@ namespace csx64
             /// <param name="floating">flag denoting result is floating-point</param>
             /// <param name="err">error emitted upon failure</param>
             /// <param name="visited">DO NOT PROVIDE THIS</param>
-            public bool Evaluate(Dictionary<string, Hole> symbols, out UInt64 res, out bool floating, ref string err, Stack<string> visited = null)
+            public bool Evaluate(Dictionary<string, Expr> symbols, out UInt64 res, out bool floating, ref string err, Stack<string> visited = null)
             {
                 res = 0; // initialize out params
                 floating = false;
@@ -2433,9 +2457,10 @@ namespace csx64
                         }
 
                         // otherwise if it's a defined symbol
-                        if (symbols.TryGetValue(Value, out Hole hole))
+                        if (symbols.TryGetValue(Value, out Expr hole))
                         {
-                            if (visited == null) visited = new Stack<string>(); // create the visited stack if it wasn't already
+                            // create the visited stack if it wasn't already
+                            if (visited == null) visited = new Stack<string>();
 
                             // fail if looking up a symbol we've already looked up (infinite recursion)
                             if (visited.Contains(Value)) { err = $"Cyclic dependence on \"{Value}\" encountered"; return false; }
@@ -2586,9 +2611,9 @@ namespace csx64
 
             /// <summary>
             /// Creates a replica of this expression tree
-            public Hole Clone()
+            public Expr Clone()
             {
-                return new Hole()
+                return new Expr()
                 {
                     OP = OP,
                     Left = Left?.Clone(),
@@ -2606,9 +2631,9 @@ namespace csx64
             /// </summary>
             /// <param name="from">the string to find</param>
             /// <param name="to">the string to replace with</param>
-            public Hole Clone(string from, string to)
+            public Expr Clone(string from, string to)
             {
-                Hole temp = new Hole() { OP = OP, Left = Left?.Clone(from, to), Right = Right?.Clone(from, to) };
+                Expr temp = new Expr() { OP = OP, Left = Left?.Clone(from, to), Right = Right?.Clone(from, to) };
 
                 // if this is a replacement, swap for new value
                 if (Value == from)
@@ -2634,9 +2659,9 @@ namespace csx64
             /// <param name="from">the string to find</param>
             /// <param name="to">the value to replace with</param>
             /// <param name="floating">flag if the specified value is floating-point</param>
-            public Hole Clone(string from, UInt64 to, bool floating)
+            public Expr Clone(string from, UInt64 to, bool floating)
             {
-                Hole temp = new Hole() { OP = OP, Left = Left?.Clone(from, to, floating), Right = Right?.Clone(from, to, floating) };
+                Expr temp = new Expr() { OP = OP, Left = Left?.Clone(from, to, floating), Right = Right?.Clone(from, to, floating) };
 
                 if (Value == from)
                 {
@@ -2661,7 +2686,7 @@ namespace csx64
             /// </summary>
             /// <param name="value">the value to find</param>
             /// <param name="path">the resulting path (with the root at the bottom of the stack and the found node at the top)</param>
-            public bool Find(string value, Stack<Hole> path)
+            public bool Find(string value, Stack<Expr> path)
             {
                 path.Push(this);
 
@@ -2681,9 +2706,9 @@ namespace csx64
             /// Finds the value in the specified expression tree. Returns it on success, otherwise null
             /// </summary>
             /// <param name="value">the found node or null</param>
-            public Hole Find(string value)
+            public Expr Find(string value)
             {
-                if(OP == OPs.None) return Value == value ? this : null;
+                if (OP == OPs.None) return Value == value ? this : null;
                 else return Left.Find(value) ?? Right?.Find(value);
             }
 
@@ -2705,7 +2730,10 @@ namespace csx64
                 return b.ToString();
             }
 
-            public static void Swap(Hole a, Hole b)
+            /// <summary>
+            /// Swaps the contents of the expressions
+            /// </summary>
+            public static void Swap(Expr a, Expr b)
             {
                 Utility.Swap(ref a.OP, ref b.OP);
 
@@ -2720,21 +2748,48 @@ namespace csx64
         }
         internal class HoleData
         {
+            /// <summary>
+            /// The local address of the hole in the file
+            /// </summary>
             public UInt64 Address;
+            /// <summary>
+            /// The size of the hole
+            /// </summary>
             public UInt64 Size;
-
+            
+            /// <summary>
+            /// The line where this hole was created
+            /// </summary>
             public int Line;
-            public Hole Hole;
+            /// <summary>
+            /// The expression that represents this hole's value
+            /// </summary>
+            public Expr Expr;
         }
         public class ObjectFile
         {
-            internal Dictionary<string, Hole> Symbols = new Dictionary<string, Hole>();
+            /// <summary>
+            /// The symbols defined in the file
+            /// </summary>
+            internal Dictionary<string, Expr> Symbols = new Dictionary<string, Expr>();
+            /// <summary>
+            /// All the holes that need to be patched by the linker
+            /// </summary>
             internal List<HoleData> Holes = new List<HoleData>();
 
+            /// <summary>
+            /// The list of exported symbol names
+            /// </summary>
             internal List<string> GlobalSymbols = new List<string>();
+            /// <summary>
+            /// The executable data
+            /// </summary>
             internal List<byte> Data = new List<byte>();
         }
 
+        /// <summary>
+        /// Holds all the variables used during assembly
+        /// </summary>
         internal class AssembleArgs
         {
             public ObjectFile file;
@@ -2785,12 +2840,12 @@ namespace csx64
             for (ushort i = 0; i < size; ++i)
                 args.file.Data.Add((byte)(val >> (8 * i)));
         }
-        private static bool TryAppendHole(AssembleArgs args, UInt64 size, Hole hole, int type = 3)
+        private static bool TryAppendHole(AssembleArgs args, UInt64 size, Expr hole, int type = 3)
         {
             string err = null; // evaluation error
 
             // create the hole data
-            HoleData data = new HoleData() { Address = (UInt64)args.file.Data.LongCount(), Size = size, Line = args.line, Hole = hole };
+            HoleData data = new HoleData() { Address = (UInt64)args.file.Data.LongCount(), Size = size, Line = args.line, Expr = hole };
             // write a dummy (all 1's for easy manual identification)
             AppendVal(args, size, 0xffffffffffffffff);
 
@@ -2806,7 +2861,7 @@ namespace csx64
 
             return true;
         }
-        private static bool TryAppendAddress(AssembleArgs args, UInt64 a, UInt64 b, Hole hole)
+        private static bool TryAppendAddress(AssembleArgs args, UInt64 a, UInt64 b, Expr hole)
         {
             // [1: literal][3: m1][1: -m2][3: m2]   ([4: r1][4: r2])   ([64: imm])
             AppendVal(args, 1, a);
@@ -2816,10 +2871,10 @@ namespace csx64
             return true;
         }
 
-        private static PatchError TryPatchHole<T>(Dictionary<string, Hole> symbols, T res, HoleData data, ref string err) where T : IList<byte>
+        private static PatchError TryPatchHole<T>(Dictionary<string, Expr> symbols, T res, HoleData data, ref string err) where T : IList<byte>
         {
             // if we can fill it immediately, do so
-            if (data.Hole.Evaluate(symbols, out UInt64 val, out bool floating, ref err))
+            if (data.Expr.Evaluate(symbols, out UInt64 val, out bool floating, ref err))
             {
                 // if it's floating-point
                 if (floating)
@@ -2917,38 +2972,38 @@ namespace csx64
             return true;
         }
 
-        private static readonly Dictionary<Hole.OPs, int> Precedence = new Dictionary<Hole.OPs, int>()
+        private static readonly Dictionary<Expr.OPs, int> Precedence = new Dictionary<Expr.OPs, int>()
         {
-            { Hole.OPs.Mul, 5 },
-            { Hole.OPs.Div, 5 },
-            { Hole.OPs.Mod, 5 },
+            { Expr.OPs.Mul, 5 },
+            { Expr.OPs.Div, 5 },
+            { Expr.OPs.Mod, 5 },
 
-            { Hole.OPs.Add, 6 },
-            { Hole.OPs.Sub, 6 },
+            { Expr.OPs.Add, 6 },
+            { Expr.OPs.Sub, 6 },
 
-            { Hole.OPs.SL, 7 },
-            { Hole.OPs.SR, 7 },
+            { Expr.OPs.SL, 7 },
+            { Expr.OPs.SR, 7 },
 
-            { Hole.OPs.Less, 9 },
-            { Hole.OPs.LessE, 9 },
-            { Hole.OPs.Great, 9 },
-            { Hole.OPs.GreatE, 9 },
+            { Expr.OPs.Less, 9 },
+            { Expr.OPs.LessE, 9 },
+            { Expr.OPs.Great, 9 },
+            { Expr.OPs.GreatE, 9 },
 
-            { Hole.OPs.Eq, 10 },
-            { Hole.OPs.Neq, 10 },
+            { Expr.OPs.Eq, 10 },
+            { Expr.OPs.Neq, 10 },
 
-            { Hole.OPs.BitAnd, 11 },
-            { Hole.OPs.BitXor, 12 },
-            { Hole.OPs.BitOr, 13 },
-            { Hole.OPs.LogAnd, 14 },
-            { Hole.OPs.LogOr, 15 }
+            { Expr.OPs.BitAnd, 11 },
+            { Expr.OPs.BitXor, 12 },
+            { Expr.OPs.BitOr, 13 },
+            { Expr.OPs.LogAnd, 14 },
+            { Expr.OPs.LogOr, 15 }
         };
         private static readonly List<char> UnaryOps = new List<char>() { '+', '-', '~', '!', '*', '/' };
 
-        private static bool TryGetOp(string token, int pos, out Hole.OPs op, out int oplen)
+        private static bool TryGetOp(string token, int pos, out Expr.OPs op, out int oplen)
         {
             // default to invalid op
-            op = Hole.OPs.None;
+            op = Expr.OPs.None;
             oplen = 0;
 
             // try to take as many characters as possible (greedy)
@@ -2957,17 +3012,17 @@ namespace csx64
                 oplen = 2; // record oplen
                 switch (token.Substring(pos, 2))
                 {
-                    case "<<": op = Hole.OPs.SL; return true;
-                    case ">>": op = Hole.OPs.SR; return true;
+                    case "<<": op = Expr.OPs.SL; return true;
+                    case ">>": op = Expr.OPs.SR; return true;
 
-                    case "<=": op = Hole.OPs.LessE; return true;
-                    case ">=": op = Hole.OPs.GreatE; return true;
+                    case "<=": op = Expr.OPs.LessE; return true;
+                    case ">=": op = Expr.OPs.GreatE; return true;
 
-                    case "==": op = Hole.OPs.Eq; return true;
-                    case "!=": op = Hole.OPs.Neq; return true;
+                    case "==": op = Expr.OPs.Eq; return true;
+                    case "!=": op = Expr.OPs.Neq; return true;
 
-                    case "&&": op = Hole.OPs.LogAnd; return true;
-                    case "||": op = Hole.OPs.LogOr; return true;
+                    case "&&": op = Expr.OPs.LogAnd; return true;
+                    case "||": op = Expr.OPs.LogOr; return true;
                 }
             }
             if (pos + 1 <= token.Length)
@@ -2975,42 +3030,42 @@ namespace csx64
                 oplen = 1; // record oplen
                 switch (token[pos])
                 {
-                    case '*': op = Hole.OPs.Mul; return true;
-                    case '/': op = Hole.OPs.Div; return true;
-                    case '%': op = Hole.OPs.Mod; return true;
+                    case '*': op = Expr.OPs.Mul; return true;
+                    case '/': op = Expr.OPs.Div; return true;
+                    case '%': op = Expr.OPs.Mod; return true;
 
-                    case '+': op = Hole.OPs.Add; return true;
-                    case '-': op = Hole.OPs.Sub; return true;
+                    case '+': op = Expr.OPs.Add; return true;
+                    case '-': op = Expr.OPs.Sub; return true;
 
-                    case '<': op = Hole.OPs.Less; return true;
-                    case '>': op = Hole.OPs.Great; return true;
+                    case '<': op = Expr.OPs.Less; return true;
+                    case '>': op = Expr.OPs.Great; return true;
 
-                    case '&': op = Hole.OPs.BitAnd; return true;
-                    case '^': op = Hole.OPs.BitXor; return true;
-                    case '|': op = Hole.OPs.BitOr; return true;
+                    case '&': op = Expr.OPs.BitAnd; return true;
+                    case '^': op = Expr.OPs.BitXor; return true;
+                    case '|': op = Expr.OPs.BitOr; return true;
                 }
             }
 
             // if nothing found, fail
             return false;
         }
-        private static bool TryParseImm(AssembleArgs args, string token, out Hole hole)
+        private static bool TryParseImm(AssembleArgs args, string token, out Expr hole)
         {
             hole = null; // initially-nulled result
 
-            Hole temp; // temporary for node creation
+            Expr temp; // temporary for node creation
             
             int pos = 0, end;     // position in token
             int depth;            // parenthesis depth
             bool binPair = false; // marker if tree contains complete binary pairs (i.e. N+1 values and N binary ops)
 
-            Hole.OPs op = Hole.OPs.None; // extracted binary op (initialized so compiler doesn't complain)
+            Expr.OPs op = Expr.OPs.None; // extracted binary op (initialized so compiler doesn't complain)
             int oplen = 0;               // length of operator found (in characters)
 
             string err = null; // error location for hole evaluation
 
             Stack<char> unaryOps = new Stack<char>(8); // holds unary ops for processing
-            Stack<Hole> stack = new Stack<Hole>();     // the stack used to manage operator precedence rules
+            Stack<Expr> stack = new Stack<Expr>();     // the stack used to manage operator precedence rules
 
             // top of stack shall be refered to as current
 
@@ -3061,7 +3116,7 @@ namespace csx64
                         if (!MutateLabel(args, ref val)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse imm \"{token}\"\n-> {args.err.Item2}"); return false; }
 
                         // create the hole for it
-                        temp = new Hole() { Value = val };
+                        temp = new Expr() { Value = val };
 
                         // it either needs to be evaluatable or a valid label name
                         if (!temp.Evaluate(args.file.Symbols, out UInt64 res, out bool floating, ref err) && !IsValidLabel(val))
@@ -3077,11 +3132,11 @@ namespace csx64
                         switch (uop)
                         {
                             case '+': break;
-                            case '-': temp = new Hole() { OP = Hole.OPs.Neg, Left = temp }; break;
-                            case '~': temp = new Hole() { OP = Hole.OPs.BitNot, Left = temp }; break;
-                            case '!': temp = new Hole() { OP = Hole.OPs.LogNot, Left = temp }; break;
-                            case '*': temp = new Hole() { OP = Hole.OPs.Float, Left = temp }; break;
-                            case '/': temp = new Hole() { OP = Hole.OPs.Int, Left = temp }; break;
+                            case '-': temp = new Expr() { OP = Expr.OPs.Neg, Left = temp }; break;
+                            case '~': temp = new Expr() { OP = Expr.OPs.BitNot, Left = temp }; break;
+                            case '!': temp = new Expr() { OP = Expr.OPs.LogNot, Left = temp }; break;
+                            case '*': temp = new Expr() { OP = Expr.OPs.Float, Left = temp }; break;
+                            case '/': temp = new Expr() { OP = Expr.OPs.Int, Left = temp }; break;
 
                             default: throw new NotImplementedException($"unary op \'{uop}\' not implemented");
                         }
@@ -3111,13 +3166,13 @@ namespace csx64
                     if (stack.Peek() != null)
                     {
                         // splice in the new operator, moving current's right sub-tree to left of new node
-                        stack.Push(stack.Peek().Right = new Hole() { OP = op, Left = stack.Peek().Right });
+                        stack.Push(stack.Peek().Right = new Expr() { OP = op, Left = stack.Peek().Right });
                     }
                     // otherwise we'll have to move the root
                     else
                     {
                         // splice in the new operator, moving entire tree to left of new node
-                        stack.Push(hole = new Hole() { OP = op, Left = hole });
+                        stack.Push(hole = new Expr() { OP = op, Left = hole });
                     }
 
                     // flag as invalid binary pair
@@ -3137,7 +3192,7 @@ namespace csx64
         {
             string err = null; // error location for evaluation
 
-            if (!TryParseImm(args, token, out Hole hole)) { res = 0; floating = false; return false; }
+            if (!TryParseImm(args, token, out Expr hole)) { res = 0; floating = false; return false; }
             if (!hole.Evaluate(args.file.Symbols, out res, out floating, ref err)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to parse instant imm \"{token}\"\n-> {err}"); return false; }
 
             return true;
@@ -3229,10 +3284,10 @@ namespace csx64
             }
         }
 
-        private static bool TryParseAddressReg(AssembleArgs args, string label, ref Hole hole, ref UInt64 m, ref bool neg)
+        private static bool TryParseAddressReg(AssembleArgs args, string label, ref Expr hole, ref UInt64 m, ref bool neg)
         {
-            Stack<Hole> path = new Stack<Hole>();
-            List<Hole> list = new List<Hole>();
+            Stack<Expr> path = new Stack<Expr>();
+            List<Expr> list = new List<Expr>();
 
             string err = string.Empty; // evaluation error
 
@@ -3243,12 +3298,12 @@ namespace csx64
                 while (path.Count > 0) list.Add(path.Pop());
 
                 // if it doesn't have a mult section
-                if (list.Count == 1 || list.Count > 1 && list[1].OP != Hole.OPs.Mul)
+                if (list.Count == 1 || list.Count > 1 && list[1].OP != Expr.OPs.Mul)
                 {
                     // add in a multiplier of 1
-                    list[0].OP = Hole.OPs.Mul;
-                    list[0].Left = new Hole() { Value = "1" };
-                    list[0].Right = new Hole() { Value = list[0].Value };
+                    list[0].OP = Expr.OPs.Mul;
+                    list[0].Left = new Expr() { Value = "1" };
+                    list[0].Right = new Expr() { Value = list[0].Value };
 
                     // insert new register location as beginning of path
                     list.Insert(0, list[0].Right);
@@ -3259,22 +3314,22 @@ namespace csx64
                 {
                     switch (list[i].OP)
                     {
-                        case Hole.OPs.Add: case Hole.OPs.Sub: case Hole.OPs.Neg: ++i; break;
+                        case Expr.OPs.Add: case Expr.OPs.Sub: case Expr.OPs.Neg: ++i; break;
 
-                        case Hole.OPs.Mul:
+                        case Expr.OPs.Mul:
                             {
                                 // toward leads to register, mult leads to mult value
-                                Hole toward = list[i - 1], mult = list[i].Left == list[i - 1] ? list[i].Right : list[i].Left;
+                                Expr toward = list[i - 1], mult = list[i].Left == list[i - 1] ? list[i].Right : list[i].Left;
 
                                 // if pos is add/sub, we need to distribute
-                                if (toward.OP == Hole.OPs.Add || toward.OP == Hole.OPs.Sub)
+                                if (toward.OP == Expr.OPs.Add || toward.OP == Expr.OPs.Sub)
                                 {
                                     // swap operators with toward
                                     list[i].OP = toward.OP;
-                                    toward.OP = Hole.OPs.Mul;
+                                    toward.OP = Expr.OPs.Mul;
 
                                     // create the distribution node
-                                    Hole temp = new Hole() { OP = Hole.OPs.Mul, Left = mult };
+                                    Expr temp = new Expr() { OP = Expr.OPs.Mul, Left = mult };
 
                                     // compute right and transfer mult to toward
                                     if (toward.Left == list[i - 2]) { temp.Right = toward.Right; toward.Right = mult; }
@@ -3284,10 +3339,10 @@ namespace csx64
                                     if (list[i].Left == mult) list[i].Left = temp; else list[i].Right = temp;
                                 }
                                 // if pos is mul, we need to combine with pre-existing mult code
-                                else if (toward.OP == Hole.OPs.Mul)
+                                else if (toward.OP == Expr.OPs.Mul)
                                 {
                                     // create the combination node
-                                    Hole temp = new Hole() { OP = Hole.OPs.Mul, Left = mult, Right = toward.Left == list[i - 2] ? toward.Right : toward.Left };
+                                    Expr temp = new Expr() { OP = Expr.OPs.Mul, Left = mult, Right = toward.Left == list[i - 2] ? toward.Right : toward.Left };
 
                                     // add it in
                                     if (list[i].Left == mult)
@@ -3305,10 +3360,10 @@ namespace csx64
                                     list.RemoveAt(i - 1);
                                 }
                                 // if pos is neg, we need to put the negative on the mult
-                                else if (toward.OP == Hole.OPs.Neg)
+                                else if (toward.OP == Expr.OPs.Neg)
                                 {
                                     // create the combinartion node
-                                    Hole temp = new Hole() { OP = Hole.OPs.Neg, Left = mult };
+                                    Expr temp = new Expr() { OP = Expr.OPs.Neg, Left = mult };
 
                                     // add it in
                                     if (list[i].Left == mult)
@@ -3350,7 +3405,7 @@ namespace csx64
                 for (int i = list.Count - 1; i >= 2; --i)
                 {
                     // if this will negate the register
-                    if (list[i].OP == Hole.OPs.Neg || list[i].OP == Hole.OPs.Sub && list[i].Right == list[i - 1])
+                    if (list[i].OP == Expr.OPs.Neg || list[i].OP == Expr.OPs.Sub && list[i].Right == list[i - 1])
                     {
                         // negate found partial mult
                         val = ~val + 1;
@@ -3362,7 +3417,7 @@ namespace csx64
                 //for (top = list.Count - 1; list[top].OP != Hole.OPs.Add && list[top].OP != Hole.OPs.Sub && list[top].OP != Hole.OPs.None; --top) ;
 
                 // remove the register section from the expression (replace with integral 0)
-                list[1].OP = Hole.OPs.None;
+                list[1].OP = Expr.OPs.None;
                 list[1].Left = list[1].Right = null;
                 list[1].Value = "0";
 
@@ -3392,10 +3447,10 @@ namespace csx64
             // register successfully parsed
             return true;
         }
-        private static bool TryParseAddress(AssembleArgs args, string token, out UInt64 a, out UInt64 b, out Hole hole)
+        private static bool TryParseAddress(AssembleArgs args, string token, out UInt64 a, out UInt64 b, out Expr hole)
         {
             a = b = 0;
-            hole = new Hole();
+            hole = new Expr();
 
             // must be of [*] format
             if (token.Length < 3 || token[0] != '[' || token[token.Length - 1] != ']') { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Invalid address format encountered \"{token}\""); return false; }
@@ -3469,7 +3524,7 @@ namespace csx64
             }
 
             // now that all that processing is done, we want the base imm to definitely be an integer
-            hole = new Hole() { OP = Hole.OPs.Int, Left = hole };
+            hole = new Expr() { OP = Expr.OPs.Int, Left = hole };
 
             // if we can evaluate the hole
             if (hole.Evaluate(args.file.Symbols, out UInt64 hole_val, out bool floating, ref err))
@@ -3523,7 +3578,7 @@ namespace csx64
         private static bool TryProcessBinaryOp(AssembleArgs args, OPCode op, int _b_sizecode = -1, UInt64 sizemask = 15)
         {
             UInt64 a, b, c; // parsing temporaries
-            Hole hole1, hole2;
+            Expr hole1, hole2;
 
             if (args.args.Length != 2) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: {op} expected 2 args"); return false; }
             if ((Size(args.sizecode) & sizemask) == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.UsageError, $"line {args.line}: {op} does not support the specified size code"); return false; }
@@ -3595,7 +3650,7 @@ namespace csx64
         private static bool TryProcessUnaryOp(AssembleArgs args, OPCode op, UInt64 sizemask = 15)
         {
             UInt64 a, b;
-            Hole hole;
+            Expr hole;
 
             if (args.args.Length != 1) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: {op} expected 1 arg"); return false; }
             if ((Size(args.sizecode) & sizemask) == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.UsageError, $"line {args.line}: {op} does not support the specified size code"); return false; }
@@ -3626,7 +3681,7 @@ namespace csx64
         {
             if (args.args.Length != 1) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: {op} expected 1 arg"); return false; }
 
-            if (!TryParseAddress(args, args.args[0], out UInt64 a, out UInt64 b, out Hole hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Jump expected address as first arg\n-> {args.err.Item2}"); return false; }
+            if (!TryParseAddress(args, args.args[0], out UInt64 a, out UInt64 b, out Expr hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Jump expected address as first arg\n-> {args.err.Item2}"); return false; }
 
             AppendVal(args, 1, (UInt64)op);
             if (!TryAppendAddress(args, a, b, hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
@@ -3637,7 +3692,7 @@ namespace csx64
         {
             if (args.args.Length == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: Emission expected at least one value"); return false; }
 
-            Hole hole = new Hole(); // initially empty hole (to allow for buffer shorthand e.x. "emit x32")
+            Expr hole = new Expr(); // initially empty hole (to allow for buffer shorthand e.x. "emit x32")
             UInt64 mult;
             bool floating;
 
@@ -3690,7 +3745,7 @@ namespace csx64
         private static bool TryProcessXMULXDIV(AssembleArgs args, OPCode op)
         {
             UInt64 a, b;
-            Hole hole;
+            Expr hole;
 
             if (args.args.Length != 1) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: {op} expected 1 arg"); return false; }
 
@@ -3736,28 +3791,28 @@ namespace csx64
             };
 
             // predefined symbols
-            args.file.Symbols = new Dictionary<string, Hole>()
+            args.file.Symbols = new Dictionary<string, Expr>()
             {
-                ["__time__"] = new Hole() { IntResult = Time() },
-                ["__version__"] = new Hole() { IntResult = Version },
+                ["__time__"] = new Expr() { IntResult = Time() },
+                ["__version__"] = new Expr() { IntResult = Version },
 
-                ["__pinf__"] = new Hole() { FloatResult = double.PositiveInfinity },
-                ["__ninf__"] = new Hole() { FloatResult = double.NegativeInfinity },
-                ["__nan__"] = new Hole() { FloatResult = double.NaN },
+                ["__pinf__"] = new Expr() { FloatResult = double.PositiveInfinity },
+                ["__ninf__"] = new Expr() { FloatResult = double.NegativeInfinity },
+                ["__nan__"] = new Expr() { FloatResult = double.NaN },
 
-                ["__fmax__"] = new Hole() { FloatResult = double.MaxValue },
-                ["__fmin__"] = new Hole() { FloatResult = double.MinValue },
-                ["__fepsilon__"] = new Hole() { FloatResult = double.Epsilon },
+                ["__fmax__"] = new Expr() { FloatResult = double.MaxValue },
+                ["__fmin__"] = new Expr() { FloatResult = double.MinValue },
+                ["__fepsilon__"] = new Expr() { FloatResult = double.Epsilon },
 
-                ["__pi__"] = new Hole() { FloatResult = Math.PI },
-                ["__e__"] = new Hole() { FloatResult = Math.E },
+                ["__pi__"] = new Expr() { FloatResult = Math.PI },
+                ["__e__"] = new Expr() { FloatResult = Math.E },
             };
 
             int pos = 0, end = 0; // position in code
 
             // potential parsing args for an instruction
             UInt64 a = 0, b = 0, c = 0, d = 0;
-            Hole hole;
+            Expr hole;
             bool floating;
 
             string err = null; // error location for evaluation
@@ -3790,7 +3845,7 @@ namespace csx64
                     if (file.Symbols.ContainsKey(label)) return new Tuple<AssembleError, string>(AssembleError.SymbolRedefinition, $"line {args.line}: Symbol \"{label}\" was already defined");
 
                     // add the symbol as an address (uses illegal symbol #base, which will be defined at link time)
-                    file.Symbols.Add(label, new Hole() { OP = Hole.OPs.Add, Left = new Hole() { Value = "#base" }, Right = new Hole() { Value = file.Data.LongCount().MakeUnsigned().ToString() } });
+                    file.Symbols.Add(label, new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Value = "#base" }, Right = new Expr() { Value = file.Data.LongCount().MakeUnsigned().ToString() } });
                 }
 
                 // empty lines are ignored
@@ -4119,6 +4174,18 @@ namespace csx64
 
                             break;
 
+                        case "FEXTEND":
+                        case "FX":
+                            if (args.args.Length != 2) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: XEXTEND expected 2 args");
+
+                            if (!TryParseSizecode(args, args.args[0], out a)) return new Tuple<AssembleError, string>(AssembleError.MissingSize, $"line {args.line}: UEXTEND expected size parameter as second arg\n-> {args.err.Item2}");
+                            if (!TryParseRegister(args, args.args[1], out b)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: UEXTEND expected register parameter as third arg\n-> {args.err.Item2}");
+
+                            AppendVal(args, 1, (UInt64)OPCode.FEXTEND);
+                            AppendVal(args, 1, (b << 4) | (a << 2) | args.sizecode);
+
+                            break;
+
                         default: return new Tuple<AssembleError, string>(AssembleError.UnknownOp, $"line {args.line}: Unknown operation \"{args.op}\"");
                     }
                 }
@@ -4145,7 +4212,7 @@ namespace csx64
                     default: throw new ArgumentException("Unknown patch error");
                 }
 
-                file.Holes[i].Hole.Evaluate(file.Symbols, out a, out floating, ref err);
+                file.Holes[i].Expr.Evaluate(file.Symbols, out a, out floating, ref err);
             }
 
             // return no error
@@ -4163,12 +4230,12 @@ namespace csx64
             filesize = 10;                 // set size to after header (points to writing position)
 
             UInt64[] offsets = new UInt64[objs.Length]; // offsets for where an object file begins in the resulting exe
-            var symbols = new Dictionary<string, Hole>[objs.Length]; // processed symbols for each object file
+            var symbols = new Dictionary<string, Expr>[objs.Length]; // processed symbols for each object file
 
             // create a combined symbols table with predefined values
-            var G_symbols = new Dictionary<string, Hole>()
+            var G_symbols = new Dictionary<string, Expr>()
             {
-                ["__prog_end__"] = new Hole() { IntResult = res.LongLength.MakeUnsigned() }
+                ["__prog_end__"] = new Expr() { IntResult = res.LongLength.MakeUnsigned() }
             };
 
             UInt64 val; // parsing locations
@@ -4176,7 +4243,7 @@ namespace csx64
 
             string err = null; // error location for evaluation
 
-            Hole main = null; // entry point expression
+            Expr main = null; // entry point expression
 
             // -------------------------------------------
 
@@ -4193,7 +4260,7 @@ namespace csx64
             for (int i = 0; i < objs.Length; ++i)
             {
                 // create temporary symbols dictionary
-                symbols[i] = new Dictionary<string, Hole>(objs[i].Symbols.Count);
+                symbols[i] = new Dictionary<string, Expr>(objs[i].Symbols.Count);
 
                 // populate local symbols (define #base)
                 foreach (var symbol in objs[i].Symbols) symbols[i].Add(symbol.Key, symbol.Value.Clone("#base", offsets[i], false));
@@ -4204,7 +4271,7 @@ namespace csx64
                     // don't redefine the same symbol
                     if (G_symbols.ContainsKey(symbol)) return new Tuple<LinkError, string>(LinkError.SymbolRedefinition, $"Global symbol \"{symbol}\" was already defined");
                     // make sure the symbol exists in locals dictionary (if using built-in assembler above, this should never happen with valid object files)
-                    if (!symbols[i].TryGetValue(symbol, out Hole hole)) return new Tuple<LinkError, string>(LinkError.MissingSymbol, $"Global symbol \"{symbol}\" undefined");
+                    if (!symbols[i].TryGetValue(symbol, out Expr hole)) return new Tuple<LinkError, string>(LinkError.MissingSymbol, $"Global symbol \"{symbol}\" undefined");
 
                     // add to global symbols
                     G_symbols.Add(symbol, hole);
@@ -4227,7 +4294,7 @@ namespace csx64
                 foreach (HoleData _data in objs[i].Holes)
                 {
                     // create a copy of hole and data (so as not to corrupt object file)
-                    HoleData data = new HoleData { Address = _data.Address + offsets[i], Size = _data.Size, Line = _data.Line, Hole = _data.Hole.Clone() };
+                    HoleData data = new HoleData { Address = _data.Address + offsets[i], Size = _data.Size, Line = _data.Line, Expr = _data.Expr.Clone() };
 
                     // try to patch it
                     PatchError _err = TryPatchHole(symbols[i], res, data, ref err);

@@ -72,10 +72,10 @@ namespace csx64
             x = 400; y = 0;
             g.DrawString("Flags", DebuggingFont, DebuggingBrush, x, y); y += h;
             g.DrawString($"Z:  {(f.Z ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
-            g.DrawString($"S:  {(f.S ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
             g.DrawString($"P:  {(f.P ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
             g.DrawString($"O:  {(f.O ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
             g.DrawString($"C:  {(f.C ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"S:  {(f.S ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
 
             y += h;
             g.DrawString($"a:  {(f.a ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
