@@ -2356,7 +2356,12 @@ namespace csx64
 
                 // unary ops
 
-                Neg, BitNot, LogNot, Int, Float
+                Neg, BitNot, LogNot, Int, Float,
+
+                // special
+
+                Condition, Pair,
+                NullCoalesce
             }
 
             /// <summary>
@@ -2595,6 +2600,17 @@ namespace csx64
                         floating = true;
                         break;
 
+                    // misc
+
+                    case OPs.NullCoalesce:
+                        if (!Left.Evaluate(symbols, out res, out floating, ref err) || res == 0 && !Right.Evaluate(symbols, out res, out floating, ref err)) return false;
+                        break;
+                    case OPs.Condition:
+                        if (!Left.Evaluate(symbols, out L, out LF, ref err)) return false;
+                        if (L != 0) { if (!Right.Left.Evaluate(symbols, out res, out floating, ref err)) return false; }
+                        else { if (!Right.Right.Evaluate(symbols, out res, out floating, ref err)) return false; }
+                        break;
+
                     default: err = "Unknown operation"; return false;
                 }
 
@@ -2714,7 +2730,7 @@ namespace csx64
 
             private void _ToString(StringBuilder b)
             {
-                if (OP == 0) b.Append($"({(_Evaluated ? (_Floating ? _Result.ToString("e17") : _Result.MakeSigned().ToString()) : Value)})");
+                if (OP == 0) b.Append($"({(_Evaluated ? (_Floating ? AsDouble(_Result).ToString("e17") : _Result.MakeSigned().ToString()) : Value)})");
                 else
                 {
                     Left._ToString(b);
@@ -2996,7 +3012,11 @@ namespace csx64
             { Expr.OPs.BitXor, 12 },
             { Expr.OPs.BitOr, 13 },
             { Expr.OPs.LogAnd, 14 },
-            { Expr.OPs.LogOr, 15 }
+            { Expr.OPs.LogOr, 15 },
+
+            { Expr.OPs.NullCoalesce, 99 },
+            { Expr.OPs.Pair, 100 },
+            { Expr.OPs.Condition, 101 }
         };
         private static readonly List<char> UnaryOps = new List<char>() { '+', '-', '~', '!', '*', '/' };
 
@@ -3023,6 +3043,8 @@ namespace csx64
 
                     case "&&": op = Expr.OPs.LogAnd; return true;
                     case "||": op = Expr.OPs.LogOr; return true;
+
+                    case "??": op = Expr.OPs.NullCoalesce; return true;
                 }
             }
             if (pos + 1 <= token.Length)
@@ -3043,11 +3065,30 @@ namespace csx64
                     case '&': op = Expr.OPs.BitAnd; return true;
                     case '^': op = Expr.OPs.BitXor; return true;
                     case '|': op = Expr.OPs.BitOr; return true;
+
+                    case '?': op = Expr.OPs.Condition; return true;
+                    case ':': op = Expr.OPs.Pair; return true;
                 }
             }
 
             // if nothing found, fail
             return false;
+        }
+        private static bool VerifyForm(Expr expr, ref string err)
+        {
+            switch (expr.OP)
+            {
+                case Expr.OPs.None: return true; // leaves are by definition well-formed
+
+                case Expr.OPs.Condition: // ternary conditional must have a pair portion to the right
+                    if (expr.Right.OP != Expr.OPs.Pair) { err = "Incomplete ternary conditional op encountered"; return false; }
+                    return VerifyForm(expr.Left, ref err) && VerifyForm(expr.Right.Left, ref err) && VerifyForm(expr.Right.Right, ref err);
+                case Expr.OPs.Pair: // ternary conditional pairs must have a condition
+                    err = "Ternary conditional pair encountered without a condition"; return false;
+
+                default: // all other ops must have verified ends
+                    return VerifyForm(expr.Left, ref err) && (expr.Right == null || VerifyForm(expr.Right, ref err));
+            }
         }
         private static bool TryParseImm(AssembleArgs args, string token, out Expr hole)
         {
@@ -3185,6 +3226,9 @@ namespace csx64
 
             // handle binary pair mismatch
             if (!binPair) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Expression contained a mismatched binary op: \"{token}\""); return false; }
+
+            // verify the resulting form
+            if (!VerifyForm(hole, ref err)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: {err}"); return false; }
 
             return true;
         }
