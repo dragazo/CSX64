@@ -90,13 +90,13 @@ namespace csx64
             JMP,
             Ja, Jae, Jb, Jbe, Jg, Jge, Jl, Jle,
             Jz, Jnz, Js, Jns, Jp, Jnp, Jo, Jno, Jc, Jnc,
-
+            
             FADD, FSUB, FMUL, FDIV, FMOD,
-            POW, SQRT, EXP, LN, FNEG, FABS, FCMPZ,
+            FPOW, FSQRT, FEXP, FLN, FNEG, FABS, FCMPZ,
 
-            SIN, COS, TAN,
-            SINH, COSH, TANH,
-            ASIN, ACOS, ATAN, ATAN2,
+            FSIN, FCOS, FTAN,
+            FSINH, FCOSH, FTANH,
+            FASIN, FACOS, FATAN, FATAN2,
 
             FLOOR, CEIL, ROUND, TRUNC,
 
@@ -688,7 +688,7 @@ namespace csx64
         private bool ProcessSL()
         {
             UInt64 s = 0, m = 0, a = 0, b = 0;
-            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b, 0)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
             UInt16 sh = (UInt16)(b % SizeBits(sizecode));
@@ -701,7 +701,7 @@ namespace csx64
         private bool ProcessSR()
         {
             UInt64 s = 0, m = 0, a = 0, b = 0;
-            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b, 0)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
             UInt16 sh = (UInt16)(b % SizeBits(sizecode));
@@ -715,7 +715,7 @@ namespace csx64
         private bool ProcessSAL()
         {
             UInt64 s = 0, m = 0, a = 0, b = 0;
-            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b, 0)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
             UInt16 sh = (UInt16)(b % SizeBits(sizecode));
@@ -728,7 +728,7 @@ namespace csx64
         private bool ProcessSAR()
         {
             UInt64 s = 0, m = 0, a = 0, b = 0;
-            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b, 0)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
             UInt16 sh = (UInt16)(b % SizeBits(sizecode));
@@ -742,7 +742,7 @@ namespace csx64
         private bool ProcessRL()
         {
             UInt64 s = 0, m = 0, a = 0, b = 0;
-            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b, 0)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
             UInt16 sh = (UInt16)(b % SizeBits(sizecode));
@@ -755,7 +755,7 @@ namespace csx64
         private bool ProcessRR()
         {
             UInt64 s = 0, m = 0, a = 0, b = 0;
-            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
+            if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b, 0)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
             UInt16 sh = (UInt16)(b % SizeBits(sizecode));
@@ -1019,7 +1019,7 @@ namespace csx64
             }
         }
 
-        private bool ProcessPOW()
+        private bool ProcessFPOW()
         {
             UInt64 s = 0, m = 0, a = 0, b = 0;
             if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
@@ -1046,7 +1046,7 @@ namespace csx64
                 default: Fail(ErrorCode.UndefinedBehavior); return false;
             }
         }
-        private bool ProcessSQRT()
+        private bool ProcessFSQRT()
         {
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
@@ -1073,7 +1073,7 @@ namespace csx64
                 default: Fail(ErrorCode.UndefinedBehavior); return false;
             }
         }
-        private bool ProcessEXP()
+        private bool ProcessFEXP()
         {
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
@@ -1100,7 +1100,7 @@ namespace csx64
                 default: Fail(ErrorCode.UndefinedBehavior); return false;
             }
         }
-        private bool ProcessLN()
+        private bool ProcessFLN()
         {
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
@@ -1209,7 +1209,7 @@ namespace csx64
             }
         }
 
-        private bool ProcessSIN()
+        private bool ProcessFSIN()
         {
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
@@ -1236,7 +1236,7 @@ namespace csx64
                 default: Fail(ErrorCode.UndefinedBehavior); return false;
             }
         }
-        private bool ProcessCOS()
+        private bool ProcessFCOS()
         {
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
@@ -1263,7 +1263,7 @@ namespace csx64
                 default: Fail(ErrorCode.UndefinedBehavior); return false;
             }
         }
-        private bool ProcessTAN()
+        private bool ProcessFTAN()
         {
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
@@ -1291,7 +1291,7 @@ namespace csx64
             }
         }
 
-        private bool ProcessSINH()
+        private bool ProcessFSINH()
         {
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
@@ -1318,7 +1318,7 @@ namespace csx64
                 default: Fail(ErrorCode.UndefinedBehavior); return false;
             }
         }
-        private bool ProcessCOSH()
+        private bool ProcessFCOSH()
         {
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
@@ -1345,7 +1345,7 @@ namespace csx64
                 default: Fail(ErrorCode.UndefinedBehavior); return false;
             }
         }
-        private bool ProcessTANH()
+        private bool ProcessFTANH()
         {
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
@@ -1373,7 +1373,7 @@ namespace csx64
             }
         }
 
-        private bool ProcessASIN()
+        private bool ProcessFASIN()
         {
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
@@ -1400,7 +1400,7 @@ namespace csx64
                 default: Fail(ErrorCode.UndefinedBehavior); return false;
             }
         }
-        private bool ProcessACOS()
+        private bool ProcessFACOS()
         {
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
@@ -1427,7 +1427,7 @@ namespace csx64
                 default: Fail(ErrorCode.UndefinedBehavior); return false;
             }
         }
-        private bool ProcessATAN()
+        private bool ProcessFATAN()
         {
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
@@ -1454,7 +1454,7 @@ namespace csx64
                 default: Fail(ErrorCode.UndefinedBehavior); return false;
             }
         }
-        private bool ProcessATAN2()
+        private bool ProcessFATAN2()
         {
             UInt64 s = 0, m = 0, a = 0, b = 0;
             if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
@@ -1481,7 +1481,7 @@ namespace csx64
                 default: Fail(ErrorCode.UndefinedBehavior); return false;
             }
         }
-
+        
         private bool ProcessFLOOR()
         {
             UInt64 s = 0, m = 0, a = 0;
@@ -2229,26 +2229,26 @@ namespace csx64
                 case OPCode.FDIV: return ProcessFDIV();
                 case OPCode.FMOD: return ProcessFMOD();
 
-                case OPCode.POW: return ProcessPOW();
-                case OPCode.SQRT: return ProcessSQRT();
-                case OPCode.EXP: return ProcessEXP();
-                case OPCode.LN: return ProcessLN();
+                case OPCode.FPOW: return ProcessFPOW();
+                case OPCode.FSQRT: return ProcessFSQRT();
+                case OPCode.FEXP: return ProcessFEXP();
+                case OPCode.FLN: return ProcessFLN();
                 case OPCode.FNEG: return ProcessFNEG();
                 case OPCode.FABS: return ProcessFABS();
                 case OPCode.FCMPZ: return ProcessFCMPZ();
 
-                case OPCode.SIN: return ProcessSIN();
-                case OPCode.COS: return ProcessCOS();
-                case OPCode.TAN: return ProcessTAN();
+                case OPCode.FSIN: return ProcessFSIN();
+                case OPCode.FCOS: return ProcessFCOS();
+                case OPCode.FTAN: return ProcessFTAN();
 
-                case OPCode.SINH: return ProcessSINH();
-                case OPCode.COSH: return ProcessCOSH();
-                case OPCode.TANH: return ProcessTANH();
+                case OPCode.FSINH: return ProcessFSINH();
+                case OPCode.FCOSH: return ProcessFCOSH();
+                case OPCode.FTANH: return ProcessFTANH();
 
-                case OPCode.ASIN: return ProcessASIN();
-                case OPCode.ACOS: return ProcessACOS();
-                case OPCode.ATAN: return ProcessATAN();
-                case OPCode.ATAN2: return ProcessATAN2();
+                case OPCode.FASIN: return ProcessFASIN();
+                case OPCode.FACOS: return ProcessFACOS();
+                case OPCode.FATAN: return ProcessFATAN();
+                case OPCode.FATAN2: return ProcessFATAN2();
 
                 case OPCode.FLOOR: return ProcessFLOOR();
                 case OPCode.CEIL: return ProcessCEIL();
@@ -2992,6 +2992,9 @@ namespace csx64
                         for (end = pos; end < args.rawline.Length && (args.rawline[end] == '_' || char.IsLetterOrDigit(args.rawline[end])); ++end) ;
                     }
 
+                    // make sure we didn't end on non-white space
+                    if (end < args.rawline.Length && !char.IsWhiteSpace(args.rawline[end])) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Size parameter must be separated from arguments by white space"); return false; }
+
                     // parse the read size code
                     if (!TryParseSizecode(args, args.rawline.Substring(pos, end - pos).RemoveWhiteSpace(), out args.sizecode))
                     { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse operation size specification\n-> {args.err.Item2}"); return false; }
@@ -3135,6 +3138,9 @@ namespace csx64
             int pos = 0, end; // position in token
             int depth;        // parenthesis depth
 
+            bool numeric; // flags for enabling exponent notation for floating-point
+            bool exp;
+
             bool binPair = false;          // marker if tree contains complete binary pairs (i.e. N+1 values and N binary ops)
             int unpaired_conditionals = 0; // number of unpaired conditional ops
 
@@ -3156,16 +3162,21 @@ namespace csx64
             {
                 // -- read val(op) -- //
 
-                depth = 0; // initial depth of 0
-
                 // consume unary ops
                 for (; pos < token.Length && UnaryOps.Contains(token[pos]); ++pos) unaryOps.Push(token[pos]);
-                
+
+                depth = 0; // initial depth of 0
+
+                numeric = pos < token.Length && char.IsDigit(token[pos]); // flag if this is a numeric literal
+                exp = false; // no exponent yet
+
                 // find next binary op
-                for (end = pos; end < token.Length && (depth > 0 || !TryGetOp(token, end, out op, out oplen)); ++end)
+                for (end = pos; end < token.Length && (depth > 0 || !TryGetOp(token, end, out op, out oplen) || (numeric && exp)); ++end)
                 {
                     if (token[end] == '(') ++depth;
                     else if (token[end] == ')') --depth;
+                    else if (numeric && token[end] == 'e' || token[end] == 'E') exp = true; // e or E begins exponent
+                    else if (numeric && token[end] == '+' || token[end] == '-' || char.IsDigit(token[end])) exp = false; // + or - or a digit ends exponent safety net
 
                     // can't ever have negative depth
                     if (depth < 0) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Mismatched parenthesis \"{token}\""); return false; }
@@ -3676,13 +3687,15 @@ namespace csx64
             // if defining a local label
             if (label[0] == '.')
             {
+                string sub = label.Substring(1); // local symbol name
+
                 // local name can't be empty
-                if (label.Length == 1) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Local label name cannot be empty"); return false; }
+                if (!IsValidLabel(sub)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Local label name must be legal"); return false; }
                 // can't make a local label before any non-local ones exist
                 if (args.last_static_label == null) { args.err = new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Cannot define a local label before the first static label"); return false; }
 
                 // mutate the label
-                label = $"__local_{args.time:x16}_{args.last_static_label}_{label.Substring(1)}";
+                label = $"__local_{args.time:x16}_{args.last_static_label}_{sub}";
             }
 
             return true;
@@ -3941,7 +3954,7 @@ namespace csx64
 
             /* testing for expressions
             {
-                string test = "a?b?c:d?e:f:g";
+                string test = "1.2ee2";
                 //string test = "a?b?c:d:e?f:g";
 
                 if (!TryParseImm(args, test, out Expr _test)) MessageBox.Show(args.err.ToString());
@@ -4148,12 +4161,12 @@ namespace csx64
                         case "BSDIV": if (!TryProcessBinaryOp(args, OPCode.BSDIV)) return args.err; break;
                         case "BSMOD": if (!TryProcessBinaryOp(args, OPCode.BSMOD)) return args.err; break;
 
-                        case "SL": if (!TryProcessBinaryOp(args, OPCode.SL)) return args.err; break;
-                        case "SR": if (!TryProcessBinaryOp(args, OPCode.SR)) return args.err; break;
-                        case "SAL": if (!TryProcessBinaryOp(args, OPCode.SAL)) return args.err; break;
-                        case "SAR": if (!TryProcessBinaryOp(args, OPCode.SAR)) return args.err; break;
-                        case "RL": if (!TryProcessBinaryOp(args, OPCode.RL)) return args.err; break;
-                        case "RR": if (!TryProcessBinaryOp(args, OPCode.RR)) return args.err; break;
+                        case "SL": if (!TryProcessBinaryOp(args, OPCode.SL, 0)) return args.err; break;
+                        case "SR": if (!TryProcessBinaryOp(args, OPCode.SR, 0)) return args.err; break;
+                        case "SAL": if (!TryProcessBinaryOp(args, OPCode.SAL, 0)) return args.err; break;
+                        case "SAR": if (!TryProcessBinaryOp(args, OPCode.SAR, 0)) return args.err; break;
+                        case "RL": if (!TryProcessBinaryOp(args, OPCode.RL, 0)) return args.err; break;
+                        case "RR": if (!TryProcessBinaryOp(args, OPCode.RR, 0)) return args.err; break;
 
                         case "AND": if (!TryProcessBinaryOp(args, OPCode.AND)) return args.err; break;
                         case "OR": if (!TryProcessBinaryOp(args, OPCode.OR)) return args.err; break;
@@ -4214,26 +4227,26 @@ namespace csx64
                         case "FDIV": if (!TryProcessBinaryOp(args, OPCode.FDIV, -1, 12)) return args.err; break;
                         case "FMOD": if (!TryProcessBinaryOp(args, OPCode.FMOD, -1, 12)) return args.err; break;
 
-                        case "POW": if (!TryProcessBinaryOp(args, OPCode.POW, -1, 12)) return args.err; break;
-                        case "SQRT": if (!TryProcessUnaryOp(args, OPCode.SQRT, 12)) return args.err; break;
-                        case "EXP": if (!TryProcessUnaryOp(args, OPCode.EXP, 12)) return args.err; break;
-                        case "LN": if (!TryProcessUnaryOp(args, OPCode.LN, 12)) return args.err; break;
+                        case "FPOW": if (!TryProcessBinaryOp(args, OPCode.FPOW, -1, 12)) return args.err; break;
+                        case "FSQRT": if (!TryProcessUnaryOp(args, OPCode.FSQRT, 12)) return args.err; break;
+                        case "FEXP": if (!TryProcessUnaryOp(args, OPCode.FEXP, 12)) return args.err; break;
+                        case "FLN": if (!TryProcessUnaryOp(args, OPCode.FLN, 12)) return args.err; break;
                         case "FNEG": if (!TryProcessUnaryOp(args, OPCode.FNEG, 12)) return args.err; break;
                         case "FABS": if (!TryProcessUnaryOp(args, OPCode.FABS, 12)) return args.err; break;
                         case "FCMPZ": if (!TryProcessUnaryOp(args, OPCode.FCMPZ, 12)) return args.err; break;
 
-                        case "SIN": if (!TryProcessUnaryOp(args, OPCode.SIN, 12)) return args.err; break;
-                        case "COS": if (!TryProcessUnaryOp(args, OPCode.COS, 12)) return args.err; break;
-                        case "TAN": if (!TryProcessUnaryOp(args, OPCode.TAN, 12)) return args.err; break;
+                        case "FSIN": if (!TryProcessUnaryOp(args, OPCode.FSIN, 12)) return args.err; break;
+                        case "FCOS": if (!TryProcessUnaryOp(args, OPCode.FCOS, 12)) return args.err; break;
+                        case "FTAN": if (!TryProcessUnaryOp(args, OPCode.FTAN, 12)) return args.err; break;
 
-                        case "SINH": if (!TryProcessUnaryOp(args, OPCode.SINH, 12)) return args.err; break;
-                        case "COSH": if (!TryProcessUnaryOp(args, OPCode.COSH, 12)) return args.err; break;
-                        case "TANH": if (!TryProcessUnaryOp(args, OPCode.TANH, 12)) return args.err; break;
+                        case "FSINH": if (!TryProcessUnaryOp(args, OPCode.FSINH, 12)) return args.err; break;
+                        case "FCOSH": if (!TryProcessUnaryOp(args, OPCode.FCOSH, 12)) return args.err; break;
+                        case "FTANH": if (!TryProcessUnaryOp(args, OPCode.FTANH, 12)) return args.err; break;
 
-                        case "ASIN": if (!TryProcessUnaryOp(args, OPCode.ASIN, 12)) return args.err; break;
-                        case "ACOS": if (!TryProcessUnaryOp(args, OPCode.ACOS, 12)) return args.err; break;
-                        case "ATAN": if (!TryProcessUnaryOp(args, OPCode.ATAN, 12)) return args.err; break;
-                        case "ATAN2": if (!TryProcessBinaryOp(args, OPCode.ATAN2, -1, 12)) return args.err; break;
+                        case "FASIN": if (!TryProcessUnaryOp(args, OPCode.FASIN, 12)) return args.err; break;
+                        case "FACOS": if (!TryProcessUnaryOp(args, OPCode.FACOS, 12)) return args.err; break;
+                        case "FATAN": if (!TryProcessUnaryOp(args, OPCode.FATAN, 12)) return args.err; break;
+                        case "FATAN2": if (!TryProcessBinaryOp(args, OPCode.FATAN2, -1, 12)) return args.err; break;
 
                         case "FLOOR": if (!TryProcessUnaryOp(args, OPCode.FLOOR, 12)) return args.err; break;
                         case "CEIL": if (!TryProcessUnaryOp(args, OPCode.CEIL, 12)) return args.err; break;
