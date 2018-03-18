@@ -177,7 +177,7 @@ namespace csx64
             }
         }
 
-        private void button1_Click(object sender, EventArgs e)
+        private void TestsButton_Click(object sender, EventArgs e)
         {
             Computer.FlagsRegister f = C.GetFlags();
             MessageBox.Show($"a: {(f.a ? 1 : 0)}\nae: {(f.ae ? 1 : 0)}\nb: {(f.b ? 1 : 0)}\nbe: {(f.be ? 1 : 0)}\n" +

@@ -37,7 +37,7 @@
             this.StopButton = new System.Windows.Forms.Button();
             this.CodeBox = new System.Windows.Forms.TextBox();
             this.PauseButton = new System.Windows.Forms.Button();
-            this.button1 = new System.Windows.Forms.Button();
+            this.TestsButton = new System.Windows.Forms.Button();
             this.tabControl1 = new System.Windows.Forms.TabControl();
             this.tabPage1 = new System.Windows.Forms.TabPage();
             this.tabPage2 = new System.Windows.Forms.TabPage();
@@ -150,16 +150,16 @@
             this.PauseButton.UseVisualStyleBackColor = true;
             this.PauseButton.Click += new System.EventHandler(this.PauseButton_Click);
             // 
-            // button1
+            // TestsButton
             // 
-            this.button1.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
-            this.button1.Location = new System.Drawing.Point(284, 600);
-            this.button1.Name = "button1";
-            this.button1.Size = new System.Drawing.Size(75, 23);
-            this.button1.TabIndex = 9;
-            this.button1.Text = "Test";
-            this.button1.UseVisualStyleBackColor = true;
-            this.button1.Click += new System.EventHandler(this.button1_Click);
+            this.TestsButton.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
+            this.TestsButton.Location = new System.Drawing.Point(255, 600);
+            this.TestsButton.Name = "TestsButton";
+            this.TestsButton.Size = new System.Drawing.Size(75, 23);
+            this.TestsButton.TabIndex = 9;
+            this.TestsButton.Text = "Tests";
+            this.TestsButton.UseVisualStyleBackColor = true;
+            this.TestsButton.Click += new System.EventHandler(this.TestsButton_Click);
             // 
             // tabControl1
             // 
@@ -209,7 +209,7 @@
             this.BackColor = System.Drawing.Color.Black;
             this.ClientSize = new System.Drawing.Size(915, 693);
             this.Controls.Add(this.tabControl1);
-            this.Controls.Add(this.button1);
+            this.Controls.Add(this.TestsButton);
             this.Controls.Add(this.PauseButton);
             this.Controls.Add(this.CodeBox);
             this.Controls.Add(this.StopButton);
@@ -240,7 +240,7 @@
         private System.Windows.Forms.Button StopButton;
         private System.Windows.Forms.Button PauseButton;
         private System.Windows.Forms.TextBox CodeBox;
-        private System.Windows.Forms.Button button1;
+        private System.Windows.Forms.Button TestsButton;
         private System.Windows.Forms.TabControl tabControl1;
         private System.Windows.Forms.TabPage tabPage1;
         private System.Windows.Forms.TabPage tabPage2;
