@@ -139,12 +139,12 @@ namespace csx64
 
                 case 8: // draw string ($1 brush) ($2 font) ($3 point) ($4 string) ($5 length)
                     if (GraphicSurface == null || !GetBrush(GetRegister(1).x64, ref brush) || !GetFont(GetRegister(2).x64, ref font)
-                        || !GetPoint(GetRegister(3).x64, ref point) || !GetMem(GetRegister(5).x64, ref val) || !GetString(GetRegister(4).x64, val, ref str)) { ret = false; break; }
+                        || !GetPoint(GetRegister(3).x64, ref point) || !GetString(GetRegister(4).x64, GetRegister(5).x64, ref str)) { ret = false; break; }
                     using (Graphics g = Graphics.FromImage(GraphicSurface)) g.DrawString(str, font, brush, point);
                     break;
                 case 9: // draw string ($1 brush) ($2 font) ($3 rect) ($4 string) ($5 length)
                     if (GraphicSurface == null || !GetBrush(GetRegister(1).x64, ref brush) || !GetFont(GetRegister(2).x64, ref font)
-                        || !GetRect(GetRegister(3).x64, ref rect) || !GetMem(GetRegister(5).x64, ref val) || !GetString(GetRegister(4).x64, val, ref str)) { ret = false; break; }
+                        || !GetRect(GetRegister(3).x64, ref rect) || !GetString(GetRegister(4).x64, GetRegister(5).x64, ref str)) { ret = false; break; }
                     using (Graphics g = Graphics.FromImage(GraphicSurface)) g.DrawString(str, font, brush, rect);
                     break;
 

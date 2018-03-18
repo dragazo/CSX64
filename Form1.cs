@@ -104,7 +104,7 @@ namespace csx64
                 b.Append($"{i.ToString().PadLeft(3, '0')}: {exe[i].ToString().PadLeft(3, '0')} - {Convert.ToString(exe[i], 2).PadLeft(8, '0')}\n");
             MessageBox.Show(b.ToString());
             */
-
+            
             C = new Computer();
             if (!C.Initialize(exe)) { MessageBox.Show("Something went wrong initializing the program", "Initialization Error"); return; }
             CInitialized = true;
