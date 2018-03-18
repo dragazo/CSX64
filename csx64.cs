@@ -28,7 +28,7 @@ namespace csx64
         // -----------
         // -- Types --
         // -----------
-        
+
         public enum ErrorCode
         {
             None, OutOfBounds, UnhandledSyscall, UndefinedBehavior, ArithmeticError, Abort
@@ -219,7 +219,7 @@ namespace csx64
 
         private Register[] Registers = new Register[16];
         private FlagsRegister Flags = new FlagsRegister();
-        
+
         private byte[] Memory = null;
 
         /// <summary>
@@ -357,7 +357,7 @@ namespace csx64
         /// Interprets a double as its raw bits
         /// </summary>
         /// <param name="val">value to interpret</param>
-        public static unsafe UInt64 AsUInt64(double val)
+        public static unsafe UInt64 DoubleAsUInt64(double val)
         {
             return *(UInt64*)&val;
         }
@@ -368,6 +368,24 @@ namespace csx64
         public static unsafe double AsDouble(UInt64 val)
         {
             return *(double*)&val;
+        }
+
+        /// <summary>
+        /// Interprets a float as its raw bits (placed in low 32 bits)
+        /// </summary>
+        /// <param name="val">the float to interpret</param>
+        public static unsafe UInt64 FloatAsUInt64(float val)
+        {
+            return *(UInt32*)&val;
+        }
+        /// <summary>
+        /// Interprets raw bits as a float (low 32 bits)
+        /// </summary>
+        /// <param name="val">the bits to interpret</param>
+        public static unsafe float AsFloat(UInt64 val)
+        {
+            UInt32 bits = (UInt32)val; // getting the low bits allows this code to work even on big-endian platforms
+            return *(float*)&bits;
         }
 
         // ---------------
@@ -512,13 +530,21 @@ namespace csx64
             Flags.P = parity;
         }
         // updates the ZSOC flags for floating point ops
-        private void UpdateFlagsF(double value)
+        private void UpdateFlagsDouble(double value)
         {
             Flags.Z = value == 0;
             Flags.S = value < 0;
 
             Flags.O = double.IsInfinity(value);
             Flags.C = double.IsNaN(value);
+        }
+        private void UpdateFlagsFloat(float value)
+        {
+            Flags.Z = value == 0;
+            Flags.S = value < 0;
+
+            Flags.O = float.IsInfinity(value);
+            Flags.C = float.IsNaN(value);
         }
 
         // -- special ops --
@@ -834,22 +860,54 @@ namespace csx64
             UInt64 s = 0, m = 0, a = 0, b = 0;
             if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
 
-            double res = AsDouble(a) + AsDouble(b);
+            switch ((s >> 2) & 3)
+            {
+                case 3:
+                    {
+                        double res = AsDouble(a) + AsDouble(b);
 
-            UpdateFlagsF(res);
+                        UpdateFlagsDouble(res);
 
-            return StoreBinaryOpFormat(s, m, AsUInt64(res));
+                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
+                    }
+                case 2:
+                    {
+                        float res = AsFloat(a) + AsFloat(b);
+
+                        UpdateFlagsFloat(res);
+
+                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
+                    }
+
+                default: Fail(ErrorCode.UndefinedBehavior); return false;
+            }
         }
         private bool ProcessFsub(bool apply = true)
         {
             UInt64 s = 0, m = 0, a = 0, b = 0;
             if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
 
-            double res = AsDouble(a) - AsDouble(b);
+            switch ((s >> 2) & 3)
+            {
+                case 3:
+                    {
+                        double res = AsDouble(a) - AsDouble(b);
 
-            UpdateFlagsF(res);
+                        UpdateFlagsDouble(res);
 
-            return apply ? StoreBinaryOpFormat(s, m, AsUInt64(res)) : true;
+                        return apply ? StoreBinaryOpFormat(s, m, DoubleAsUInt64(res)) : true;
+                    }
+                case 2:
+                    {
+                        float res = AsFloat(a) - AsFloat(b);
+
+                        UpdateFlagsFloat(res);
+
+                        return apply ? StoreBinaryOpFormat(s, m, FloatAsUInt64(res)) : true;
+                    }
+
+                default: Fail(ErrorCode.UndefinedBehavior); return false;
+            }
         }
 
         private bool ProcessFmul()
@@ -857,11 +915,27 @@ namespace csx64
             UInt64 s = 0, m = 0, a = 0, b = 0;
             if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
 
-            double res = AsDouble(a) * AsDouble(b);
+            switch ((s >> 2) & 3)
+            {
+                case 3:
+                    {
+                        double res = AsDouble(a) * AsDouble(b);
 
-            UpdateFlagsF(res);
+                        UpdateFlagsDouble(res);
 
-            return StoreBinaryOpFormat(s, m, AsUInt64(res));
+                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
+                    }
+                case 2:
+                    {
+                        float res = AsFloat(a) * AsFloat(b);
+
+                        UpdateFlagsFloat(res);
+
+                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
+                    }
+
+                default: Fail(ErrorCode.UndefinedBehavior); return false;
+            }
         }
 
         private bool ProcessFdiv()
@@ -869,22 +943,54 @@ namespace csx64
             UInt64 s = 0, m = 0, a = 0, b = 0;
             if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
 
-            double res = AsDouble(a) / AsDouble(b);
+            switch ((s >> 2) & 3)
+            {
+                case 3:
+                    {
+                        double res = AsDouble(a) / AsDouble(b);
 
-            UpdateFlagsF(res);
+                        UpdateFlagsDouble(res);
 
-            return StoreBinaryOpFormat(s, m, AsUInt64(res));
+                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
+                    }
+                case 2:
+                    {
+                        float res = AsFloat(a) / AsFloat(b);
+
+                        UpdateFlagsFloat(res);
+
+                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
+                    }
+
+                default: Fail(ErrorCode.UndefinedBehavior); return false;
+            }
         }
         private bool ProcessFmod()
         {
             UInt64 s = 0, m = 0, a = 0, b = 0;
             if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
 
-            double res = AsDouble(a) % AsDouble(b);
+            switch ((s >> 2) & 3)
+            {
+                case 3:
+                    {
+                        double res = AsDouble(a) % AsDouble(b);
 
-            UpdateFlagsF(res);
+                        UpdateFlagsDouble(res);
 
-            return StoreBinaryOpFormat(s, m, AsUInt64(res));
+                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
+                    }
+                case 2:
+                    {
+                        float res = AsFloat(a) % AsFloat(b);
+
+                        UpdateFlagsFloat(res);
+
+                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
+                    }
+
+                default: Fail(ErrorCode.UndefinedBehavior); return false;
+            }
         }
 
         private bool ProcessFpow()
@@ -892,77 +998,189 @@ namespace csx64
             UInt64 s = 0, m = 0, a = 0, b = 0;
             if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
 
-            double res = Math.Pow(AsDouble(a), AsDouble(b));
+            switch ((s >> 2) & 3)
+            {
+                case 3:
+                    {
+                        double res = Math.Pow(AsDouble(a), AsDouble(b));
 
-            UpdateFlagsF(res);
+                        UpdateFlagsDouble(res);
 
-            return StoreBinaryOpFormat(s, m, AsUInt64(res));
+                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
+                    }
+                case 2:
+                    {
+                        float res = (float)Math.Pow(AsFloat(a), AsFloat(b));
+
+                        UpdateFlagsFloat(res);
+
+                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
+                    }
+
+                default: Fail(ErrorCode.UndefinedBehavior); return false;
+            }
         }
         private bool ProcessFsqrt()
         {
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
-            double res = Math.Sqrt(AsDouble(a));
+            switch ((s >> 2) & 3)
+            {
+                case 3:
+                    {
+                        double res = Math.Sqrt(AsDouble(a));
 
-            UpdateFlagsF(res);
+                        UpdateFlagsDouble(res);
 
-            return StoreUnaryOpFormat(s, m, AsUInt64(res));
+                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
+                    }
+                case 2:
+                    {
+                        float res = (float)Math.Sqrt(AsFloat(a));
+
+                        UpdateFlagsFloat(res);
+
+                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
+                    }
+
+                default: Fail(ErrorCode.UndefinedBehavior); return false;
+            }
         }
         private bool ProcessFexp()
         {
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
-            double res = Math.Exp(AsDouble(a));
+            switch ((s >> 2) & 3)
+            {
+                case 3:
+                    {
+                        double res = Math.Exp(AsDouble(a));
 
-            UpdateFlagsF(res);
+                        UpdateFlagsDouble(res);
 
-            return StoreUnaryOpFormat(s, m, AsUInt64(res));
+                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
+                    }
+                case 2:
+                    {
+                        float res = (float)Math.Exp(AsFloat(a));
+
+                        UpdateFlagsFloat(res);
+
+                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
+                    }
+
+                default: Fail(ErrorCode.UndefinedBehavior); return false;
+            }
         }
         private bool ProcessFln()
         {
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
-            double res = Math.Log(AsDouble(a));
+            switch ((s >> 2) & 3)
+            {
+                case 3:
+                    {
+                        double res = Math.Log(AsDouble(a));
 
-            UpdateFlagsF(res);
+                        UpdateFlagsDouble(res);
 
-            return StoreUnaryOpFormat(s, m, AsUInt64(res));
+                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
+                    }
+                case 2:
+                    {
+                        float res = (float)Math.Log(AsFloat(a));
+
+                        UpdateFlagsFloat(res);
+
+                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
+                    }
+
+                default: Fail(ErrorCode.UndefinedBehavior); return false;
+            }
         }
         private bool ProcessFneg()
         {
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
-            double res = -AsDouble(a);
+            switch ((s >> 2) & 3)
+            {
+                case 3:
+                    {
+                        double res = -AsDouble(a);
 
-            UpdateFlagsF(res);
+                        UpdateFlagsDouble(res);
 
-            return StoreUnaryOpFormat(s, m, AsUInt64(res));
+                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
+                    }
+                case 2:
+                    {
+                        float res = -AsFloat(a);
+
+                        UpdateFlagsFloat(res);
+
+                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
+                    }
+
+                default: Fail(ErrorCode.UndefinedBehavior); return false;
+            }
         }
         private bool ProcessFabs()
         {
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
-            double res = Math.Abs(AsDouble(a));
+            switch ((s >> 2) & 3)
+            {
+                case 3:
+                    {
+                        double res = Math.Abs(AsDouble(a));
 
-            UpdateFlagsF(res);
+                        UpdateFlagsDouble(res);
 
-            return StoreUnaryOpFormat(s, m, AsUInt64(res));
+                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
+                    }
+                case 2:
+                    {
+                        float res = Math.Abs(AsFloat(a));
+
+                        UpdateFlagsFloat(res);
+
+                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
+                    }
+
+                default: Fail(ErrorCode.UndefinedBehavior); return false;
+            }
         }
         private bool ProcessFcmp0()
         {
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
-            double res = AsDouble(a);
+            switch ((s >> 2) & 3)
+            {
+                case 3:
+                    {
+                        double res = AsDouble(a);
 
-            UpdateFlagsF(res);
+                        UpdateFlagsDouble(res);
 
-            return true;
+                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
+                    }
+                case 2:
+                    {
+                        float res = AsFloat(a);
+
+                        UpdateFlagsFloat(res);
+
+                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
+                    }
+
+                default: Fail(ErrorCode.UndefinedBehavior); return false;
+            }
         }
 
         private bool ProcessFsin()
@@ -970,33 +1188,81 @@ namespace csx64
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
-            double res = Math.Sin(AsDouble(a));
+            switch ((s >> 2) & 3)
+            {
+                case 3:
+                    {
+                        double res = Math.Sin(AsDouble(a));
 
-            UpdateFlagsF(res);
+                        UpdateFlagsDouble(res);
 
-            return StoreUnaryOpFormat(s, m, AsUInt64(res));
+                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
+                    }
+                case 2:
+                    {
+                        float res = (float)Math.Sin(AsFloat(a));
+
+                        UpdateFlagsFloat(res);
+
+                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
+                    }
+
+                default: Fail(ErrorCode.UndefinedBehavior); return false;
+            }
         }
         private bool ProcessFcos()
         {
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
-            double res = Math.Cos(AsDouble(a));
+            switch ((s >> 2) & 3)
+            {
+                case 3:
+                    {
+                        double res = Math.Cos(AsDouble(a));
 
-            UpdateFlagsF(res);
+                        UpdateFlagsDouble(res);
 
-            return StoreUnaryOpFormat(s, m, AsUInt64(res));
+                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
+                    }
+                case 2:
+                    {
+                        float res = (float)Math.Cos(AsFloat(a));
+
+                        UpdateFlagsFloat(res);
+
+                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
+                    }
+
+                default: Fail(ErrorCode.UndefinedBehavior); return false;
+            }
         }
         private bool ProcessFtan()
         {
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
-            double res = Math.Tan(AsDouble(a));
+            switch ((s >> 2) & 3)
+            {
+                case 3:
+                    {
+                        double res = Math.Tan(AsDouble(a));
 
-            UpdateFlagsF(res);
+                        UpdateFlagsDouble(res);
 
-            return StoreUnaryOpFormat(s, m, AsUInt64(res));
+                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
+                    }
+                case 2:
+                    {
+                        float res = (float)Math.Tan(AsFloat(a));
+
+                        UpdateFlagsFloat(res);
+
+                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
+                    }
+
+                default: Fail(ErrorCode.UndefinedBehavior); return false;
+            }
         }
 
         private bool ProcessFsinh()
@@ -1004,33 +1270,81 @@ namespace csx64
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
-            double res = Math.Sinh(AsDouble(a));
+            switch ((s >> 2) & 3)
+            {
+                case 3:
+                    {
+                        double res = Math.Sinh(AsDouble(a));
 
-            UpdateFlagsF(res);
+                        UpdateFlagsDouble(res);
 
-            return StoreUnaryOpFormat(s, m, AsUInt64(res));
+                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
+                    }
+                case 2:
+                    {
+                        float res = (float)Math.Sinh(AsFloat(a));
+
+                        UpdateFlagsFloat(res);
+
+                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
+                    }
+
+                default: Fail(ErrorCode.UndefinedBehavior); return false;
+            }
         }
         private bool ProcessFcosh()
         {
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
-            double res = Math.Cosh(AsDouble(a));
+            switch ((s >> 2) & 3)
+            {
+                case 3:
+                    {
+                        double res = Math.Cosh(AsDouble(a));
 
-            UpdateFlagsF(res);
+                        UpdateFlagsDouble(res);
 
-            return StoreUnaryOpFormat(s, m, AsUInt64(res));
+                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
+                    }
+                case 2:
+                    {
+                        float res = (float)Math.Cosh(AsFloat(a));
+
+                        UpdateFlagsFloat(res);
+
+                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
+                    }
+
+                default: Fail(ErrorCode.UndefinedBehavior); return false;
+            }
         }
         private bool ProcessFtanh()
         {
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
-            double res = Math.Tanh(AsDouble(a));
+            switch ((s >> 2) & 3)
+            {
+                case 3:
+                    {
+                        double res = Math.Tanh(AsDouble(a));
 
-            UpdateFlagsF(res);
+                        UpdateFlagsDouble(res);
 
-            return StoreUnaryOpFormat(s, m, AsUInt64(res));
+                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
+                    }
+                case 2:
+                    {
+                        float res = (float)Math.Tanh(AsFloat(a));
+
+                        UpdateFlagsFloat(res);
+
+                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
+                    }
+
+                default: Fail(ErrorCode.UndefinedBehavior); return false;
+            }
         }
 
         private bool ProcessFasin()
@@ -1038,44 +1352,108 @@ namespace csx64
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
-            double res = Math.Asin(AsDouble(a));
+            switch ((s >> 2) & 3)
+            {
+                case 3:
+                    {
+                        double res = Math.Asin(AsDouble(a));
 
-            UpdateFlagsF(res);
+                        UpdateFlagsDouble(res);
 
-            return StoreUnaryOpFormat(s, m, AsUInt64(res));
+                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
+                    }
+                case 2:
+                    {
+                        float res = (float)Math.Asin(AsFloat(a));
+
+                        UpdateFlagsFloat(res);
+
+                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
+                    }
+
+                default: Fail(ErrorCode.UndefinedBehavior); return false;
+            }
         }
         private bool ProcessFacos()
         {
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
-            double res = Math.Acos(AsDouble(a));
+            switch ((s >> 2) & 3)
+            {
+                case 3:
+                    {
+                        double res = Math.Acos(AsDouble(a));
 
-            UpdateFlagsF(res);
+                        UpdateFlagsDouble(res);
 
-            return StoreUnaryOpFormat(s, m, AsUInt64(res));
+                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
+                    }
+                case 2:
+                    {
+                        float res = (float)Math.Acos(AsFloat(a));
+
+                        UpdateFlagsFloat(res);
+
+                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
+                    }
+
+                default: Fail(ErrorCode.UndefinedBehavior); return false;
+            }
         }
         private bool ProcessFatan()
         {
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
-            double res = Math.Atan(AsDouble(a));
+            switch ((s >> 2) & 3)
+            {
+                case 3:
+                    {
+                        double res = Math.Atan(AsDouble(a));
 
-            UpdateFlagsF(res);
+                        UpdateFlagsDouble(res);
 
-            return StoreUnaryOpFormat(s, m, AsUInt64(res));
+                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
+                    }
+                case 2:
+                    {
+                        float res = (float)Math.Atan(AsFloat(a));
+
+                        UpdateFlagsFloat(res);
+
+                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
+                    }
+
+                default: Fail(ErrorCode.UndefinedBehavior); return false;
+            }
         }
         private bool ProcessFatan2()
         {
             UInt64 s = 0, m = 0, a = 0, b = 0;
             if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
 
-            double res = Math.Atan2(AsDouble(a), AsDouble(b));
+            switch ((s >> 2) & 3)
+            {
+                case 3:
+                    {
+                        double res = Math.Atan2(AsDouble(a), AsDouble(b));
 
-            UpdateFlagsF(res);
+                        UpdateFlagsDouble(res);
 
-            return StoreBinaryOpFormat(s, m, AsUInt64(res));
+                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
+                    }
+                case 2:
+                    {
+                        float res = (float)Math.Atan2(AsFloat(a), AsFloat(b));
+
+                        UpdateFlagsFloat(res);
+
+                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
+                    }
+
+                default: Fail(ErrorCode.UndefinedBehavior); return false;
+            }
         }
 
         private bool ProcessFfloor()
@@ -1083,44 +1461,108 @@ namespace csx64
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
-            double res = Math.Floor(AsDouble(a));
+            switch ((s >> 2) & 3)
+            {
+                case 3:
+                    {
+                        double res = Math.Floor(AsDouble(a));
 
-            UpdateFlagsF(res);
+                        UpdateFlagsDouble(res);
 
-            return StoreUnaryOpFormat(s, m, AsUInt64(res));
+                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
+                    }
+                case 2:
+                    {
+                        float res = (float)Math.Floor(AsFloat(a));
+
+                        UpdateFlagsFloat(res);
+
+                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
+                    }
+
+                default: Fail(ErrorCode.UndefinedBehavior); return false;
+            }
         }
         private bool ProcessFceil()
         {
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
-            double res = Math.Ceiling(AsDouble(a));
+            switch ((s >> 2) & 3)
+            {
+                case 3:
+                    {
+                        double res = Math.Ceiling(AsDouble(a));
 
-            UpdateFlagsF(res);
+                        UpdateFlagsDouble(res);
 
-            return StoreUnaryOpFormat(s, m, AsUInt64(res));
+                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
+                    }
+                case 2:
+                    {
+                        float res = (float)Math.Ceiling(AsFloat(a));
+
+                        UpdateFlagsFloat(res);
+
+                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
+                    }
+
+                default: Fail(ErrorCode.UndefinedBehavior); return false;
+            }
         }
         private bool ProcessFround()
         {
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
-            double res = Math.Round(AsDouble(a));
+            switch ((s >> 2) & 3)
+            {
+                case 3:
+                    {
+                        double res = Math.Round(AsDouble(a));
 
-            UpdateFlagsF(res);
+                        UpdateFlagsDouble(res);
 
-            return StoreUnaryOpFormat(s, m, AsUInt64(res));
+                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
+                    }
+                case 2:
+                    {
+                        float res = (float)Math.Round(AsFloat(a));
+
+                        UpdateFlagsFloat(res);
+
+                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
+                    }
+
+                default: Fail(ErrorCode.UndefinedBehavior); return false;
+            }
         }
         private bool ProcessFtrunc()
         {
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
-            double res = Math.Truncate(AsDouble(a));
+            switch ((s >> 2) & 3)
+            {
+                case 3:
+                    {
+                        double res = Math.Truncate(AsDouble(a));
 
-            UpdateFlagsF(res);
+                        UpdateFlagsDouble(res);
 
-            return StoreUnaryOpFormat(s, m, AsUInt64(res));
+                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
+                    }
+                case 2:
+                    {
+                        float res = (float)Math.Truncate(AsFloat(a));
+
+                        UpdateFlagsFloat(res);
+
+                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
+                    }
+
+                default: Fail(ErrorCode.UndefinedBehavior); return false;
+            }
         }
 
         private bool ProcessFTOI()
@@ -1128,14 +1570,38 @@ namespace csx64
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
-            return StoreUnaryOpFormat(s, m, ((Int64)a).MakeUnsigned());
+            switch ((s >> 2) & 3)
+            {
+                case 3:
+                    {
+                        return StoreBinaryOpFormat(s, m, ((Int64)AsDouble(a)).MakeUnsigned());
+                    }
+                case 2:
+                    {
+                        return StoreBinaryOpFormat(s, m, ((Int64)AsFloat(a)).MakeUnsigned());
+                    }
+
+                default: Fail(ErrorCode.UndefinedBehavior); return false;
+            }
         }
         private bool ProcessITOF()
         {
             UInt64 s = 0, m = 0, a = 0;
             if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
 
-            return StoreUnaryOpFormat(s, m, AsUInt64((double)a.MakeSigned()));
+            switch ((s >> 2) & 3)
+            {
+                case 3:
+                    {
+                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(a.MakeSigned()));
+                    }
+                case 2:
+                    {
+                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(SignExtend(a, 2).MakeSigned()));
+                    }
+
+                default: Fail(ErrorCode.UndefinedBehavior); return false;
+            }
         }
 
         // -- extended register ops --
@@ -1552,7 +2018,7 @@ namespace csx64
                             break;
                     }
                     return true;
-                
+
                 case OPCode.UExtend: if (!GetMem(1, ref a)) return false; Registers[a >> 4].Set(a & 3, Registers[a >> 4].Get((a >> 2) & 3)); return true;
                 case OPCode.SExtend: if (!GetMem(1, ref a)) return false; Registers[a >> 4].Set(a & 3, SignExtend(Registers[a >> 4].Get((a >> 2) & 3), (a >> 2) & 3)); return true;
 
@@ -1561,9 +2027,9 @@ namespace csx64
                 case OPCode.UDIV: return ProcessUDIV();
                 case OPCode.SDIV: return ProcessSDIV();
 
-                case OPCode.Add:   return ProcessAdd();
-                case OPCode.Sub:   return ProcessSub();
-                case OPCode.Bmul:  return ProcessBmul();
+                case OPCode.Add: return ProcessAdd();
+                case OPCode.Sub: return ProcessSub();
+                case OPCode.Bmul: return ProcessBmul();
                 case OPCode.Budiv: return ProcessBudiv();
                 case OPCode.Bumod: return ProcessBumod();
                 case OPCode.Bsdiv: return ProcessBsdiv();
@@ -1577,10 +2043,10 @@ namespace csx64
                 case OPCode.RR: return ProcessRR();
 
                 case OPCode.And: return ProcessAnd();
-                case OPCode.Or:  return ProcessOr();
+                case OPCode.Or: return ProcessOr();
                 case OPCode.Xor: return ProcessXor();
 
-                case OPCode.Cmp:  return ProcessSub(false);
+                case OPCode.Cmp: return ProcessSub(false);
                 case OPCode.Test: return ProcessAnd(false);
 
                 case OPCode.Inc: return ProcessInc();
@@ -1589,7 +2055,7 @@ namespace csx64
                 case OPCode.Not: return ProcessNot();
                 case OPCode.Abs: return ProcessAbs();
                 case OPCode.Cmpz: return ProcessCmp0();
-                
+
                 case OPCode.La:
                     if (!GetMem(1, ref a) || !GetAddress(ref b)) return false;
                     Registers[a & 15].x64 = b;
@@ -1597,25 +2063,25 @@ namespace csx64
 
                 case OPCode.Jmp: if (!GetAddress(ref a)) return false; Pos = a; return true;
 
-                case OPCode.Ja:  if (!GetAddress(ref a)) return false; if (Flags.a) Pos = a;  return true;
+                case OPCode.Ja: if (!GetAddress(ref a)) return false; if (Flags.a) Pos = a; return true;
                 case OPCode.Jae: if (!GetAddress(ref a)) return false; if (Flags.ae) Pos = a; return true;
-                case OPCode.Jb:  if (!GetAddress(ref a)) return false; if (Flags.b) Pos = a;  return true;
+                case OPCode.Jb: if (!GetAddress(ref a)) return false; if (Flags.b) Pos = a; return true;
                 case OPCode.Jbe: if (!GetAddress(ref a)) return false; if (Flags.be) Pos = a; return true;
 
-                case OPCode.Jg:  if (!GetAddress(ref a)) return false; if (Flags.g) Pos = a;  return true;
+                case OPCode.Jg: if (!GetAddress(ref a)) return false; if (Flags.g) Pos = a; return true;
                 case OPCode.Jge: if (!GetAddress(ref a)) return false; if (Flags.ge) Pos = a; return true;
-                case OPCode.Jl:  if (!GetAddress(ref a)) return false; if (Flags.l) Pos = a;  return true;
+                case OPCode.Jl: if (!GetAddress(ref a)) return false; if (Flags.l) Pos = a; return true;
                 case OPCode.Jle: if (!GetAddress(ref a)) return false; if (Flags.le) Pos = a; return true;
 
-                case OPCode.Jz:  if (!GetAddress(ref a)) return false; if (Flags.Z) Pos = a;  return true;
+                case OPCode.Jz: if (!GetAddress(ref a)) return false; if (Flags.Z) Pos = a; return true;
                 case OPCode.Jnz: if (!GetAddress(ref a)) return false; if (!Flags.Z) Pos = a; return true;
-                case OPCode.Js:  if (!GetAddress(ref a)) return false; if (Flags.S) Pos = a;  return true;
+                case OPCode.Js: if (!GetAddress(ref a)) return false; if (Flags.S) Pos = a; return true;
                 case OPCode.Jns: if (!GetAddress(ref a)) return false; if (!Flags.S) Pos = a; return true;
-                case OPCode.Jp:  if (!GetAddress(ref a)) return false; if (Flags.P) Pos = a;  return true;
+                case OPCode.Jp: if (!GetAddress(ref a)) return false; if (Flags.P) Pos = a; return true;
                 case OPCode.Jnp: if (!GetAddress(ref a)) return false; if (!Flags.P) Pos = a; return true;
-                case OPCode.Jo:  if (!GetAddress(ref a)) return false; if (Flags.O) Pos = a;  return true;
+                case OPCode.Jo: if (!GetAddress(ref a)) return false; if (Flags.O) Pos = a; return true;
                 case OPCode.Jno: if (!GetAddress(ref a)) return false; if (!Flags.O) Pos = a; return true;
-                case OPCode.Jc:  if (!GetAddress(ref a)) return false; if (Flags.C) Pos = a;  return true;
+                case OPCode.Jc: if (!GetAddress(ref a)) return false; if (Flags.C) Pos = a; return true;
                 case OPCode.Jnc: if (!GetAddress(ref a)) return false; if (!Flags.C) Pos = a; return true;
 
                 case OPCode.Fadd: return ProcessFadd();
@@ -1697,7 +2163,7 @@ namespace csx64
         }
         public enum LinkError
         {
-            None, EmptyResult, SymbolRedefinition, MissingSymbol
+            None, EmptyResult, SymbolRedefinition, MissingSymbol, FormatError
         }
 
         internal struct Symbol
@@ -1715,9 +2181,6 @@ namespace csx64
             }
 
             // -------------------
-
-            public UInt64 Address;
-            public UInt64 Size;
 
             public UInt64 Value = 0;
             public double FValue = 0;
@@ -1763,12 +2226,17 @@ namespace csx64
                 return true;
             }
         }
+        internal struct HoleData
+        {
+            public UInt64 Address;
+            public UInt64 Size;
+        }
         public class ObjectFile
         {
             internal Dictionary<string, Symbol> Symbols = new Dictionary<string, Symbol>();
+            internal Dictionary<HoleData, Hole> Holes = new Dictionary<HoleData, Hole>();
 
             internal List<string> GlobalSymbols = new List<string>();
-            internal List<Hole> Holes = new List<Hole>();
             internal List<byte> Data = new List<byte>();
         }
 
@@ -1778,10 +2246,10 @@ namespace csx64
             public int line;
 
             public string rawline;
-            public string label_def;
+            public string[] label_defs; // must be array for ref params
             public string op;
             public UInt64 sizecode;
-            public string[] args;
+            public string[] args;       // must be array for ref params
 
             public string last_static_label;
             public Tuple<AssembleError, string> err;
@@ -1817,100 +2285,101 @@ namespace csx64
             return true;
         }
 
-        private static void Append(ObjectFile file, UInt64 size, UInt64 val)
+        private static void AppendVal(AssembleArgs args, UInt64 size, UInt64 val)
         {
             // write the value (little-endian)
             for (ushort i = 0; i < size; ++i)
-                file.Data.Add((byte)(val >> (8 * i)));
+                args.file.Data.Add((byte)(val >> (8 * i)));
         }
-        private static void Append(ObjectFile file, UInt64 size, Hole hole)
+        private static bool AppendHole(AssembleArgs args, UInt64 size, Hole hole)
         {
             // if we can fill it immediately, do so
             if (hole.Segments.Count == 0)
             {
-                Append(file, size, hole.Floating ? AsUInt64(hole.Value.MakeSigned() + hole.FValue) : hole.Value);
+                /* !! IF MODIFIED HERE, MUST ALSO BE MODIFIED IN LINKER HOLE PATCHING !! */
+
+                // if it's floating-point
+                if (hole.Floating)
+                {
+                    // only 64-bit and 32-bit are supported
+                    switch (size)
+                    {
+                        case 8: AppendVal(args, 8, DoubleAsUInt64(hole.Value.MakeSigned() + hole.FValue)); break;
+                        case 4: AppendVal(args, 4, FloatAsUInt64(hole.Value.MakeSigned() + (float)hole.FValue)); break;
+
+                        default: args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Attempt to use unsupported floating-point size"); return false;
+                    }
+                }
+                // otherwise it's integral
+                else AppendVal(args, size, hole.Value);
             }
             // otherwise there really is a hole
             else
             {
-                // store position data
-                hole.Size = size;
-                hole.Address = (UInt64)file.Data.LongCount();
-
                 // add the hole for later linking
-                file.Holes.Add(hole);
+                args.file.Holes.Add(new HoleData() { Address = (UInt64)args.file.Data.LongCount(), Size = size }, hole);
                 // write a dummy (all 1's for easy manual identification)
-                Append(file, size, 0xffffffffffffffff);
+                AppendVal(args, size, 0xffffffffffffffff);
             }
+
+            return true;
         }
-        private static void AppendAddress(ObjectFile file, UInt64 a, UInt64 b, Hole hole)
+        private static bool AppendAddress(AssembleArgs args, UInt64 a, UInt64 b, Hole hole)
         {
             // [1: literal][3: m1][1: -m2][3: m2]   ([4: r1][4: r2])   ([64: imm])
-            Append(file, 1, a);
-            if ((a & 0x77) != 0) Append(file, 1, b);
-            if ((a & 0x80) != 0) Append(file, 8, hole);
+            AppendVal(args, 1, a);
+            if ((a & 0x77) != 0) AppendVal(args, 1, b);
+            if ((a & 0x80) != 0) { if (!AppendHole(args, 8, hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append address base\n-> {args.err.Item2}"); return false; } }
+
+            return true;
         }
 
         private static bool SplitLine(AssembleArgs args)
         {
-            // (label:) op:size (, arg, arg, arg, ...)
-            int pos, end; // position in line parsing
+            // (label: label: ...) op(:size) (arg, arg, ...)
+            int pos, end = 0; // position in line parsing
+            int quote;
             string token;
+
             string[] subs;
+            List<string> tokens = new List<string>();
+            StringBuilder b = new StringBuilder();
 
-            // skip leading white space
-            for (pos = 0; pos < args.rawline.Length && char.IsWhiteSpace(args.rawline[pos]); ++pos) ;
-            // get a space-delimited token (label or op)
-            for (end = pos; end < args.rawline.Length && !char.IsWhiteSpace(args.rawline[end]); ++end) ;
-            token = args.rawline.Substring(pos, end - pos);
-
-            // if this denotes a label
-            if (token.Length > 0 && token[token.Length - 1] == ':')
+            // parse label defs and op
+            while (true)
             {
-                // store this as token def
-                args.label_def = token;
-
-                // get another white-space delimited token
-
                 // skip leading white space
                 for (pos = end; pos < args.rawline.Length && char.IsWhiteSpace(args.rawline[pos]); ++pos) ;
-                // get a space-delimited token (op)
+                // get a white space-delimited token
                 for (end = pos; end < args.rawline.Length && !char.IsWhiteSpace(args.rawline[end]); ++end) ;
                 token = args.rawline.Substring(pos, end - pos);
 
-                // set as op
-                args.op = token;
-            }
-            else
-            {
-                // no label defined for this line
-                args.label_def = null;
+                // if it's a token, add it to the tokens list
+                if (token.Length > 0 && token[token.Length - 1] == ':') tokens.Add(token.Substring(0, token.Length - 1));
+                // otherwise, this is op
+                else
+                {
+                    // split the op:size token
+                    subs = token.Split(':');
+                    args.op = subs[0]; // op is first arg regardless
 
-                // token is op
-                args.op = token;
+                    // handle sizecode (2 = explicit size, 1 = default 64 bit, else is format error)
+                    if (subs.Length == 2)
+                    {
+                        if (!TryParseSizecode(args, subs[1], out args.sizecode))
+                        { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to parse register size code \"{subs[1]}\"\n-> {args.err.Item2}"); return false; }
+                    }
+                    else if (subs.Length == 1) args.sizecode = 3; // use default size
+                    else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: {subs.Length}Operation token may have at most one explicit size parameter"); return false; }
+
+                    break;
+                }
             }
 
-            // split the op:size token
-            subs = args.op.Split(':');
-            if (subs.Length == 2)
-            {
-                // op is first arg
-                args.op = subs[0];
-                // explicit size is second arg
-                if (!TryParseSizecode(args, subs[1], out args.sizecode))
-                { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to parse register size code \"{subs[1]}\"\n-> {args.err.Item2}"); return false; }
-            }
-            else if (subs.Length == 1)
-            {
-                // op is first arg
-                args.op = subs[0];
-                // use default size
-                args.sizecode = 3;
-            }
+            args.label_defs = tokens.ToArray(); // dump tokens as label defs
+            tokens.Clear(); // empty tokens for reuse
 
             // parse the rest of the line as comma-separated tokens
-            List<string> tokens = new List<string>();
-            int quote;
             while (true)
             {
                 // skip leading white space
@@ -1918,7 +2387,7 @@ namespace csx64
                 // when pos reaches end of token, we're done parsing
                 if (pos >= args.rawline.Length) break;
 
-                StringBuilder b = new StringBuilder();
+                b.Clear(); // clear the string builder
 
                 // find the next terminator (comma-separated)
                 for (quote = -1, end = pos; end < args.rawline.Length && (args.rawline[end] != ',' || quote >= 0); ++end)
@@ -1927,7 +2396,7 @@ namespace csx64
                         quote = quote < 0 ? end : (args.rawline[end] == args.rawline[quote] ? -1 : quote);
 
                     // omit white space unless in a quote
-                    if(quote >= 0 || !char.IsWhiteSpace(args.rawline[end])) b.Append(args.rawline[end]);
+                    if (quote >= 0 || !char.IsWhiteSpace(args.rawline[end])) b.Append(args.rawline[end]);
                 }
 
                 // add this token
@@ -1947,7 +2416,7 @@ namespace csx64
             double ftemp, fsum = 0; // floating point parsing temporary and sum
 
             // result initially integral zero
-            res = 0; 
+            res = 0;
             floating = false;
 
             if (token.Length == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Empty label encountered"); return false; }
@@ -2014,7 +2483,7 @@ namespace csx64
             }
 
             // if result is floating, recalculate res as sum of floating and integral components
-            if (floating) res = AsUInt64(res + fsum);
+            if (floating) res = DoubleAsUInt64(res + fsum);
 
             return true;
         }
@@ -2131,7 +2600,7 @@ namespace csx64
 
             // must be of [*] format
             if (token.Length < 3 || token[0] != '[' || token[token.Length - 1] != ']')
-                { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Invalid address format encountered \"{token}\""); return false; }
+            { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Invalid address format encountered \"{token}\""); return false; }
 
             string r1_seg = null, r2_seg = null; // register parsing temporaries
 
@@ -2219,32 +2688,33 @@ namespace csx64
         {
             return DateTime.UtcNow.Ticks.MakeUnsigned();
         }
-        
-        private static bool TryProcessBinaryOp(AssembleArgs args, OPCode op)
+
+        private static bool TryProcessBinaryOp(AssembleArgs args, OPCode op, UInt64 sizemask = 15)
         {
             UInt64 a, b, c; // parsing temporaries
             Hole hole1, hole2;
 
             if (args.args.Length != 2) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: {op} expected 2 args"); return false; }
+            if ((Size(args.sizecode) & sizemask) == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.UsageError, $"line {args.line}: {op} does not support the specified size code"); return false; }
 
-            Append(args.file, 1, (UInt64)op);
+            AppendVal(args, 1, (UInt64)op);
 
             if (TryParseRegister(args, args.args[0], out a))
             {
                 if (TryParseImm(args, args.args[1], out hole1))
                 {
-                    Append(args.file, 1, (a << 4) | (args.sizecode << 2) | 0);
-                    Append(args.file, Size(args.sizecode), hole1);
+                    AppendVal(args, 1, (a << 4) | (args.sizecode << 2) | 0);
+                    if (!AppendHole(args, Size(args.sizecode), hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
                 }
                 else if (TryParseAddress(args, args.args[1], out b, out c, out hole1))
                 {
-                    Append(args.file, 1, (a << 4) | (args.sizecode << 2) | 1);
-                    AppendAddress(args.file, b, c, hole1);
+                    AppendVal(args, 1, (a << 4) | (args.sizecode << 2) | 1);
+                    if (!AppendAddress(args, b, c, hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
                 }
                 else if (TryParseRegister(args, args.args[1], out b))
                 {
-                    Append(args.file, 1, (a << 4) | (args.sizecode << 2) | 2);
-                    Append(args.file, 1, b);
+                    AppendVal(args, 1, (a << 4) | (args.sizecode << 2) | 2);
+                    AppendVal(args, 1, b);
                 }
                 else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Couldn't parse \"{args.args[1]}\" as an imm, address, or register"); return false; }
             }
@@ -2252,15 +2722,15 @@ namespace csx64
             {
                 if (TryParseRegister(args, args.args[1], out c))
                 {
-                    Append(args.file, 1, (args.sizecode << 2) | 2);
-                    Append(args.file, 1, 16 | c);
-                    AppendAddress(args.file, a, b, hole1);
+                    AppendVal(args, 1, (args.sizecode << 2) | 2);
+                    AppendVal(args, 1, 16 | c);
+                    if (!AppendAddress(args, a, b, hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; };
                 }
                 else if (TryParseImm(args, args.args[1], out hole2))
                 {
-                    Append(args.file, 1, (args.sizecode << 2) | 3);
-                    Append(args.file, Size(args.sizecode), hole2);
-                    AppendAddress(args.file, a, b, hole1);
+                    AppendVal(args, 1, (args.sizecode << 2) | 3);
+                    if (!AppendHole(args, Size(args.sizecode), hole2)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
+                    if (!AppendAddress(args, a, b, hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
                 }
                 else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Couldn't parse \"{args.args[1]}\" as a register or imm"); return false; }
             }
@@ -2268,23 +2738,24 @@ namespace csx64
 
             return true;
         }
-        private static bool TryProcessUnaryOp(AssembleArgs args, OPCode op)
+        private static bool TryProcessUnaryOp(AssembleArgs args, OPCode op, UInt64 sizemask = 15)
         {
             UInt64 a, b;
             Hole hole;
 
             if (args.args.Length != 1) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: {op} expected 1 arg"); return false; }
+            if ((Size(args.sizecode) & sizemask) == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.UsageError, $"line {args.line}: {op} does not support the specified size code"); return false; }
 
-            Append(args.file, 1, (UInt64)op);
+            AppendVal(args, 1, (UInt64)op);
 
             if (TryParseRegister(args, args.args[0], out b))
             {
-                Append(args.file, 1, (b << 4) | (args.sizecode << 2) | 0);
+                AppendVal(args, 1, (b << 4) | (args.sizecode << 2) | 0);
             }
             else if (TryParseAddress(args, args.args[0], out a, out b, out hole))
             {
-                Append(args.file, 1, (args.sizecode << 2) | 1);
-                AppendAddress(args.file, a, b, hole);
+                AppendVal(args, 1, (args.sizecode << 2) | 1);
+                if (!AppendAddress(args, a, b, hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
             }
             else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Couldn't parse \"{args.args[0]}\" as a register or address"); return false; }
 
@@ -2296,15 +2767,15 @@ namespace csx64
 
             if (!TryParseAddress(args, args.args[0], out UInt64 a, out UInt64 b, out Hole hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Jump expected address as first arg\n-> {args.err.Item2}"); return false; }
 
-            Append(args.file, 1, (UInt64)op);
-            AppendAddress(args.file, a, b, hole);
+            AppendVal(args, 1, (UInt64)op);
+            if (!AppendAddress(args, a, b, hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
 
             return true;
         }
         private static bool TryProcessEmission(AssembleArgs args)
         {
             if (args.args.Length == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: Emission expected at least one value"); return false; }
-            
+
             Hole hole = new Hole(); // initially empty hole (to allow for buffer shorthand e.x. "emit x32")
             UInt64 mult;
             bool floating;
@@ -2326,7 +2797,7 @@ namespace csx64
                     if (i > 0 && args.args[i - 1][0] != 'x') --mult;
 
                     for (UInt64 j = 0; j < mult; ++j)
-                        Append(args.file, Size(args.sizecode), hole);
+                        if (!AppendHole(args, Size(args.sizecode), hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
                 }
                 // if a string
                 else if (args.args[i][0] == '"' || args.args[i][0] == '\'')
@@ -2339,7 +2810,7 @@ namespace csx64
                         // make sure there's no string splicing
                         if (args.args[i][j] == args.args[i][0]) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: String emission prematurely reached a terminating quote"); return false; }
 
-                        Append(args.file, Size(args.sizecode), args.args[i][j]);
+                        AppendVal(args, Size(args.sizecode), args.args[i][j]);
                     }
                 }
                 // otherwise is a value
@@ -2349,7 +2820,7 @@ namespace csx64
                     if (!TryParseImm(args, args.args[i], out hole)) return false;
 
                     // make one of them
-                    Append(args.file, Size(args.sizecode), hole);
+                    if (!AppendHole(args, Size(args.sizecode), hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
                 }
             }
 
@@ -2362,21 +2833,21 @@ namespace csx64
 
             if (args.args.Length != 1) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: {op} expected 1 arg"); return false; }
 
-            Append(args.file, 1, (UInt64)op);
+            AppendVal(args, 1, (UInt64)op);
 
             if (TryParseImm(args, args.args[0], out hole))
             {
-                Append(args.file, 1, (args.sizecode << 2) | 0);
-                Append(args.file, Size(args.sizecode), hole);
+                AppendVal(args, 1, (args.sizecode << 2) | 0);
+                if (!AppendHole(args, Size(args.sizecode), hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
             }
             else if (TryParseRegister(args, args.args[0], out a))
             {
-                Append(args.file, 1, (a << 4) | (args.sizecode << 2) | 1);
+                AppendVal(args, 1, (a << 4) | (args.sizecode << 2) | 1);
             }
             else if (TryParseAddress(args, args.args[0], out a, out b, out hole))
             {
-                Append(args.file, 1, (args.sizecode << 2) | 2);
-                AppendAddress(args.file, a, b, hole);
+                AppendVal(args, 1, (args.sizecode << 2) | 2);
+                if (!AppendAddress(args, a, b, hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
             }
             else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Couldn't parse \"{args.args[0]}\" as an imm, register, or address"); return false; }
 
@@ -2393,23 +2864,23 @@ namespace csx64
                 last_static_label = null,
                 err = null
             };
-            
+
             // predefined symbols
             args.file.Symbols = new Dictionary<string, Symbol>()
             {
                 ["__time__"] = new Symbol() { Value = Time(), IsAddress = false, IsFloating = false },
                 ["__version__"] = new Symbol() { Value = Version, IsAddress = false, IsFloating = false },
 
-                ["__pinf__"] = new Symbol() { Value = AsUInt64(double.PositiveInfinity), IsAddress = false, IsFloating = true },
-                ["__ninf__"] = new Symbol() { Value = AsUInt64(double.NegativeInfinity), IsAddress = false, IsFloating = true },
-                ["__nan__"] = new Symbol() { Value = AsUInt64(double.NaN), IsAddress = false, IsFloating = true },
+                ["__pinf__"] = new Symbol() { Value = DoubleAsUInt64(double.PositiveInfinity), IsAddress = false, IsFloating = true },
+                ["__ninf__"] = new Symbol() { Value = DoubleAsUInt64(double.NegativeInfinity), IsAddress = false, IsFloating = true },
+                ["__nan__"] = new Symbol() { Value = DoubleAsUInt64(double.NaN), IsAddress = false, IsFloating = true },
 
-                ["__fmax__"] = new Symbol() { Value = AsUInt64(double.MaxValue), IsAddress = false, IsFloating = true },
-                ["__fmin__"] = new Symbol() { Value = AsUInt64(double.MinValue), IsAddress = false, IsFloating = true },
-                ["__fepsilon__"] = new Symbol() { Value = AsUInt64(double.Epsilon), IsAddress = false, IsFloating = true },
+                ["__fmax__"] = new Symbol() { Value = DoubleAsUInt64(double.MaxValue), IsAddress = false, IsFloating = true },
+                ["__fmin__"] = new Symbol() { Value = DoubleAsUInt64(double.MinValue), IsAddress = false, IsFloating = true },
+                ["__fepsilon__"] = new Symbol() { Value = DoubleAsUInt64(double.Epsilon), IsAddress = false, IsFloating = true },
 
-                ["__pi__"] = new Symbol() { Value = AsUInt64(Math.PI), IsAddress = false, IsFloating = true },
-                ["__e__"] = new Symbol() { Value = AsUInt64(Math.E), IsAddress = false, IsFloating = true }
+                ["__pi__"] = new Symbol() { Value = DoubleAsUInt64(Math.PI), IsAddress = false, IsFloating = true },
+                ["__e__"] = new Symbol() { Value = DoubleAsUInt64(Math.E), IsAddress = false, IsFloating = true }
             };
 
             int pos = 0, end = 0; // position in code
@@ -2425,7 +2896,7 @@ namespace csx64
             {
                 // find the next separator
                 for (end = pos; end < code.Length && code[end] != '\n' && code[end] != '#'; ++end) ;
-                
+
                 ++args.line; // advance line counter
                 // split the line
                 args.rawline = code.Substring(pos, end - pos);
@@ -2434,11 +2905,10 @@ namespace csx64
                 if (end < code.Length && code[end] == '#')
                     for (; end < code.Length && code[end] != '\n'; ++end) ;
 
-                // if we marked a label
-                if (args.label_def != null)
+                // process marked labels
+                for (int i = 0; i < args.label_defs.Length; ++i)
                 {
-                    // take off the colon
-                    string label = args.label_def.Substring(0, args.label_def.Length - 1);
+                    string label = args.label_defs[i]; // shorthand reference to current label
 
                     // handle local mutation
                     if (label.Length > 0 && label[0] != '.') args.last_static_label = label;
@@ -2483,13 +2953,16 @@ namespace csx64
                         // [8: op]
                         case "NOP":
                             if (args.args.Length != 0) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: NOP expected 0 args");
-                            Append(file, 1, (UInt64)OPCode.Nop); break;
+                            AppendVal(args, 1, (UInt64)OPCode.Nop);
+                            break;
                         case "STOP":
                             if (args.args.Length != 0) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: STOP expected 0 args");
-                            Append(file, 1, (UInt64)OPCode.Stop); break;
+                            AppendVal(args, 1, (UInt64)OPCode.Stop);
+                            break;
                         case "SYSCALL":
                             if (args.args.Length != 0) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: SYSCALL expected 0 args");
-                            Append(file, 1, (UInt64)OPCode.Syscall); break;
+                            AppendVal(args, 1, (UInt64)OPCode.Syscall);
+                            break;
 
                         // [8: MOVcc]   [4: source/dest][2: size][2: mode]   (mode = 0: load imm [size: imm]   mode = 1: load register [4:][4: source]   mode = 2: load memory [address]   mode = 3: store register [address])
                         case "MOV": if (!TryProcessBinaryOp(args, OPCode.Mov)) return args.err; break;
@@ -2518,19 +2991,19 @@ namespace csx64
                         case "SWAP":
                             if (args.args.Length != 2) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: SWAP expected 2 args");
 
-                            Append(file, 1, (UInt64)OPCode.Swap);
+                            AppendVal(args, 1, (UInt64)OPCode.Swap);
 
                             if (TryParseRegister(args, args.args[0], out a))
                             {
                                 if (TryParseRegister(args, args.args[1], out b))
                                 {
-                                    Append(file, 1, (a << 4) | (args.sizecode << 2) | 0);
-                                    Append(file, 1, b);
+                                    AppendVal(args, 1, (a << 4) | (args.sizecode << 2) | 0);
+                                    AppendVal(args, 1, b);
                                 }
                                 else if (TryParseAddress(args, args.args[1], out b, out c, out hole))
                                 {
-                                    Append(file, 1, (a << 4) | (args.sizecode << 2) | 1);
-                                    AppendAddress(file, b, c, hole);
+                                    AppendVal(args, 1, (a << 4) | (args.sizecode << 2) | 1);
+                                    if (!AppendAddress(args, b, c, hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}");
                                 }
                                 else return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Unknown usage of SWAP");
                             }
@@ -2538,8 +3011,8 @@ namespace csx64
                             {
                                 if (TryParseRegister(args, args.args[1], out c))
                                 {
-                                    Append(file, 1, (c << 4) | (args.sizecode << 2) | 1);
-                                    AppendAddress(file, a, b, hole);
+                                    AppendVal(args, 1, (c << 4) | (args.sizecode << 2) | 1);
+                                    if (!AppendAddress(args, a, b, hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value");
                                 }
                                 else return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Unknown usage of SWAP");
                             }
@@ -2547,16 +3020,16 @@ namespace csx64
 
                             break;
 
-                        case "UEXTEND": a = (UInt64)OPCode.UExtend; goto XEXTEND;
-                        case "SEXTEND": a = (UInt64)OPCode.SExtend;
-                            XEXTEND:
+                        case "UEXTEND": case "UX": a = (UInt64)OPCode.UExtend; goto XEXTEND;
+                        case "SEXTEND": case "SX": a = (UInt64)OPCode.SExtend;
+                        XEXTEND:
                             if (args.args.Length != 2) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: XEXTEND expected 2 args");
 
                             if (!TryParseSizecode(args, args.args[0], out b)) return new Tuple<AssembleError, string>(AssembleError.MissingSize, $"line {args.line}: UEXTEND expected size parameter as second arg\n-> {args.err.Item2}");
                             if (!TryParseRegister(args, args.args[1], out c)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: UEXTEND expected register parameter as third arg\n-> {args.err.Item2}");
 
-                            Append(file, 1, a);
-                            Append(file, 1, (c << 4) | (b << 2) | args.sizecode);
+                            AppendVal(args, 1, a);
+                            AppendVal(args, 1, (c << 4) | (b << 2) | args.sizecode);
 
                             break;
 
@@ -2602,9 +3075,9 @@ namespace csx64
                             if (!TryParseRegister(args, args.args[0], out a)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: LA expecetd register as first arg\n-> {args.err.Item2}");
                             if (!TryParseAddress(args, args.args[1], out b, out c, out hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: LA expected address as second arg\n-> {args.err.Item2}");
 
-                            Append(file, 1, (UInt64)OPCode.La);
-                            Append(file, 1, a);
-                            AppendAddress(file, b, c, hole);
+                            AppendVal(args, 1, (UInt64)OPCode.La);
+                            AppendVal(args, 1, a);
+                            if (!AppendAddress(args, b, c, hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}");
 
                             break;
 
@@ -2632,56 +3105,56 @@ namespace csx64
                         case "JC": if (!TryProcessJump(args, OPCode.Jc)) return args.err; break;
                         case "JNC": if (!TryProcessJump(args, OPCode.Jnc)) return args.err; break;
 
-                        case "FADD": if (!TryProcessBinaryOp(args, OPCode.Fadd)) return args.err; break;
-                        case "FSUB": if (!TryProcessBinaryOp(args, OPCode.Fsub)) return args.err; break;
-                        case "FMUL": if (!TryProcessBinaryOp(args, OPCode.Fmul)) return args.err; break;
-                        case "FDIV": if (!TryProcessBinaryOp(args, OPCode.Fdiv)) return args.err; break;
-                        case "FMOD": if (!TryProcessBinaryOp(args, OPCode.Fmod)) return args.err; break;
+                        case "FADD": if (!TryProcessBinaryOp(args, OPCode.Fadd, 12)) return args.err; break;
+                        case "FSUB": if (!TryProcessBinaryOp(args, OPCode.Fsub, 12)) return args.err; break;
+                        case "FMUL": if (!TryProcessBinaryOp(args, OPCode.Fmul, 12)) return args.err; break;
+                        case "FDIV": if (!TryProcessBinaryOp(args, OPCode.Fdiv, 12)) return args.err; break;
+                        case "FMOD": if (!TryProcessBinaryOp(args, OPCode.Fmod, 12)) return args.err; break;
 
-                        case "FPOW": if (!TryProcessBinaryOp(args, OPCode.Fpow)) return args.err; break;
-                        case "FSQRT": if (!TryProcessUnaryOp(args, OPCode.Fsqrt)) return args.err; break;
-                        case "FEXP": if (!TryProcessUnaryOp(args, OPCode.Fexp)) return args.err; break;
-                        case "FLN": if (!TryProcessUnaryOp(args, OPCode.Fln)) return args.err; break;
-                        case "FNEG": if (!TryProcessUnaryOp(args, OPCode.Fneg)) return args.err; break;
-                        case "FABS": if (!TryProcessUnaryOp(args, OPCode.Fabs)) return args.err; break;
-                        case "FCMPZ": if (!TryProcessUnaryOp(args, OPCode.Fcmpz)) return args.err; break;
+                        case "FPOW": if (!TryProcessBinaryOp(args, OPCode.Fpow, 12)) return args.err; break;
+                        case "FSQRT": if (!TryProcessUnaryOp(args, OPCode.Fsqrt, 12)) return args.err; break;
+                        case "FEXP": if (!TryProcessUnaryOp(args, OPCode.Fexp, 12)) return args.err; break;
+                        case "FLN": if (!TryProcessUnaryOp(args, OPCode.Fln, 12)) return args.err; break;
+                        case "FNEG": if (!TryProcessUnaryOp(args, OPCode.Fneg, 12)) return args.err; break;
+                        case "FABS": if (!TryProcessUnaryOp(args, OPCode.Fabs, 12)) return args.err; break;
+                        case "FCMPZ": if (!TryProcessUnaryOp(args, OPCode.Fcmpz, 12)) return args.err; break;
 
-                        case "FSIN": if (!TryProcessUnaryOp(args, OPCode.Fsin)) return args.err; break;
-                        case "FCOS": if (!TryProcessUnaryOp(args, OPCode.Fcos)) return args.err; break;
-                        case "FTAN": if (!TryProcessUnaryOp(args, OPCode.Ftan)) return args.err; break;
+                        case "FSIN": if (!TryProcessUnaryOp(args, OPCode.Fsin, 12)) return args.err; break;
+                        case "FCOS": if (!TryProcessUnaryOp(args, OPCode.Fcos, 12)) return args.err; break;
+                        case "FTAN": if (!TryProcessUnaryOp(args, OPCode.Ftan, 12)) return args.err; break;
 
-                        case "FSINH": if (!TryProcessUnaryOp(args, OPCode.Fsinh)) return args.err; break;
-                        case "FCOSH": if (!TryProcessUnaryOp(args, OPCode.Fcosh)) return args.err; break;
-                        case "FTANH": if (!TryProcessUnaryOp(args, OPCode.Ftanh)) return args.err; break;
+                        case "FSINH": if (!TryProcessUnaryOp(args, OPCode.Fsinh, 12)) return args.err; break;
+                        case "FCOSH": if (!TryProcessUnaryOp(args, OPCode.Fcosh, 12)) return args.err; break;
+                        case "FTANH": if (!TryProcessUnaryOp(args, OPCode.Ftanh, 12)) return args.err; break;
 
-                        case "FASIN": if (!TryProcessUnaryOp(args, OPCode.Fasin)) return args.err; break;
-                        case "FACOS": if (!TryProcessUnaryOp(args, OPCode.Facos)) return args.err; break;
-                        case "FATAN": if (!TryProcessUnaryOp(args, OPCode.Fatan)) return args.err; break;
-                        case "FATAN2": if (!TryProcessBinaryOp(args, OPCode.Fatan2)) return args.err; break;
+                        case "FASIN": if (!TryProcessUnaryOp(args, OPCode.Fasin, 12)) return args.err; break;
+                        case "FACOS": if (!TryProcessUnaryOp(args, OPCode.Facos, 12)) return args.err; break;
+                        case "FATAN": if (!TryProcessUnaryOp(args, OPCode.Fatan, 12)) return args.err; break;
+                        case "FATAN2": if (!TryProcessBinaryOp(args, OPCode.Fatan2, 12)) return args.err; break;
 
-                        case "FFLOOR": if (!TryProcessUnaryOp(args, OPCode.Ffloor)) return args.err; break;
-                        case "FCEIL": if (!TryProcessUnaryOp(args, OPCode.Fceil)) return args.err; break;
-                        case "FROUND": if (!TryProcessUnaryOp(args, OPCode.Fround)) return args.err; break;
-                        case "FTRUNC": if (!TryProcessUnaryOp(args, OPCode.Ftrunc)) return args.err; break;
+                        case "FFLOOR": if (!TryProcessUnaryOp(args, OPCode.Ffloor, 12)) return args.err; break;
+                        case "FCEIL": if (!TryProcessUnaryOp(args, OPCode.Fceil, 12)) return args.err; break;
+                        case "FROUND": if (!TryProcessUnaryOp(args, OPCode.Fround, 12)) return args.err; break;
+                        case "FTRUNC": if (!TryProcessUnaryOp(args, OPCode.Ftrunc, 12)) return args.err; break;
 
-                        case "FCMP": if (!TryProcessBinaryOp(args, OPCode.Fcmp)) return args.err; break;
+                        case "FCMP": if (!TryProcessBinaryOp(args, OPCode.Fcmp, 12)) return args.err; break;
 
-                        case "FTOI": if (!TryProcessUnaryOp(args, OPCode.FTOI)) return args.err; break;
-                        case "ITOF": if (!TryProcessUnaryOp(args, OPCode.ITOF)) return args.err; break;
+                        case "FTOI": if (!TryProcessUnaryOp(args, OPCode.FTOI, 12)) return args.err; break;
+                        case "ITOF": if (!TryProcessUnaryOp(args, OPCode.ITOF, 12)) return args.err; break;
 
                         case "PUSH":
                             if (args.args.Length != 1) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: PUSH expected 1 arg");
 
-                            Append(file, 1, (UInt64)OPCode.Push);
+                            AppendVal(args, 1, (UInt64)OPCode.Push);
 
                             if (TryParseImm(args, args.args[0], out hole))
                             {
-                                Append(file, 1, (args.sizecode << 2) | 0);
-                                Append(file, Size(args.sizecode), hole);
+                                AppendVal(args, 1, (args.sizecode << 2) | 0);
+                                if (!AppendHole(args, Size(args.sizecode), hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}");
                             }
                             else if (TryParseRegister(args, args.args[0], out a))
                             {
-                                Append(file, 1, (a << 4) | (args.sizecode << 2) | 1);
+                                AppendVal(args, 1, (a << 4) | (args.sizecode << 2) | 1);
                             }
                             else return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Couldn't parse \"{args.args[0]}\" as an imm or register");
 
@@ -2691,19 +3164,23 @@ namespace csx64
 
                             if (!TryParseRegister(args, args.args[0], out a)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: POP expected register as second arg\n-> {args.err.Item2}");
 
-                            Append(file, 1, (UInt64)OPCode.Pop);
-                            Append(file, 1, (a << 4) | (args.sizecode << 2));
+                            AppendVal(args, 1, (UInt64)OPCode.Pop);
+                            AppendVal(args, 1, (a << 4) | (args.sizecode << 2));
 
                             break;
                         case "CALL":
                             if (args.args.Length != 1) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: CALL expected 1 arg");
                             if (!TryParseAddress(args, args.args[0], out a, out b, out hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: CALLexpected address as first arg\n-> {args.err.Item2}");
-                            Append(file, 1, (UInt64)OPCode.Call);
-                            AppendAddress(file, a, b, hole);
+
+                            AppendVal(args, 1, (UInt64)OPCode.Call);
+                            if (!AppendAddress(args, a, b, hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}");
+
                             break;
                         case "RET":
                             if (args.args.Length != 0) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: CALL expected 0 args");
-                            Append(file, 1, (UInt64)OPCode.Ret);
+
+                            AppendVal(args, 1, (UInt64)OPCode.Ret);
+
                             break;
 
                         default: return new Tuple<AssembleError, string>(AssembleError.UnknownOp, $"line {args.line}: Unknown operation \"{args.op}\"");
@@ -2713,19 +3190,19 @@ namespace csx64
                 // advance to after the new line
                 pos = end + 1;
             }
-            
+
             return new Tuple<AssembleError, string>(AssembleError.None, string.Empty);
         }
         public static Tuple<LinkError, string> Link(ref byte[] res, params ObjectFile[] objs)
         {
             // get total size of objet files
-            UInt64 size = 0;
-            foreach (ObjectFile obj in objs) size += (UInt64)obj.Data.LongCount();
+            UInt64 filesize = 0;
+            foreach (ObjectFile obj in objs) filesize += (UInt64)obj.Data.LongCount();
             // if zero, there is nothing to link
-            if (size == 0) return new Tuple<LinkError, string>(LinkError.EmptyResult, "Resulting file is empty");
+            if (filesize == 0) return new Tuple<LinkError, string>(LinkError.EmptyResult, "Resulting file is empty");
 
-            res = new byte[size + 10]; // give it enough memory to write the whole file plus a header and a stack
-            size = 10;                 // set size to after header (points to writing position)
+            res = new byte[filesize + 10]; // give it enough memory to write the whole file plus a header
+            filesize = 10;                 // set size to after header (points to writing position)
 
             UInt64[] offsets = new UInt64[objs.Length];     // offsets for where an object file begins in the resulting exe
             // create a combined symbols table with predefined values
@@ -2739,10 +3216,10 @@ namespace csx64
             // merge the files into res
             for (int i = 0; i < objs.Length; ++i)
             {
-                offsets[i] = size; // record its starting offset
+                offsets[i] = filesize; // record its starting offset
 
-                objs[i].Data.CopyTo(res, (int)size); // copy its data (POTENTIAL SIZE LIMITATION)
-                size += (UInt64)objs[i].Data.LongCount(); // advance write cursor
+                objs[i].Data.CopyTo(res, (int)filesize); // copy its data (POTENTIAL SIZE LIMITATION)
+                filesize += (UInt64)objs[i].Data.LongCount(); // advance write cursor
             }
 
             // merge symbols
@@ -2753,18 +3230,18 @@ namespace csx64
                     if (!objs[i].Symbols.TryGetValue(symbol, out Symbol _symbol)) return new Tuple<LinkError, string>(LinkError.MissingSymbol, $"Global symbol \"{symbol}\" undefined");
                     symbols.Add(symbol, new Symbol() { Value = _symbol.IsAddress ? offsets[i] + _symbol.Value : _symbol.Value, IsAddress = _symbol.IsAddress, IsFloating = _symbol.IsFloating });
                 }
-            
+
             // patch holes
             for (int i = 0; i < objs.Length; ++i)
-                foreach (Hole hole in objs[i].Holes)
+                foreach (var hole in objs[i].Holes)
                 {
                     // compute the hole value
-                    UInt64 value = hole.Value;
-                    double fvalue = hole.FValue;
-                    bool floating = hole.Floating;
+                    UInt64 value = hole.Value.Value;
+                    double fvalue = hole.Value.FValue;
+                    bool floating = hole.Value.Floating;
 
                     Symbol symbol;
-                    foreach(Hole.Segment seg in hole.Segments)
+                    foreach (Hole.Segment seg in hole.Value.Segments)
                     {
                         // prefer static definitions
                         if (objs[i].Symbols.TryGetValue(seg.Symbol, out symbol))
@@ -2785,7 +3262,26 @@ namespace csx64
                     }
 
                     // fill it in
-                    Write(res, hole.Address + offsets[i], hole.Size, floating ? AsUInt64(value.MakeSigned() + fvalue) : value);
+                    {
+                        /* !! IF MODIFIED HERE, MUST ALSO BE MODIFIED IN AppendHole() !! */
+
+                        // if it's floating-point
+                        if (floating)
+                        {
+                            // only 64-bit and 32-bit are supported
+                            switch (hole.Key.Size)
+                            {
+                                case 8: Write(res, hole.Key.Address + offsets[i], 8, DoubleAsUInt64(value.MakeSigned() + fvalue)); break;
+                                case 4: Write(res, hole.Key.Address + offsets[i], 4, FloatAsUInt64(value.MakeSigned() + (float)fvalue)); break;
+
+                                default: return new Tuple<LinkError, string>(LinkError.FormatError, $"Attempt to use unsupported floating-point size");
+                            }
+                        }
+                        // otherwise it's integral
+                        else Write(res, hole.Key.Address + offsets[i], hole.Key.Size, value);
+                    }
+                    // fill it in
+                    Write(res, hole.Key.Address + offsets[i], hole.Key.Size, floating ? DoubleAsUInt64(value.MakeSigned() + fvalue) : value);
                 }
 
             // write the header
