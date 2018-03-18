@@ -31,7 +31,7 @@ namespace csx64
         
         public enum ErrorCode
         {
-            None, OutOfBounds, UnhandledSyscall, UndefinedBehavior, ArithmeticError
+            None, OutOfBounds, UnhandledSyscall, UndefinedBehavior, ArithmeticError, Abort
         }
         public enum OPCode
         {
@@ -1430,8 +1430,11 @@ namespace csx64
         /// <param name="code">The error code to emit</param>
         public void Fail(ErrorCode code)
         {
-            Error = code;
-            Running = false;
+            if (Running)
+            {
+                Error = code;
+                Running = false;
+            }
         }
 
         /// <summary>
@@ -1787,7 +1790,7 @@ namespace csx64
         /// <summary>
         /// The maximum value for an emission multiplier
         /// </summary>
-        public const UInt64 EmissionMaxMultiplier = 1024;
+        public const UInt64 EmissionMaxMultiplier = 1000000;
         public const UInt64 Version = 0;
 
         private static bool Write(byte[] arr, UInt64 pos, UInt64 size, UInt64 val)
@@ -2326,13 +2329,18 @@ namespace csx64
                         Append(args.file, Size(args.sizecode), hole);
                 }
                 // if a string
-                if (args.args[i][0] == '"' || args.args[i][0] == '\'')
+                else if (args.args[i][0] == '"' || args.args[i][0] == '\'')
                 {
                     if (args.args[i][0] != args.args[i][args.args[i].Length - 1]) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: String literal must be enclosed in single or double quotes"); return false; }
 
                     // dump the contents into memory
                     for (int j = 1; j < args.args[i].Length - 1; ++j)
+                    {
+                        // make sure there's no string splicing
+                        if (args.args[i][j] == args.args[i][0]) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: String emission prematurely reached a terminating quote"); return false; }
+
                         Append(args.file, Size(args.sizecode), args.args[i][j]);
+                    }
                 }
                 // otherwise is a value
                 else
