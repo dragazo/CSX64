@@ -3200,8 +3200,24 @@ namespace csx64
                 // -- process op -- //
                 if (end < token.Length)
                 {
-                    // wind current up to correct precedence (left-to-right evaluation, so also skip equal precedence)
-                    for (; stack.Peek() != null && Precedence[stack.Peek().OP] <= Precedence[op]; stack.Pop()) ;
+                    // ternary conditional has special rules
+                    if (op == Expr.OPs.Pair)
+                    {
+                        // seek out nearest conditional without a pair
+                        for (; stack.Peek() != null && (stack.Peek().OP != Expr.OPs.Condition || stack.Peek().Right.OP == Expr.OPs.Pair); stack.Pop()) ;
+                    }
+                    // special rules cont.
+                    else if (op == Expr.OPs.Condition)
+                    {
+                        // seek out nearest conditional or pair
+                        for (; stack.Peek() != null && stack.Peek().OP != Expr.OPs.Condition && stack.Peek().OP != Expr.OPs.Pair; stack.Pop()) ;
+                    }
+                    // all others are standard left-to-right
+                    else
+                    {
+                        // wind current up to correct precedence (left-to-right evaluation, so also skip equal precedence)
+                        for (; stack.Peek() != null && Precedence[stack.Peek().OP] <= Precedence[op]; stack.Pop()) ;
+                    }
 
                     // if we have a valid current
                     if (stack.Peek() != null)
@@ -3860,6 +3876,23 @@ namespace csx64
             bool floating;
 
             string err = null; // error location for evaluation
+
+
+
+            /* testing for expressions
+            {
+                string test = "a?b:c?d:e";
+                //string test = "a?b?c:d:e?f:g";
+
+                if (!TryParseImm(args, test, out Expr _test)) MessageBox.Show(args.err.ToString());
+                MessageBox.Show(_test.ToString());
+
+                if (!_test.Evaluate(file.Symbols, out a, out floating, ref err)) MessageBox.Show(err);
+                MessageBox.Show(_test.ToString());
+            }
+            */
+
+
 
             if (code.Length == 0) return new Tuple<AssembleError, string>(AssembleError.EmptyFile, "The file was empty");
 
