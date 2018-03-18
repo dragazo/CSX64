@@ -30,6 +30,19 @@ namespace csx64
             a = b;
             b = temp;
         }
+
+        /// <summary>
+        /// Removes all white space from a string
+        /// </summary>
+        public static string RemoveWhiteSpace(this string str)
+        {
+            StringBuilder res = new StringBuilder();
+
+            for (int i = 0; i < str.Length; ++i)
+                if (!char.IsWhiteSpace(str[i])) res.Append(str[i]);
+
+            return res.ToString();
+        }
     }
 
     /// <summary>
@@ -2819,6 +2832,8 @@ namespace csx64
 
             public string last_static_label;
             public Tuple<AssembleError, string> err;
+
+            public UInt64 time;
         }
 
         /// <summary>
@@ -2915,68 +2930,105 @@ namespace csx64
 
         private static bool SplitLine(AssembleArgs args)
         {
-            // (label: label: ...) op(:size) (arg, arg, ...)
-            int pos, end = 0; // position in line parsing
-            int quote;
-            string token;
+            // (label: label: ...) (op(:size) (arg, arg, ...))
 
-            string[] subs;
+            int pos = 0, end; // position in line parsing
+            int quote;        // index of openning quote in args
+
             List<string> tokens = new List<string>();
             StringBuilder b = new StringBuilder();
 
-            // parse label defs and op
-            while (true)
+            // parse labels
+            for (; pos < args.rawline.Length; pos = end)
             {
                 // skip leading white space
-                for (pos = end; pos < args.rawline.Length && char.IsWhiteSpace(args.rawline[pos]); ++pos) ;
+                for (; pos < args.rawline.Length && char.IsWhiteSpace(args.rawline[pos]); ++pos) ;
                 // get a white space-delimited token
                 for (end = pos; end < args.rawline.Length && !char.IsWhiteSpace(args.rawline[end]); ++end) ;
-                token = args.rawline.Substring(pos, end - pos);
 
-                // if it's a token, add it to the tokens list
-                if (token.Length > 0 && token[token.Length - 1] == ':') tokens.Add(token.Substring(0, token.Length - 1));
-                // otherwise, this is op
-                else
-                {
-                    // split the op:size token
-                    subs = token.Split(':');
-                    args.op = subs[0]; // op is first arg regardless
-
-                    // handle sizecode (2 = explicit size, 1 = default 64 bit, else is format error)
-                    if (subs.Length == 2)
-                    {
-                        if (!TryParseSizecode(args, subs[1], out args.sizecode))
-                        { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to parse register size code \"{subs[1]}\"\n-> {args.err.Item2}"); return false; }
-                    }
-                    else if (subs.Length == 1) args.sizecode = 3; // use default size
-                    else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: {subs.Length}Operation token may have at most one explicit size parameter"); return false; }
-
-                    break;
-                }
+                // if it's a label, add to tokens
+                if (pos != end && args.rawline[end - 1] == ':') tokens.Add(args.rawline.Substring(pos, end - pos - 1));
+                // otherwise we're done with labels
+                else break; // break ensures we also keep pos pointing to start of next section
             }
-
             args.label_defs = tokens.ToArray(); // dump tokens as label defs
             tokens.Clear(); // empty tokens for reuse
 
+            // parse op
+            if (pos < args.rawline.Length)
+            {
+                // get up till size separator or white space
+                for (end = pos; end < args.rawline.Length && args.rawline[end] != ':' && !char.IsWhiteSpace(args.rawline[end]); ++end) ;
+
+                // make sure we got a well-formed op
+                if (pos == end) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Operation size specification encountered without an operation"); return false; }
+                
+                // save this as op
+                args.op = args.rawline.Substring(pos, end - pos);
+
+                // if we got a size specification
+                if (end < args.rawline.Length && args.rawline[end] == ':')
+                {
+                    pos = end + 1; // position to beginning of size specification
+
+                    // if starting parenthetical section
+                    if (pos < args.rawline.Length && args.rawline[pos] == '(')
+                    {
+                        int depth = 1; // parenthetical depth
+
+                        // get till depth of zero
+                        for (end = pos + 1; end < args.rawline.Length && depth > 0; ++end)
+                        {
+                            if (args.rawline[end] == '(') ++depth;
+                            else if (args.rawline[end] == ')') --depth;
+                        }
+
+                        if (depth != 0) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Mismatched parenthesis encountered in operation size specification"); return false; }
+                    }
+                    // ohterwise standard imm
+                    else
+                    {
+                        // take all legal chars
+                        for (end = pos; end < args.rawline.Length && (args.rawline[end] == '_' || char.IsLetterOrDigit(args.rawline[end])); ++end) ;
+                    }
+
+                    // parse the read size code
+                    if (!TryParseSizecode(args, args.rawline.Substring(pos, end - pos).RemoveWhiteSpace(), out args.sizecode))
+                    { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse operation size specification\n-> {args.err.Item2}"); return false; }
+                }
+                // otherwise use default size (64-bit)
+                else args.sizecode = 3;
+
+                pos = end; // pass parsed section before next section
+            }
+            // otherwise there is no op
+            else args.op = string.Empty;
+
             // parse the rest of the line as comma-separated tokens
-            while (true)
+            for (; pos < args.rawline.Length; ++pos)
             {
                 // skip leading white space
-                for (pos = end + 1; pos < args.rawline.Length && char.IsWhiteSpace(args.rawline[pos]); ++pos) ;
+                for (; pos < args.rawline.Length && char.IsWhiteSpace(args.rawline[pos]); ++pos) ;
                 // when pos reaches end of token, we're done parsing
                 if (pos >= args.rawline.Length) break;
 
                 b.Clear(); // clear the string builder
 
                 // find the next terminator (comma-separated)
-                for (quote = -1, end = pos; end < args.rawline.Length && (args.rawline[end] != ',' || quote >= 0); ++end)
+                for (quote = -1; pos < args.rawline.Length && (args.rawline[pos] != ',' || quote >= 0); ++pos)
                 {
-                    if (args.rawline[end] == '"' || args.rawline[end] == '\'')
-                        quote = quote < 0 ? end : (args.rawline[end] == args.rawline[quote] ? -1 : quote);
+                    if (args.rawline[pos] == '"' || args.rawline[pos] == '\'')
+                        quote = quote < 0 ? pos : (args.rawline[pos] == args.rawline[quote] ? -1 : quote);
 
                     // omit white space unless in a quote
-                    if (quote >= 0 || !char.IsWhiteSpace(args.rawline[end])) b.Append(args.rawline[end]);
+                    if (quote >= 0 || !char.IsWhiteSpace(args.rawline[pos])) b.Append(args.rawline[pos]);
                 }
+
+                // make sure we closed any quotations
+                if (quote >= 0) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Unmatched quotation encountered in argument list"); return false; }
+
+                // make sure arg isn't empty
+                if (b.Length == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Empty operation argument encountered"); return false; }
 
                 // add this token
                 tokens.Add(b.ToString());
@@ -3517,12 +3569,12 @@ namespace csx64
             UInt64 r1 = 0, m1 = 0, r2 = 0, m2 = 0; // final register info
             bool n1 = false, n2 = false;
 
-            string preface = $"__{Time():x16}"; // preface used for registers
+            string preface = $"__reg_{args.time:x16}"; // preface used for registers
             string err = string.Empty; // evaluation error
 
             List<UInt64> regs = new List<UInt64>(); // the registers found in the expression
 
-            // until register parsing reaches the end of the token
+            // replace registers with temporary names
             while (true)
             {
                 // find the next register marker
@@ -3622,12 +3674,15 @@ namespace csx64
         private static bool MutateLabel(AssembleArgs args, ref string label)
         {
             // if defining a local label
-            if (label.Length >= 2 && label[0] == '.')
+            if (label[0] == '.')
             {
+                // local name can't be empty
+                if (label.Length == 1) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Local label name cannot be empty"); return false; }
+                // can't make a local label before any non-local ones exist
                 if (args.last_static_label == null) { args.err = new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Cannot define a local label before the first static label"); return false; }
 
                 // mutate the label
-                label = $"{args.last_static_label}_{label.Substring(1)}";
+                label = $"__local_{args.time:x16}_{args.last_static_label}_{label.Substring(1)}";
             }
 
             return true;
@@ -3850,7 +3905,9 @@ namespace csx64
                 line = 0,
 
                 last_static_label = null,
-                err = null
+                err = null,
+
+                time = Time()
             };
 
             // predefined symbols
@@ -3934,16 +3991,23 @@ namespace csx64
                     switch (args.op.ToUpper())
                     {
                         case "GLOBAL":
-                            if (args.args.Length != 1) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: GLOBAL expected 1 arg");
+                            if (args.args.Length == 0) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: GLOBAL expected at least one symbol to export");
 
-                            // test name for legality
-                            if (!IsValidLabel(args.args[0])) return new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Invalid label name \"{args.args[0]}\"");
+                            foreach (string symbol in args.args)
+                            {
+                                // special error message for using global on local labels
+                                if (symbol[0] == '.') return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Cannot export local symbols");
 
-                            // don't add to global table twice
-                            if (file.GlobalSymbols.Contains(args.args[0])) return new Tuple<AssembleError, string>(AssembleError.SymbolRedefinition, $"line {args.line}: Attempt to export symbol \"{args.args[0]}\" multiple times");
+                                // test name for legality
+                                if (!IsValidLabel(symbol)) return new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Invalid symbol name \"{symbol}\"");
 
-                            // add it to the globals list
-                            file.GlobalSymbols.Add(args.args[0]);
+                                // don't add to global table twice
+                                if (file.GlobalSymbols.Contains(symbol)) return new Tuple<AssembleError, string>(AssembleError.SymbolRedefinition, $"line {args.line}: Attempt to export symbol \"{symbol}\" multiple times");
+
+                                // add it to the globals list
+                                file.GlobalSymbols.Add(symbol);
+                            }
+
                             break;
                         case "DEF":
                             if (args.args.Length != 2) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: DEF expected 2 args");
@@ -4307,10 +4371,8 @@ namespace csx64
                     case PatchError.Unevaluated: break;
                     case PatchError.Error: return new Tuple<AssembleError, string>(AssembleError.ArgError, err);
 
-                    default: throw new ArgumentException("Unknown patch error");
+                    default: throw new ArgumentException("Unknown patch error encountered");
                 }
-
-                file.Holes[i].Expr.Evaluate(file.Symbols, out a, out floating, ref err);
             }
 
             // return no error
