@@ -38,6 +38,8 @@
             this.PauseButton = new System.Windows.Forms.Button();
             this.GraphicalButton = new System.Windows.Forms.Button();
             this.EditButton = new System.Windows.Forms.Button();
+            this.SlowMemCheck = new System.Windows.Forms.CheckBox();
+            this.SettingsButton = new System.Windows.Forms.Button();
             this.SuspendLayout();
             // 
             // TickButton
@@ -150,12 +152,36 @@
             this.EditButton.UseVisualStyleBackColor = true;
             this.EditButton.Click += new System.EventHandler(this.EditButton_Click);
             // 
+            // SlowMemCheck
+            // 
+            this.SlowMemCheck.AutoSize = true;
+            this.SlowMemCheck.ForeColor = System.Drawing.Color.White;
+            this.SlowMemCheck.Location = new System.Drawing.Point(550, 273);
+            this.SlowMemCheck.Name = "SlowMemCheck";
+            this.SlowMemCheck.Size = new System.Drawing.Size(89, 17);
+            this.SlowMemCheck.TabIndex = 13;
+            this.SlowMemCheck.Text = "Slow Memory";
+            this.SlowMemCheck.UseVisualStyleBackColor = false;
+            // 
+            // SettingsButton
+            // 
+            this.SettingsButton.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
+            this.SettingsButton.Location = new System.Drawing.Point(823, 273);
+            this.SettingsButton.Name = "SettingsButton";
+            this.SettingsButton.Size = new System.Drawing.Size(85, 25);
+            this.SettingsButton.TabIndex = 14;
+            this.SettingsButton.Text = "Settings";
+            this.SettingsButton.UseVisualStyleBackColor = true;
+            this.SettingsButton.Click += new System.EventHandler(this.SettingsButton_Click);
+            // 
             // ProcessorView
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.Color.Black;
             this.ClientSize = new System.Drawing.Size(920, 372);
+            this.Controls.Add(this.SettingsButton);
+            this.Controls.Add(this.SlowMemCheck);
             this.Controls.Add(this.EditButton);
             this.Controls.Add(this.GraphicalButton);
             this.Controls.Add(this.PauseButton);
@@ -170,6 +196,7 @@
             this.Name = "ProcessorView";
             this.Text = "Processor View";
             this.ResumeLayout(false);
+            this.PerformLayout();
 
         }
 
@@ -185,6 +212,8 @@
         private System.Windows.Forms.Button PauseButton;
         private System.Windows.Forms.Button GraphicalButton;
         private System.Windows.Forms.Button EditButton;
+        private System.Windows.Forms.CheckBox SlowMemCheck;
+        private System.Windows.Forms.Button SettingsButton;
     }
 }
 

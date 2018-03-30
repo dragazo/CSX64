@@ -31,7 +31,7 @@
             this.ResultBox = new System.Windows.Forms.TextBox();
             this.label1 = new System.Windows.Forms.Label();
             this._CancelButton = new System.Windows.Forms.Button();
-            this.OKButton = new System.Windows.Forms.Button();
+            this._OKButton = new System.Windows.Forms.Button();
             this.SuspendLayout();
             // 
             // ResultBox
@@ -63,25 +63,25 @@
             this._CancelButton.Text = "Cancel";
             this._CancelButton.UseVisualStyleBackColor = true;
             // 
-            // OKButton
+            // _OKButton
             // 
-            this.OKButton.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
-            this.OKButton.DialogResult = System.Windows.Forms.DialogResult.OK;
-            this.OKButton.Location = new System.Drawing.Point(118, 51);
-            this.OKButton.Name = "OKButton";
-            this.OKButton.Size = new System.Drawing.Size(75, 23);
-            this.OKButton.TabIndex = 3;
-            this.OKButton.Text = "Rename";
-            this.OKButton.UseVisualStyleBackColor = true;
+            this._OKButton.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
+            this._OKButton.DialogResult = System.Windows.Forms.DialogResult.OK;
+            this._OKButton.Location = new System.Drawing.Point(118, 51);
+            this._OKButton.Name = "_OKButton";
+            this._OKButton.Size = new System.Drawing.Size(75, 23);
+            this._OKButton.TabIndex = 3;
+            this._OKButton.Text = "Rename";
+            this._OKButton.UseVisualStyleBackColor = true;
             // 
             // RenameDialog
             // 
-            this.AcceptButton = this.OKButton;
+            this.AcceptButton = this._OKButton;
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.CancelButton = this._CancelButton;
             this.ClientSize = new System.Drawing.Size(286, 84);
-            this.Controls.Add(this.OKButton);
+            this.Controls.Add(this._OKButton);
             this.Controls.Add(this._CancelButton);
             this.Controls.Add(this.label1);
             this.Controls.Add(this.ResultBox);
@@ -98,6 +98,6 @@
         private System.Windows.Forms.TextBox ResultBox;
         private System.Windows.Forms.Label label1;
         private System.Windows.Forms.Button _CancelButton;
-        private System.Windows.Forms.Button OKButton;
+        private System.Windows.Forms.Button _OKButton;
     }
 }

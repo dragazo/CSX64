@@ -12,10 +12,13 @@ namespace csx64
 {
     public partial class ProcessorView : Form
     {
-        private CSX64 C = new CSX64();
+        private CSX64 C = new GraphicalComputer(); // initialized with graphical computer to ensure its static ctor executes
         private ulong Ticks = 0;
         private bool Sim = false;
 
+        /// <summary>
+        /// The code editor used by this processor (contains all the assembly files)
+        /// </summary>
         private CodeEditor Editor;
 
         private bool CInitialized
@@ -24,6 +27,8 @@ namespace csx64
             set
             {
                 CompileButton.Enabled = GraphicalButton.Enabled = !value;
+                //SlowMemCheck.Enabled = !value; render bug causes text to be black, which in this case makes it unreadable
+
                 StopButton.Enabled = value;
 
                 RunButton.Enabled = value;
@@ -42,12 +47,29 @@ namespace csx64
 
             // create the code editor
             Editor = new CodeEditor();
-
             // rebind form close to instead just hide
             Editor.FormClosing += (o, e) => { e.Cancel = true; Editor.Hide(); };
-
-            // set forn
+            // set fort
             Editor.Font = new Font(FontFamily.GenericMonospace, 12);
+
+            // load the settings file
+            LoadSettings();
+        }
+        ~ProcessorView()
+        {
+            Editor.Dispose();
+        }
+
+        /// <summary>
+        /// Loads data from the settings file
+        /// </summary>
+        private void LoadSettings()
+        {
+            BackColor = Properties.Settings.Default.ProcessorBackColor;
+            DebuggingBrush.Color = Properties.Settings.Default.ProcessorForeColor;
+
+            // make sure to redraw form after loading settings
+            Invalidate();
         }
 
         private static SolidBrush DebuggingBrush = new SolidBrush(Color.LimeGreen);
@@ -65,7 +87,7 @@ namespace csx64
             // registers
             x = 0; y = 0;
             g.DrawString("Registers", DebuggingFont, DebuggingBrush, x, y); y += h;
-            for (ulong i = 0; i < 16; ++i)
+            for (int i = 0; i < 16; ++i)
                 g.DrawString($"R{i:x}: {C.GetRegister(i).x64:x16}", DebuggingFont, DebuggingBrush, x, y += h);
 
             // flags
@@ -94,6 +116,7 @@ namespace csx64
             g.DrawString("State", DebuggingFont, DebuggingBrush, x, y); y += h;
             g.DrawString($"Pos: {C.Pos:x16}", DebuggingFont, DebuggingBrush, x, y += h);
             g.DrawString($"Exe: {(C.Running ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"Slp: {C.Sleep:x16}", DebuggingFont, DebuggingBrush, x, y += h);
             g.DrawString($"Err: {C.Error}", DebuggingFont, DebuggingBrush, x, y += h);
             g.DrawString($"T  : {Ticks:x16}", DebuggingFont, DebuggingBrush, x, y += h);
         }
@@ -121,17 +144,20 @@ namespace csx64
             CSX64.ObjectFile[] objs = new CSX64.ObjectFile[source.Length];
             for (int i = 0; i < source.Length; ++i)
             {
-                var res = CSX64.Assemble(source[i].Item2, out objs[i]);
-                if (res.Item1 != CSX64.AssembleError.None) { MessageBox.Show(res.Item2, $"Assemble Error in \"{source[i].Item1}\""); return; }
+                CSX64.AssembleResult res = CSX64.Assemble(source[i].Item2, out objs[i]);
+                if (res.Error != CSX64.AssembleError.None) { MessageBox.Show(res.ErrorMsg, $"Assemble Error in \"{source[i].Item1}\""); return; }
             }
 
             // link them
-            byte[] exe = null;
-            var link_res = CSX64.Link(ref exe, objs);
-            if (link_res.Item1 != CSX64.LinkError.None) { MessageBox.Show(link_res.Item2, "Link Error"); return; }
-            
+            CSX64.LinkResult link_res = CSX64.Link(out byte[] exe, objs);
+            if (link_res.Error != CSX64.LinkError.None) { MessageBox.Show(link_res.ErrorMsg, "Link Error"); return; }
+
+            C.Dispose();
             C = new CSX64();
             if (!C.Initialize(exe)) { MessageBox.Show("Something went wrong initializing the program", "Initialization Error"); return; }
+
+            // set private flags
+            C.GetFlags().SlowMem = SlowMemCheck.Checked;
 
             CInitialized = true;
             Ticks = 0;
@@ -185,24 +211,27 @@ namespace csx64
             CSX64.ObjectFile[] objs = new CSX64.ObjectFile[source.Length];
             for (int i = 0; i < source.Length; ++i)
             {
-                var res = CSX64.Assemble(source[i].Item2, out objs[i]);
-                if (res.Item1 != CSX64.AssembleError.None) { MessageBox.Show(res.Item2, $"Assemble Error in \"{source[i].Item1}\""); return; }
+                CSX64.AssembleResult res = CSX64.Assemble(source[i].Item2, out objs[i]);
+                if (res.Error != CSX64.AssembleError.None) { MessageBox.Show(res.ErrorMsg, $"Assemble Error in \"{source[i].Item1}\""); return; }
             }
 
             // link them
-            byte[] exe = null;
-            var link_res = CSX64.Link(ref exe, objs);
-            if (link_res.Item1 != CSX64.LinkError.None) { MessageBox.Show(link_res.Item2, "Link Error"); return; }
+            CSX64.LinkResult link_res = CSX64.Link(out byte[] exe, objs);
+            if (link_res.Error != CSX64.LinkError.None) { MessageBox.Show(link_res.ErrorMsg, "Link Error"); return; }
 
             using (GraphicalDisplay g = new GraphicalDisplay())
             {
                 if (!g.C.Initialize(exe)) { MessageBox.Show("Something went wrong initializing the program", "Initialization Error"); return; }
+                C.Dispose();
                 C = g.C; // link computers for local logging
+
+                // set private flags
+                C.GetFlags().SlowMem = SlowMemCheck.Checked;
 
                 g.OnTickCycle += ExternRenderCycle; // sync tick cycles
                 g.Run();                            // begin execution
                 g.ShowDialog();                     // display graphical client
-
+                
                 C.Fail(CSX64.ErrorCode.Abort); // cancellation results in an abort error
             }
         }
@@ -211,6 +240,30 @@ namespace csx64
         {
             Editor.Show();
             Editor.Focus();
+        }
+
+        private void SettingsButton_Click(object sender, EventArgs e)
+        {
+            using (ProcessorViewSettingsDialog d = new ProcessorViewSettingsDialog())
+            {
+                // load settings
+                d.BackgroundColor = BackColor;
+                d.ForegroundColor = DebuggingBrush.Color;
+
+                // if user says ok
+                if (d.ShowDialog() == DialogResult.OK)
+                {
+                    // updates settings
+                    Properties.Settings.Default.ProcessorBackColor = d.BackgroundColor;
+                    Properties.Settings.Default.ProcessorForeColor = d.ForegroundColor;
+                    
+                    // save
+                    Properties.Settings.Default.Save();
+
+                    // reload settings
+                    LoadSettings();
+                }
+            }
         }
     }
 }

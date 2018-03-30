@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Numerics;
+using System.IO;
 
 namespace csx64
 {
@@ -21,6 +22,40 @@ namespace csx64
     }
     internal static class Utility
     {
+        /// <summary>
+        /// Gets the register partition with the specified size code
+        /// </summary>
+        /// <param name="code">The size code</param>
+        public static UInt64 Get(this CSX64.Register reg, UInt64 code)
+        {
+            switch (code)
+            {
+                case 0: return reg.x8;
+                case 1: return reg.x16;
+                case 2: return reg.x32;
+                case 3: return reg.x64;
+
+                default: throw new ArgumentOutOfRangeException("Register code out of range");
+            }
+        }
+        /// <summary>
+        /// Sets the register partition with the specified size code
+        /// </summary>
+        /// <param name="code">The size code</param>
+        /// <param name="value">The value to set</param>
+        public static void Set(this CSX64.Register reg, UInt64 code, UInt64 value)
+        {
+            switch (code)
+            {
+                case 0: reg.x8 = value; return;
+                case 1: reg.x16 = value; return;
+                case 2: reg.x32 = value; return;
+                case 3: reg.x64 = value; return;
+
+                default: throw new ArgumentOutOfRangeException("Register code out of range");
+            }
+        }
+
         /// <summary>
         /// Swaps the contents of the specified l-values
         /// </summary>
@@ -43,17 +78,65 @@ namespace csx64
 
             return res.ToString();
         }
+
+        /// <summary>
+        /// Writes a little-endian value
+        /// </summary>
+        /// <param name="arr">the data to write to</param>
+        /// <param name="pos">the index to begin at</param>
+        /// <param name="size">the size of the value in bytes</param>
+        /// <param name="val">the value to write</param>
+        public static bool Write<T>(this T arr, UInt64 pos, UInt64 size, UInt64 val) where T : IList<byte>
+        {
+            // make sure we're not exceeding memory bounds
+            if (pos < 0 || pos + size > (UInt64)arr.Count) return false;
+
+            // write the value (little-endian)
+            for (ushort i = 0; i < size; ++i)
+                arr[(int)pos + i] = (byte)(val >> (8 * i));
+
+            return true;
+        }
+        /// <summary>
+        /// Reads a little-endian value
+        /// </summary>
+        /// <param name="arr">the data to write to</param>
+        /// <param name="pos">the index to begin at</param>
+        /// <param name="size">the size of the value in bytes</param>
+        /// <param name="res">the read value</param>
+        public static bool Read<T>(this T arr, UInt64 pos, UInt64 size, out UInt64 res) where T : IList<byte>
+        {
+            res = 0; // initialize out param
+
+            // make sure we're not exceeding memory bounds
+            if (pos < 0 || pos + size > (UInt64)arr.Count) return false;
+
+            // read the value (little-endian)
+            for (ushort i = 0; i < size; ++i)
+                res |= (UInt64)arr[(int)pos + i] << (8 * i);
+
+            return true;
+        }
     }
 
     /// <summary>
     /// Represents a computer executing a binary program (little-endian)
     /// </summary>
-    public class CSX64
+    public class CSX64 : IDisposable
     {
+        // ---------------
+        // -- Constants --
+        // ---------------
+
         /// <summary>
         /// Version number
         /// </summary>
-        public const UInt64 Version = 0x0314;
+        public const UInt64 Version = 0x0413;
+
+        /// <summary>
+        /// The flags that can be modified by executing code
+        /// </summary>
+        private const UInt64 PublicFlags = 0x1f;
 
         // -----------
         // -- Types --
@@ -61,7 +144,8 @@ namespace csx64
 
         public enum ErrorCode
         {
-            None, OutOfBounds, UnhandledSyscall, UndefinedBehavior, ArithmeticError, Abort
+            None, OutOfBounds, UnhandledSyscall, UndefinedBehavior, ArithmeticError, Abort,
+            IOFailure
         }
         public enum OPCode
         {
@@ -112,13 +196,22 @@ namespace csx64
 
             LOOP,
 
-            FX
+            FX,
+
+            SLP
+        }
+
+        public enum SyscallCodes
+        {
+            Read, Write,
+            Open, Close,
+            Move
         }
 
         /// <summary>
         /// Represents a 64 bit register
         /// </summary>
-        public class Register
+        public sealed class Register
         {
             /// <summary>
             /// gets/sets the full 64 bits of the register
@@ -151,46 +244,12 @@ namespace csx64
                 get { return x64 & 0x00000000000000ff; }
                 set { x64 = x64 & 0xffffffffffffff00 | value & 0x00000000000000ff; }
             }
-
-            /// <summary>
-            /// Gets the register partition with the specified size code
-            /// </summary>
-            /// <param name="code">The size code</param>
-            public UInt64 Get(UInt64 code)
-            {
-                switch (code)
-                {
-                    case 0: return x8;
-                    case 1: return x16;
-                    case 2: return x32;
-                    case 3: return x64;
-
-                    default: throw new ArgumentOutOfRangeException("Register code out of range");
-                }
-            }
-            /// <summary>
-            /// Sets the register partition with the specified size code
-            /// </summary>
-            /// <param name="code">The size code</param>
-            /// <param name="value">The value to set</param>
-            public void Set(UInt64 code, UInt64 value)
-            {
-                switch (code)
-                {
-                    case 0: x8 = value; return;
-                    case 1: x16 = value; return;
-                    case 2: x32 = value; return;
-                    case 3: x64 = value; return;
-
-                    default: throw new ArgumentOutOfRangeException("Register code out of range");
-                }
-            }
         }
 
         /// <summary>
         /// Represents a collection of 1-bit flags used by the processor
         /// </summary>
-        public class FlagsRegister
+        public sealed class FlagsRegister
         {
             /// <summary>
             /// Contains the actual flag data
@@ -202,40 +261,40 @@ namespace csx64
             /// </summary>
             public bool Z
             {
-                get { return (Flags & 0x01) != 0; }
-                set { Flags = (Flags & 0xfe) | (value ? 0x01 : 0ul); }
+                get => (Flags & 0x01ul) != 0;
+                set => Flags = (Flags & ~0x01ul) | (value ? 0x01ul : 0);
             }
             /// <summary>
             /// The Parity flag
             /// </summary>
             public bool P
             {
-                get { return (Flags & 0x02) != 0; }
-                set { Flags = (Flags & 0xfd) | (value ? 0x02 : 0ul); }
+                get => (Flags & 0x02ul) != 0;
+                set => Flags = (Flags & ~0x02ul) | (value ? 0x02ul : 0);
             }
             /// <summary>
             /// The Overflow flag
             /// </summary>
             public bool O
             {
-                get { return (Flags & 0x04) != 0; }
-                set { Flags = (Flags & 0xfb) | (value ? 0x04 : 0ul); }
+                get => (Flags & 0x04ul) != 0;
+                set => Flags = (Flags & ~0x04ul) | (value ? 0x04ul : 0);
             }
             /// <summary>
             /// The Carry flag
             /// </summary>
             public bool C
             {
-                get { return (Flags & 0x08) != 0; }
-                set { Flags = (Flags & 0xf7) | (value ? 0x08 : 0ul); }
+                get => (Flags & 0x08ul) != 0;
+                set => Flags = (Flags & ~0x08ul) | (value ? 0x08ul : 0);
             }
             /// <summary>
             /// The Sign flag
             /// </summary>
             public bool S
             {
-                get { return (Flags & 0x10) != 0; }
-                set { Flags = (Flags & 0xef) | (value ? 0x10 : 0ul); }
+                get => (Flags & 0x10ul) != 0;
+                set => Flags = (Flags & ~0x10ul) | (value ? 0x10ul : 0);
             }
 
             public bool a { get => !C && !Z; }
@@ -247,6 +306,16 @@ namespace csx64
             public bool ge { get => S == O; }
             public bool l { get => S != O; }
             public bool le { get => Z || S != O; }
+
+            /// <summary>
+            /// The flag that indicates that memory access should be artificially slowed
+            /// </summary>
+            public bool SlowMem
+            {
+                get => (Flags & 0x20ul) != 0;
+                set => Flags = (Flags & ~0x20ul) | (value ? 0x20ul : 0);
+
+            }
         }
 
         // --------------------
@@ -258,26 +327,52 @@ namespace csx64
 
         private byte[] Memory = null;
 
-        /// <summary>
-        /// Gets the total amount of memory the processor currently has access to
-        /// </summary>
-        public UInt64 MemorySize { get => (UInt64)Memory.LongLength; }
+        private FileStream[] FileDescriptors = new FileStream[4];
 
         /// <summary>
         /// The current execution positon (executed on next tick)
         /// </summary>
-        public UInt64 Pos { get; private set; }
+        public UInt64 Pos { get; protected set; }
         /// <summary>
         /// Flag marking if the program is still executing
         /// </summary>
-        public bool Running { get; private set; }
+        public bool Running { get; protected set; }
+
+        /// <summary>
+        /// The number of ticks the processor is currently sleeping for
+        /// </summary>
+        public UInt64 Sleep { get; protected set; }
 
         /// <summary>
         /// Gets the current error code
         /// </summary>
-        public ErrorCode Error { get; private set; }
+        public ErrorCode Error { get; protected set; }
 
-        private static Random Rand = new Random();
+        /// <summary>
+        /// Random object used for randomizing values after initialization
+        /// </summary>
+        protected readonly Random Rand = new Random();
+
+        // -- accessors -- //
+
+        /// <summary>
+        /// Gets the total amount of memory the processor currently has access to
+        /// </summary>
+        public UInt64 MemorySize => (UInt64)Memory.Length;
+
+        /// <summary>
+        /// Gets the current time as used by the assembler
+        /// </summary>
+        public static UInt64 Time => DateTime.UtcNow.Ticks.MakeUnsigned();
+
+        // -- static initialization -- //
+
+        static CSX64()
+        {
+            // create definitions for all the syscall codes
+            foreach (SyscallCodes item in Enum.GetValues(typeof(SyscallCodes)))
+                DefineSymbol($"sys_{item.ToString().ToLower()}", (UInt64)item);
+        }
 
         // -----------------------
         // -- Utility Functions --
@@ -359,26 +454,26 @@ namespace csx64
         /// <summary>
         /// Gets the multiplier from a 3-bit mult code. 0:0  1:1  2:2  3:4  4:8  5:16  6:32  7:64
         /// </summary>
-        /// <param name="code">the code to parse</param>
-        protected static UInt64 MultCode(UInt64 code)
+        /// <param name="multcode">the code to parse</param>
+        protected static UInt64 Mult(UInt64 multcode)
         {
-            return code == 0 ? 0ul : 1ul << (ushort)(code - 1);
+            return multcode == 0 ? 0ul : 1ul << (ushort)(multcode - 1);
         }
         /// <summary>
         /// As MultCode but returns negative value if neg is nonzero
         /// </summary>
-        /// <param name="code">the code to parse</param>
+        /// <param name="multcode">the code to parse</param>
         /// <param name="neg">the negative boolean</param>
-        protected static UInt64 MultCode(UInt64 code, UInt64 neg)
+        protected static UInt64 Mult(UInt64 multcode, UInt64 neg)
         {
-            return neg == 0 ? MultCode(code) : ~MultCode(code) + 1;
+            return neg == 0 ? Mult(multcode) : ~Mult(multcode) + 1;
         }
 
         /// <summary>
         /// Interprets a double as its raw bits
         /// </summary>
         /// <param name="val">value to interpret</param>
-        public static unsafe UInt64 DoubleAsUInt64(double val)
+        protected static unsafe UInt64 DoubleAsUInt64(double val)
         {
             return *(UInt64*)&val;
         }
@@ -386,7 +481,7 @@ namespace csx64
         /// Interprets raw bits as a double
         /// </summary>
         /// <param name="val">value to interpret</param>
-        public static unsafe double AsDouble(UInt64 val)
+        protected static unsafe double AsDouble(UInt64 val)
         {
             return *(double*)&val;
         }
@@ -395,7 +490,7 @@ namespace csx64
         /// Interprets a float as its raw bits (placed in low 32 bits)
         /// </summary>
         /// <param name="val">the float to interpret</param>
-        public static unsafe UInt64 FloatAsUInt64(float val)
+        protected static unsafe UInt64 FloatAsUInt64(float val)
         {
             return *(UInt32*)&val;
         }
@@ -403,7 +498,7 @@ namespace csx64
         /// Interprets raw bits as a float (low 32 bits)
         /// </summary>
         /// <param name="val">the bits to interpret</param>
-        public static unsafe float AsFloat(UInt64 val)
+        protected static unsafe float AsFloat(UInt64 val)
         {
             UInt32 bits = (UInt32)val; // getting the low bits allows this code to work even on big-endian platforms
             return *(float*)&bits;
@@ -434,7 +529,7 @@ namespace csx64
         private bool FetchBinaryOpFormat(ref UInt64 s, ref UInt64 m, ref UInt64 a, ref UInt64 b, int _b_sizecode = -1)
         {
             // read settings
-            if (!GetMemAdv(1, ref s)) return false;
+            if (!GetMemAdv(1, out s)) return false;
 
             UInt64 a_sizecode = (s >> 2) & 3;
             UInt64 b_sizecode = _b_sizecode == -1 ? (s >> 2) & 3 : (UInt64)_b_sizecode;
@@ -444,14 +539,14 @@ namespace csx64
             {
                 case 0:
                     a = Registers[s >> 4].Get(a_sizecode);
-                    if (!GetMemAdv(Size(b_sizecode), ref b)) return false;
+                    if (!GetMemAdv(Size(b_sizecode), out b)) return false;
                     break;
                 case 1:
                     a = Registers[s >> 4].Get(a_sizecode);
-                    if (!GetAddressAdv(ref b) || !GetMem(b, Size(b_sizecode), ref b)) return false;
+                    if (!GetAddressAdv(out b) || !GetMem(b, Size(b_sizecode), out b)) return false;
                     break;
                 case 2:
-                    if (!GetMemAdv(1, ref b)) return false;
+                    if (!GetMemAdv(1, out b)) return false;
                     switch ((b >> 4) & 1)
                     {
                         case 0:
@@ -459,15 +554,15 @@ namespace csx64
                             b = Registers[b & 15].Get(b_sizecode);
                             break;
                         case 1:
-                            if (!GetAddressAdv(ref m) || !GetMem(m, Size(a_sizecode), ref a)) return false;
+                            if (!GetAddressAdv(out m) || !GetMem(m, Size(a_sizecode), out a)) return false;
                             b = Registers[b & 15].Get(b_sizecode);
                             s |= 256; // mark as memory path of mode 2
                             break;
                     }
                     break;
                 case 3:
-                    if (!GetMemAdv(Size(b_sizecode), ref b)) return false;
-                    if (!GetAddressAdv(ref m) || !GetMem(m, Size(a_sizecode), ref a)) return false;
+                    if (!GetMemAdv(Size(b_sizecode), out b)) return false;
+                    if (!GetAddressAdv(out m) || !GetMem(m, Size(a_sizecode), out a)) return false;
                     break;
             }
 
@@ -506,7 +601,7 @@ namespace csx64
         private bool FetchUnaryOpFormat(ref UInt64 s, ref UInt64 m, ref UInt64 a)
         {
             // read settings
-            if (!GetMemAdv(1, ref s)) return false;
+            if (!GetMemAdv(1, out s)) return false;
 
             UInt64 a_sizecode = (s >> 2) & 3;
 
@@ -517,7 +612,7 @@ namespace csx64
                     a = Registers[s >> 4].Get(a_sizecode);
                     break;
                 case 1:
-                    if (!GetAddressAdv(ref m) || !GetMem(m, Size(a_sizecode), ref a)) return false;
+                    if (!GetAddressAdv(out m) || !GetMem(m, Size(a_sizecode), out a)) return false;
                     break;
             }
 
@@ -541,7 +636,31 @@ namespace csx64
             return true;
         }
 
-        // updates the ZSP flags for integral ops (identical for most integral ops)
+        /*
+        [8: imm r m]   [4: reg][2: size][2: mode]
+            mode = 0: [size: imm]
+            mode = 1: use reg
+            mode = 2: [address]
+        */
+        private bool FetchIMMRMFormat(out UInt64 s, out UInt64 a, int _a_sizecode = -1)
+        {
+            if (!GetMemAdv(1, out s)) { a = 0; return false; }
+
+            UInt64 a_sizecode = _a_sizecode == -1 ? (s >> 2) & 3 : (UInt64)_a_sizecode;
+
+            // get the value into b
+            switch (s & 3)
+            {
+                case 0: if (!GetMemAdv(Size((s >> 2) & 3), out a)) return false; break;
+                case 1: a = Registers[s >> 4].Get((s >> 2) & 3); break;
+                case 2: if (!GetAddressAdv(out a) || !GetMem(a, Size((s >> 2) & 3), out a)) return false; break;
+                default: Fail(ErrorCode.UndefinedBehavior); { a = 0; return false; }
+            }
+
+            return true;
+        }
+
+        // updates the flags for integral ops (identical for most integral ops)
         private void UpdateFlagsInt(UInt64 value, UInt64 sizecode)
         {
             Flags.Z = value == 0;
@@ -1622,36 +1741,27 @@ namespace csx64
 
         private bool ProcessUMUL()
         {
-            UInt64 a = 0, b = 0;
+            UInt64 s, a;
 
-            if (!GetMemAdv(1, ref a)) return false;
-
-            // get the value into b
-            switch (a & 3)
-            {
-                case 0: if (!GetMemAdv(Size((a >> 2) & 3), ref b)) return false; break;
-                case 1: b = Registers[a >> 4].Get((a >> 2) & 3); break;
-                case 2: if (!GetAddressAdv(ref b) || !GetMem(b, Size((a >> 2) & 3), ref b)) return false; break;
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
-            }
+            if (!FetchIMMRMFormat(out s, out a)) return false;
 
             // switch through register sizes
-            switch ((a >> 2) & 3)
+            switch ((s >> 2) & 3)
             {
                 case 0:
-                    Registers[0].x16 = Registers[0].x8 * b;
+                    Registers[0].x16 = Registers[0].x8 * a;
                     Flags.C = Flags.O = (Registers[0].x16 >> 8) != 0;
                     break;
                 case 1:
-                    Registers[0].x32 = Registers[0].x16 * b;
+                    Registers[0].x32 = Registers[0].x16 * a;
                     Flags.C = Flags.O = (Registers[0].x32 >> 16) != 0;
                     break;
                 case 2:
-                    Registers[0].x64 = Registers[0].x32 * b;
+                    Registers[0].x64 = Registers[0].x32 * a;
                     Flags.C = Flags.O = (Registers[0].x64 >> 32) != 0;
                     break;
                 case 3: // 64 bits requires extra logic
-                    BigInteger full = new BigInteger(Registers[0].x64) * new BigInteger(b);
+                    BigInteger full = new BigInteger(Registers[0].x64) * new BigInteger(a);
                     Registers[0].x64 = (UInt64)(full & 0xffffffffffffffff);
                     Registers[1].x64 = (UInt64)(full >> 64);
                     Flags.C = Flags.O = Registers[1].x64 != 0;
@@ -1662,34 +1772,25 @@ namespace csx64
         }
         private bool ProcessSMUL()
         {
-            UInt64 a = 0, b = 0;
+            UInt64 s, a;
 
-            if (!GetMemAdv(1, ref a)) return false;
-
-            // get the value into b
-            switch (a & 3)
-            {
-                case 0: if (!GetMemAdv(Size((a >> 2) & 3), ref b)) return false; break;
-                case 1: b = Registers[a >> 4].Get((a >> 2) & 3); break;
-                case 2: if (!GetAddressAdv(ref b) || !GetMem(b, Size((a >> 2) & 3), ref b)) return false; break;
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
-            }
+            if (!FetchIMMRMFormat(out s, out a)) return false;
 
             // switch through register sizes
-            switch ((a >> 2) & 3)
+            switch ((s >> 2) & 3)
             {
                 case 0:
-                    Registers[0].x16 = (SignExtend(Registers[0].x8, 0).MakeSigned() * SignExtend(b, 0).MakeSigned()).MakeUnsigned();
+                    Registers[0].x16 = (SignExtend(Registers[0].x8, 0).MakeSigned() * SignExtend(a, 0).MakeSigned()).MakeUnsigned();
                     Flags.C = Flags.O = (Registers[0].x16 >> 8) == 0 && Positive(Registers[0].x8, 0) || (Registers[0].x16 >> 8) == 0xff && Negative(Registers[0].x8, 0);
                     Flags.S = Negative(Registers[0].x16, 1);
                     break;
                 case 1:
-                    Registers[0].x32 = (SignExtend(Registers[0].x16, 1).MakeSigned() * SignExtend(b, 1).MakeSigned()).MakeUnsigned();
+                    Registers[0].x32 = (SignExtend(Registers[0].x16, 1).MakeSigned() * SignExtend(a, 1).MakeSigned()).MakeUnsigned();
                     Flags.C = Flags.O = (Registers[0].x32 >> 16) == 0 && Positive(Registers[0].x16, 1) || (Registers[0].x32 >> 16) == 0xffff && Negative(Registers[0].x16, 1);
                     Flags.S = Negative(Registers[0].x32, 2);
                     break;
                 case 2:
-                    Registers[0].x64 = (SignExtend(Registers[0].x32, 2).MakeSigned() * SignExtend(b, 2).MakeSigned()).MakeUnsigned();
+                    Registers[0].x64 = (SignExtend(Registers[0].x32, 2).MakeSigned() * SignExtend(a, 2).MakeSigned()).MakeUnsigned();
                     Flags.C = Flags.O = (Registers[0].x64 >> 32) == 0 && Positive(Registers[0].x32, 2) || (Registers[0].x64 >> 32) == 0xffffffff && Negative(Registers[0].x32, 2);
                     Flags.S = Negative(Registers[0].x64, 3);
                     break;
@@ -1697,10 +1798,10 @@ namespace csx64
                     // store negative flag (we'll do the multiplication in signed values since bit shifting is well-defined for positive BigInteger)
                     bool neg = false;
                     if (Negative(Registers[0].x64, 3)) { neg = !neg; Registers[0].x64 = ~Registers[0].x64 + 1; }
-                    if (Negative(b, 3)) { neg = !neg; b = ~b + 1; }
+                    if (Negative(a, 3)) { neg = !neg; a = ~a + 1; }
 
                     // form the full (positive) product
-                    BigInteger full = new BigInteger(Registers[0].x64) * new BigInteger(b);
+                    BigInteger full = new BigInteger(Registers[0].x64) * new BigInteger(a);
                     Registers[0].x64 = (UInt64)(full & 0xffffffffffffffff);
                     Registers[1].x64 = (UInt64)(full >> 64);
 
@@ -1723,53 +1824,44 @@ namespace csx64
 
         private bool ProcessUDIV()
         {
-            UInt64 a = 0, b = 0, full;
+            UInt64 s, a, full;
             BigInteger bigraw, bigfull;
 
-            if (!GetMemAdv(1, ref a)) return false;
+            if (!FetchIMMRMFormat(out s, out a)) return false;
 
-            // get the value into b
-            switch (a & 3)
-            {
-                case 0: if (!GetMemAdv(Size((a >> 2) & 3), ref b)) return false; break;
-                case 1: b = Registers[a >> 4].Get((a >> 2) & 3); break;
-                case 2: if (!GetAddressAdv(ref b) || !GetMem(b, Size((a >> 2) & 3), ref b)) return false; break;
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
-            }
-
-            if (b == 0) { Fail(ErrorCode.ArithmeticError); return false; }
+            if (a == 0) { Fail(ErrorCode.ArithmeticError); return false; }
 
             // switch through register sizes
-            switch ((a >> 2) & 3)
+            switch ((s >> 2) & 3)
             {
                 case 0:
-                    full = Registers[0].x16 / b;
+                    full = Registers[0].x16 / a;
                     if ((full >> 8) != 0) { Fail(ErrorCode.ArithmeticError); return false; }
-                    Registers[1].x8 = Registers[0].x16 % b;
+                    Registers[1].x8 = Registers[0].x16 % a;
                     Registers[0].x8 = full;
                     Flags.C = Registers[1].x8 != 0;
                     break;
                 case 1:
-                    full = Registers[0].x32 / b;
+                    full = Registers[0].x32 / a;
                     if ((full >> 16) != 0) { Fail(ErrorCode.ArithmeticError); return false; }
-                    Registers[1].x16 = Registers[0].x32 % b;
+                    Registers[1].x16 = Registers[0].x32 % a;
                     Registers[0].x16 = full;
                     Flags.C = Registers[1].x16 != 0;
                     break;
                 case 2:
-                    full = Registers[0].x64 / b;
+                    full = Registers[0].x64 / a;
                     if ((full >> 32) != 0) { Fail(ErrorCode.ArithmeticError); return false; }
-                    Registers[1].x32 = Registers[0].x64 % b;
+                    Registers[1].x32 = Registers[0].x64 % a;
                     Registers[0].x32 = full;
                     Flags.C = Registers[1].x32 != 0;
                     break;
                 case 3: // 64 bits requires extra logic
                     bigraw = (new BigInteger(Registers[1].x64) << 64) | new BigInteger(Registers[0].x64);
-                    bigfull = bigraw / new BigInteger(b);
+                    bigfull = bigraw / new BigInteger(a);
 
                     if ((bigfull >> 64) != 0) { Fail(ErrorCode.ArithmeticError); return false; }
 
-                    Registers[1].x64 = (UInt64)(bigraw % new BigInteger(b));
+                    Registers[1].x64 = (UInt64)(bigraw % new BigInteger(a));
                     Registers[0].x64 = (UInt64)bigfull;
                     Flags.C = Registers[1].x64 != 0;
                     break;
@@ -1779,29 +1871,20 @@ namespace csx64
         }
         private bool ProcessSDIV()
         {
-            UInt64 a = 0, b = 0;
+            UInt64 s, a;
             Int64 _a, _b, full;
             BigInteger bigraw, bigfull;
 
-            if (!GetMemAdv(1, ref a)) return false;
+            if (!FetchIMMRMFormat(out s, out a)) return false;
 
-            // get the value into b
-            switch (a & 3)
-            {
-                case 0: if (!GetMemAdv(Size((a >> 2) & 3), ref b)) return false; break;
-                case 1: b = Registers[a >> 4].Get((a >> 2) & 3); break;
-                case 2: if (!GetAddressAdv(ref b) || !GetMem(b, Size((a >> 2) & 3), ref b)) return false; break;
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
-            }
-
-            if (b == 0) { Fail(ErrorCode.ArithmeticError); return false; }
+            if (a == 0) { Fail(ErrorCode.ArithmeticError); return false; }
 
             // switch through register sizes
-            switch ((a >> 2) & 3)
+            switch ((s >> 2) & 3)
             {
                 case 0:
                     _a = SignExtend(Registers[0].x16, 1).MakeSigned();
-                    _b = SignExtend(b, 0).MakeSigned();
+                    _b = SignExtend(a, 0).MakeSigned();
                     full = _a / _b;
 
                     if (full != (sbyte)full) { Fail(ErrorCode.ArithmeticError); return false; }
@@ -1813,7 +1896,7 @@ namespace csx64
                     break;
                 case 1:
                     _a = SignExtend(Registers[0].x32, 2).MakeSigned();
-                    _b = SignExtend(b, 1).MakeSigned();
+                    _b = SignExtend(a, 1).MakeSigned();
                     full = _a / _b;
 
                     if (full != (Int16)full) { Fail(ErrorCode.ArithmeticError); return false; }
@@ -1825,7 +1908,7 @@ namespace csx64
                     break;
                 case 2:
                     _a = Registers[0].x64.MakeSigned();
-                    _b = SignExtend(b, 2).MakeSigned();
+                    _b = SignExtend(a, 2).MakeSigned();
                     full = _a / _b;
 
                     if (full != (Int32)full) { Fail(ErrorCode.ArithmeticError); return false; }
@@ -1836,7 +1919,7 @@ namespace csx64
                     Flags.S = Negative(Registers[0].x32, 2);
                     break;
                 case 3: // 64 bits requires extra logic
-                    _b = b.MakeSigned();
+                    _b = a.MakeSigned();
                     bigraw = (new BigInteger(Registers[1].x64.MakeSigned()) << 64) + new BigInteger(Registers[0].x64.MakeSigned());
                     bigfull = bigraw / _b;
 
@@ -1855,19 +1938,19 @@ namespace csx64
 
         private bool ProcessSWAP()
         {
-            UInt64 a = 0, b = 0, c = 0, d = 0;
+            UInt64 a, b, c, d;
 
-            if (!GetMemAdv(1, ref a)) return false;
+            if (!GetMemAdv(1, out a)) return false;
             switch (a & 1)
             {
                 case 0:
-                    if (!GetMemAdv(1, ref b)) return false;
+                    if (!GetMemAdv(1, out b)) return false;
                     c = Registers[a >> 4].x64;
                     Registers[a >> 4].Set((a >> 2) & 3, Registers[b & 15].x64);
                     Registers[b & 15].Set((a >> 2) & 3, c);
                     break;
                 case 1:
-                    if (!GetAddressAdv(ref b) || !GetMem(b, Size((a >> 2) & 3), ref c)) return false;
+                    if (!GetAddressAdv(out b) || !GetMem(b, Size((a >> 2) & 3), out c)) return false;
                     d = Registers[a >> 4].x64;
                     Registers[a >> 4].Set((a >> 2) & 3, c);
                     if (!SetMem(b, Size((a >> 2) & 3), d)) return false;
@@ -1967,24 +2050,65 @@ namespace csx64
             // allocate registers
             for (int i = 0; i < Registers.Length; ++i) Registers[i] = new Register();
 
+            // define initial state
             Running = false;
             Error = ErrorCode.None;
+        }
+
+        /// <summary>
+        /// Disposes of any unmanaged resources that were allocated during execution
+        /// </summary>
+        ~CSX64()
+        {
+            Dispose(false);
+        }
+
+        /// <summary>
+        /// Disposes of unmanaged resources
+        /// </summary>
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        /// <summary>
+        /// Marks if this object has already been disposed. DO NOT MODIFY
+        /// </summary>
+        private bool disposed = false;
+        /// <summary>
+        /// Relaeses all the resources used by this object
+        /// </summary>
+        /// <param name="disposing">if managed resources should be released</param>
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!disposed)
+            {
+                if (disposing)
+                {
+                    // close all the file descriptors
+                    for (UInt64 i = 0; i < (UInt64)FileDescriptors.Length; ++i) FS_Close(i);
+                }
+
+                disposed = true;
+            }
         }
 
         /// <summary>
         /// Initializes the computer for execution. Returns true if successful (fails on insufficient memory)
         /// </summary>
         /// <param name="data">The memory to load before starting execution (extra memory is undefined)</param>
-        public bool Initialize(byte[] data, UInt64 stacksize = 1024)
+        /// <param name="stacksize">the amount of additional space to allocate for the program's stack</param>
+        public bool Initialize(Byte[] data, UInt64 stacksize = 2 * 1024 * 1024)
         {
             // make sure we're not loading null array
-            if (data == null || data.LongLength == 0) return false;
-
+            if (data == null || data.Length == 0) return false;
+            
             // get new memory array
-            Memory = new byte[(UInt64)data.LongLength + stacksize];
-
+            Memory = new byte[(UInt64)data.Length + stacksize];
+            
             // copy over the data
-            data.CopyTo(Memory, 0L);
+            data.CopyTo(Memory, 0);
 
             // randomize registers except stack register
             for (int i = Registers.Length - 2; i >= 0; --i)
@@ -1994,20 +2118,21 @@ namespace csx64
                 Registers[i].x32 = (UInt64)Rand.Next();
             }
             // randomize flags
-            Flags.Flags = (uint)Rand.Next();
+            Flags.Flags = (UInt64)Rand.Next() & PublicFlags;
             // initialize stack register to end of memory segment
-            Registers[15].x64 = (UInt64)Memory.LongLength;
+            Registers[15].x64 = (UInt64)Memory.Length;
 
             // set execution state
             Pos = 0;
             Running = true;
             Error = ErrorCode.None;
+            Sleep = 0;
 
             return true;
         }
 
         /// <summary>
-        /// Causes the machine to fail
+        /// Causes the machine to fail. Releases unmanaged resources allocated during execution
         /// </summary>
         /// <param name="code">The error code to emit</param>
         public void Fail(ErrorCode code)
@@ -2016,6 +2141,9 @@ namespace csx64
             {
                 Error = code;
                 Running = false;
+
+                // close all the file descriptors
+                for (UInt64 i = 0; i < (UInt64)FileDescriptors.Length; ++i) FS_Close(i);
             }
         }
 
@@ -2023,95 +2151,55 @@ namespace csx64
         /// Gets the specified register in this computer (no bounds checking: test index against NRegisters)
         /// </summary>
         /// <param name="index">The index of the register</param>
-        public Register GetRegister(UInt64 index) => Registers[index];
+        public Register GetRegister(int index) => Registers[index];
         /// <summary>
         /// Returns the flags register
         /// </summary>
         public FlagsRegister GetFlags() => Flags;
 
         /// <summary>
-        /// Reads a value from memory (fails with OutOfBounds if invalid)
+        /// Gets the file descriptor at the specified index. DO NOT CLOSE/OPEN THIS OBJECT. USE CLOSE/OPEN UTILITY FUNCTIONS
         /// </summary>
-        /// <param name="pos">Address to read</param>
-        /// <param name="size">Number of bytes to read</param>
-        /// <param name="res">The result</param>
-        public bool GetMem(UInt64 pos, UInt64 size, ref UInt64 res)
-        {
-            if (Read(Memory, pos, size, ref res)) return true;
-
-            Fail(ErrorCode.OutOfBounds); return false;
-        }
-        /// <summary>
-        /// Writes a value to memory (fails with OutOfBounds if invalid)
-        /// </summary>
-        /// <param name="pos">Address to write</param>
-        /// <param name="size">Number of bytes to write</param>
-        /// <param name="val">The value to write</param>
-        public bool SetMem(UInt64 pos, UInt64 size, UInt64 val)
-        {
-            if (Write(Memory, pos, size, val)) return true;
-
-            Fail(ErrorCode.OutOfBounds); return false;
-        }
-
-        /// <summary>
-        /// Gets a value at and advances the execution pointer (fails with OutOfBounds if invalid)
-        /// </summary>
-        /// <param name="size">Number of bytes to read</param>
-        /// <param name="res">The result</param>
-        private bool GetMemAdv(UInt64 size, ref UInt64 res)
-        {
-            bool r = GetMem(Pos, size, ref res);
-            Pos += size;
-
-            return r;
-        }
-        // [1: literal][3: m1][1: -m2][3: m2]   ([4: r1][4: r2])   ([64: imm])
-        /// <summary>
-        /// Gets an address and advances the execution pointer
-        /// </summary>
-        /// <param name="res">resulting address</param>
-        private bool GetAddressAdv(ref UInt64 res)
-        {
-            UInt64 mults = 0, regs = 0, imm = 0; // the mult codes, regs, and literal (mults and regs only initialized for compiler, but literal must be initialized to 0)
-
-            // parse the address
-            if (!GetMemAdv(1, ref mults) || (mults & 0x77) != 0 && !GetMemAdv(1, ref regs) || (mults & 0x80) != 0 && !GetMemAdv(8, ref imm)) return false;
-
-            // compute the result into res
-            res = MultCode((mults >> 4) & 7) * Registers[regs >> 4].x64 + MultCode(mults & 7, mults & 8) * Registers[regs & 15].x64 + imm;
-
-            // got an address
-            return true;
-        }
-
-        /// <summary>
-        /// Pushes a value onto the stack
-        /// </summary>
-        /// <param name="size">the size of the value (in bytes)</param>
-        /// <param name="val">the value to push</param>
-        protected bool Push(UInt64 size, UInt64 val)
-        {
-            Registers[15].x64 -= size;
-            return SetMem(Registers[15].x64, size, val);
-        }
-        /// <summary>
-        /// Pops a value from the stack
-        /// </summary>
-        /// <param name="size">the size of the value (in bytes)</param>
-        /// <param name="val">the resulting value</param>
-        protected bool Pop(UInt64 size, ref UInt64 val)
-        {
-            if (!GetMem(Registers[15].x64, size, ref val)) return false;
-            Registers[15].x64 += size;
-            return true;
-        }
+        /// <param name="index">the index of the file descriptor</param>
+        public FileStream GetFileDescriptor(int index) => FileDescriptors[index];
 
         /// <summary>
         /// Handles syscall instructions from the processor. Returns true iff the syscall was handled successfully.
         /// Should not be called directly: only by interpreted syscall instructions
         /// </summary>
-        protected virtual bool Syscall() { return false; }
+        protected virtual bool Syscall()
+        {
+            string str, str2;
+
+            // requested syscall in R0
+            switch (Registers[0].x64)
+            {
+                // R1 fd, R2 pos, R3 count
+                // R0 <- #bytes read
+                case (UInt64)SyscallCodes.Read: Registers[0].x64 = FS_Read(Registers[1].x64, Registers[2].x64, Registers[3].x64); return true;
+                // R1 fd, R2 pos, R3 count
+                case (UInt64)SyscallCodes.Write: return FS_Write(Registers[1].x64, Registers[2].x64, Registers[3].x64);
+                
+                // R1 path, R2 mode
+                // R0 <- fd
+                case (UInt64)SyscallCodes.Open:
+                    if (!GetString(Registers[1].x64, 2, out str)) return false;
+                    Registers[0].x64 = FS_Open(str, Registers[2].x64);
+                    return true;
+                // R1 fd
+                case (UInt64)SyscallCodes.Close: return FS_Close(Registers[1].x64);
+                
+                // R1 from_path, R2 to_path
+                case (UInt64)SyscallCodes.Move:
+                    if (!GetString(Registers[1].x64, 2, out str) || !GetString(Registers[2].x64, 2, out str2)) return false;
+                    return FS_Move(str, str2);
+
+                // ----------------------------------
+
+                // otherwise syscall not found
+                default: return false;
+            }
+        }
 
         /// <summary>
         /// Performs a single operation. Returns true if successful
@@ -2121,10 +2209,13 @@ namespace csx64
             // fail to execute ins if terminated
             if (!Running) return false;
 
+            // if we're sleeping, no-op
+            if (Sleep > 0) { --Sleep; return true; }
+
             UInt64 a = 0, b = 0, c = 0, d = 0; // the potential args (initialized for compiler)
 
             // fetch the instruction
-            if (!GetMemAdv(1, ref a)) return false;
+            if (!GetMemAdv(1, out a)) return false;
 
             // switch through the opcodes
             switch ((OPCode)a)
@@ -2158,8 +2249,8 @@ namespace csx64
 
                 case OPCode.SWAP: return ProcessSWAP();
 
-                case OPCode.UX: if (!GetMemAdv(1, ref a)) return false; Registers[a >> 4].Set(a & 3, Registers[a >> 4].Get((a >> 2) & 3)); return true;
-                case OPCode.SX: if (!GetMemAdv(1, ref a)) return false; Registers[a >> 4].Set(a & 3, SignExtend(Registers[a >> 4].Get((a >> 2) & 3), (a >> 2) & 3)); return true;
+                case OPCode.UX: if (!GetMemAdv(1, out a)) return false; Registers[a >> 4].Set(a & 3, Registers[a >> 4].Get((a >> 2) & 3)); return true;
+                case OPCode.SX: if (!GetMemAdv(1, out a)) return false; Registers[a >> 4].Set(a & 3, SignExtend(Registers[a >> 4].Get((a >> 2) & 3), (a >> 2) & 3)); return true;
 
                 case OPCode.UMUL: return ProcessUMUL();
                 case OPCode.SMUL: return ProcessSMUL();
@@ -2196,32 +2287,32 @@ namespace csx64
                 case OPCode.CMPZ: return ProcessCMPZ();
 
                 case OPCode.LA:
-                    if (!GetMemAdv(1, ref a) || !GetAddressAdv(ref b)) return false;
+                    if (!GetMemAdv(1, out a) || !GetAddressAdv(out b)) return false;
                     Registers[a & 15].x64 = b;
                     return true;
 
-                case OPCode.JMP: if (!GetAddressAdv(ref a)) return false; Pos = a; return true;
+                case OPCode.JMP: if (!GetAddressAdv(out a)) return false; Pos = a; return true;
 
-                case OPCode.Ja: if (!GetAddressAdv(ref a)) return false; if (Flags.a) Pos = a; return true;
-                case OPCode.Jae: if (!GetAddressAdv(ref a)) return false; if (Flags.ae) Pos = a; return true;
-                case OPCode.Jb: if (!GetAddressAdv(ref a)) return false; if (Flags.b) Pos = a; return true;
-                case OPCode.Jbe: if (!GetAddressAdv(ref a)) return false; if (Flags.be) Pos = a; return true;
+                case OPCode.Ja: if (!GetAddressAdv(out a)) return false; if (Flags.a) Pos = a; return true;
+                case OPCode.Jae: if (!GetAddressAdv(out a)) return false; if (Flags.ae) Pos = a; return true;
+                case OPCode.Jb: if (!GetAddressAdv(out a)) return false; if (Flags.b) Pos = a; return true;
+                case OPCode.Jbe: if (!GetAddressAdv(out a)) return false; if (Flags.be) Pos = a; return true;
 
-                case OPCode.Jg: if (!GetAddressAdv(ref a)) return false; if (Flags.g) Pos = a; return true;
-                case OPCode.Jge: if (!GetAddressAdv(ref a)) return false; if (Flags.ge) Pos = a; return true;
-                case OPCode.Jl: if (!GetAddressAdv(ref a)) return false; if (Flags.l) Pos = a; return true;
-                case OPCode.Jle: if (!GetAddressAdv(ref a)) return false; if (Flags.le) Pos = a; return true;
+                case OPCode.Jg: if (!GetAddressAdv(out a)) return false; if (Flags.g) Pos = a; return true;
+                case OPCode.Jge: if (!GetAddressAdv(out a)) return false; if (Flags.ge) Pos = a; return true;
+                case OPCode.Jl: if (!GetAddressAdv(out a)) return false; if (Flags.l) Pos = a; return true;
+                case OPCode.Jle: if (!GetAddressAdv(out a)) return false; if (Flags.le) Pos = a; return true;
 
-                case OPCode.Jz: if (!GetAddressAdv(ref a)) return false; if (Flags.Z) Pos = a; return true;
-                case OPCode.Jnz: if (!GetAddressAdv(ref a)) return false; if (!Flags.Z) Pos = a; return true;
-                case OPCode.Js: if (!GetAddressAdv(ref a)) return false; if (Flags.S) Pos = a; return true;
-                case OPCode.Jns: if (!GetAddressAdv(ref a)) return false; if (!Flags.S) Pos = a; return true;
-                case OPCode.Jp: if (!GetAddressAdv(ref a)) return false; if (Flags.P) Pos = a; return true;
-                case OPCode.Jnp: if (!GetAddressAdv(ref a)) return false; if (!Flags.P) Pos = a; return true;
-                case OPCode.Jo: if (!GetAddressAdv(ref a)) return false; if (Flags.O) Pos = a; return true;
-                case OPCode.Jno: if (!GetAddressAdv(ref a)) return false; if (!Flags.O) Pos = a; return true;
-                case OPCode.Jc: if (!GetAddressAdv(ref a)) return false; if (Flags.C) Pos = a; return true;
-                case OPCode.Jnc: if (!GetAddressAdv(ref a)) return false; if (!Flags.C) Pos = a; return true;
+                case OPCode.Jz: if (!GetAddressAdv(out a)) return false; if (Flags.Z) Pos = a; return true;
+                case OPCode.Jnz: if (!GetAddressAdv(out a)) return false; if (!Flags.Z) Pos = a; return true;
+                case OPCode.Js: if (!GetAddressAdv(out a)) return false; if (Flags.S) Pos = a; return true;
+                case OPCode.Jns: if (!GetAddressAdv(out a)) return false; if (!Flags.S) Pos = a; return true;
+                case OPCode.Jp: if (!GetAddressAdv(out a)) return false; if (Flags.P) Pos = a; return true;
+                case OPCode.Jnp: if (!GetAddressAdv(out a)) return false; if (!Flags.P) Pos = a; return true;
+                case OPCode.Jo: if (!GetAddressAdv(out a)) return false; if (Flags.O) Pos = a; return true;
+                case OPCode.Jno: if (!GetAddressAdv(out a)) return false; if (!Flags.O) Pos = a; return true;
+                case OPCode.Jc: if (!GetAddressAdv(out a)) return false; if (Flags.C) Pos = a; return true;
+                case OPCode.Jnc: if (!GetAddressAdv(out a)) return false; if (!Flags.C) Pos = a; return true;
 
                 case OPCode.FADD: return ProcessFADD();
                 case OPCode.FSUB: return ProcessFSUB();
@@ -2261,22 +2352,22 @@ namespace csx64
                 case OPCode.ITOF: return ProcessITOF();
 
                 case OPCode.PUSH:
-                    if (!GetMemAdv(1, ref a)) return false;
+                    if (!GetMemAdv(1, out a)) return false;
                     switch (a & 1)
                     {
-                        case 0: if (!GetMemAdv(Size((a >> 2) & 3), ref b)) return false; break;
+                        case 0: if (!GetMemAdv(Size((a >> 2) & 3), out b)) return false; break;
                         case 1: b = Registers[a >> 4].x64; break;
                     }
                     return Push(Size((a >> 2) & 3), b);
                 case OPCode.POP:
-                    if (!GetMemAdv(1, ref a) || !Pop(Size((a >> 2) & 3), ref b)) return false;
+                    if (!GetMemAdv(1, out a) || !Pop(Size((a >> 2) & 3), out b)) return false;
                     Registers[a >> 4].Set((a >> 2) & 3, b);
                     return true;
                 case OPCode.CALL:
-                    if (!GetAddressAdv(ref a) || !Push(8, Pos)) return false;
+                    if (!GetAddressAdv(out a) || !Push(8, Pos)) return false;
                     Pos = a; return true;
                 case OPCode.RET:
-                    if (!Pop(8, ref a)) return false;
+                    if (!Pop(8, out a)) return false;
                     Pos = a; return true;
 
                 case OPCode.BSWAP: return ProcessBSWAP();
@@ -2286,11 +2377,11 @@ namespace csx64
                 case OPCode.BLSR: return ProcessBLSR();
                 case OPCode.ANDN: return ProcessANDN();
 
-                case OPCode.GETF: if (!GetMemAdv(1, ref a)) return false; Registers[a & 15].x64 = Flags.Flags; return true;
-                case OPCode.SETF: if (!GetMemAdv(1, ref a)) return false; Flags.Flags = Registers[a & 15].x64; return true;
+                case OPCode.GETF: if (!GetMemAdv(1, out a)) return false; Registers[a & 15].x64 = Flags.Flags; return true;
+                case OPCode.SETF: if (!GetMemAdv(1, out a)) return false; Flags.Flags = (Registers[a & 15].x64 & PublicFlags) | (Flags.Flags & ~PublicFlags); return true;
 
                 case OPCode.LOOP:
-                    if (!GetMemAdv(1, ref a) || !GetAddressAdv(ref b)) return false;
+                    if (!GetMemAdv(1, out a) || !GetAddressAdv(out b)) return false;
                     c = Registers[a >> 4].Get((a >> 2) & 3);
                     c = c - Size(a & 3); // since we know we're subtracting a positive value and only comparing to zero, no need to truncate
                     Registers[a >> 4].Set((a >> 2) & 3, c);
@@ -2298,7 +2389,7 @@ namespace csx64
                     return true;
 
                 case OPCode.FX:
-                    if (!GetMemAdv(1, ref a)) return false;
+                    if (!GetMemAdv(1, out a)) return false;
                     switch ((a >> 2) & 3)
                     {
                         case 2:
@@ -2309,7 +2400,7 @@ namespace csx64
 
                                 default: Fail(ErrorCode.UndefinedBehavior); return false;
                             }
-                            
+
                         case 3:
                             switch (a & 3)
                             {
@@ -2322,10 +2413,367 @@ namespace csx64
                         default: Fail(ErrorCode.UndefinedBehavior); return false;
                     }
 
+                case OPCode.SLP: if (!FetchIMMRMFormat(out a, out b)) return false; Sleep = b; return true;
+
 
                 // otherwise, unknown opcode
                 default: Fail(ErrorCode.UndefinedBehavior); return false;
             }
+        }
+
+        // -------------------
+        // -- Memory Access --
+        // -------------------
+
+        /// <summary>
+        /// Reads a value from memory (fails with OutOfBounds if invalid). if SMF is set, delays 
+        /// </summary>
+        /// <param name="pos">Address to read</param>
+        /// <param name="size">Number of bytes to read</param>
+        /// <param name="res">The result</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool GetMem(UInt64 pos, UInt64 size, out UInt64 res, bool _abide_slow = true)
+        {
+            if (Memory.Read(pos, size, out res))
+            {
+                if (_abide_slow && Flags.SlowMem) Sleep += size;
+                return true;
+            }
+
+            Fail(ErrorCode.OutOfBounds); return false;
+        }
+        /// <summary>
+        /// Writes a value to memory (fails with OutOfBounds if invalid)
+        /// </summary>
+        /// <param name="pos">Address to write</param>
+        /// <param name="size">Number of bytes to write</param>
+        /// <param name="val">The value to write</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool SetMem(UInt64 pos, UInt64 size, UInt64 val, bool _abide_slow = true)
+        {
+            if (Memory.Write(pos, size, val))
+            {
+                if (_abide_slow && Flags.SlowMem) Sleep += size;
+                return true;
+            }
+
+            Fail(ErrorCode.OutOfBounds); return false;
+        }
+
+        /// <summary>
+        /// Reads a series of bytes from memory. Returns true iff successful, otherwise fails with OutOfBounds
+        /// </summary>
+        /// <param name="pos">The position in memory to begin reading</param>
+        /// <param name="count">The number of bytes to read</param>
+        /// <param name="data">The location to store the data. Should be at least as large as count</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool GetMem(UInt64 pos, UInt64 count, byte[] data, bool _abide_slow = true)
+        {
+            for (UInt64 i = 0; i < count; ++i)
+            {
+                if (!GetMem(pos + i, 1, out UInt64 temp, _abide_slow)) return false;
+                data[i] = (byte)temp;
+            }
+
+            return true;
+        }
+        /// <summary>
+        /// Writes a series of bytes to memory. Returns true iff successful, otherwise fails with OutOfBounds
+        /// </summary>
+        /// <param name="pos">The position in memory to begin writing</param>
+        /// <param name="count">The number of bytes to write</param>
+        /// <param name="data">The data to write. Should be at least as large as count</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool SetMem(UInt64 pos, UInt64 count, byte[] data, bool _abide_slow = true)
+        {
+            for (UInt64 i = 0; i < count; ++i)
+                if (!SetMem(pos + i, 1, data[i], _abide_slow)) return false;
+
+            return true;
+        }
+
+        /// <summary>
+        /// Reads a series of 2-byte words from memory. Returns true iff successful, otherwise fails with OutOfBounds
+        /// </summary>
+        /// <param name="pos">The position in memory to begin reading</param>
+        /// <param name="count">The number of words to read</param>
+        /// <param name="data">The location to store the data. Should be at least as large as count</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool GetMem(UInt64 pos, UInt64 count, UInt16[] data, bool _abide_slow = true)
+        {
+            for (UInt64 i = 0; i < count; ++i)
+            {
+                if (!GetMem(pos + i, 2, out UInt64 temp, _abide_slow)) return false;
+                data[i] = (byte)temp;
+            }
+
+            return true;
+        }
+        /// <summary>
+        /// Writes a series of 2-byte words to memory. Returns true iff successful, otherwise fails with OutOfBounds
+        /// </summary>
+        /// <param name="pos">The position in memory to begin writing</param>
+        /// <param name="count">The number of words to write</param>
+        /// <param name="data">The data to write. Should be at least as large as count</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool SetMem(UInt64 pos, UInt64 count, UInt16[] data, bool _abide_slow = true)
+        {
+            for (UInt64 i = 0; i < count; ++i)
+                if (!SetMem(pos + i, 2, data[i], _abide_slow)) return false;
+
+            return true;
+        }
+
+        /// <summary>
+        /// Reads a series of 4-byte words from memory. Returns true iff successful, otherwise fails with OutOfBounds
+        /// </summary>
+        /// <param name="pos">The position in memory to begin reading</param>
+        /// <param name="count">The number of words to read</param>
+        /// <param name="data">The location to store the data. Should be at least as large as count</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool GetMem(UInt64 pos, UInt64 count, UInt32[] data, bool _abide_slow = true)
+        {
+            for (UInt64 i = 0; i < count; ++i)
+            {
+                if (!GetMem(pos + i, 4, out UInt64 temp, _abide_slow)) return false;
+                data[i] = (byte)temp;
+            }
+
+            return true;
+        }
+        /// <summary>
+        /// Writes a series of 4-byte words to memory. Returns true iff successful, otherwise fails with OutOfBounds
+        /// </summary>
+        /// <param name="pos">The position in memory to begin writing</param>
+        /// <param name="count">The number of words to write</param>
+        /// <param name="data">The data to write. Should be at least as large as count</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool SetMem(UInt64 pos, UInt64 count, UInt32[] data, bool _abide_slow = true)
+        {
+            for (UInt64 i = 0; i < count; ++i)
+                if (!SetMem(pos + i, 4, data[i], _abide_slow)) return false;
+
+            return true;
+        }
+
+        /// <summary>
+        /// Reads a series of 8-byte words from memory. Returns true iff successful, otherwise fails with OutOfBounds
+        /// </summary>
+        /// <param name="pos">The position in memory to begin reading</param>
+        /// <param name="count">The number of words to read</param>
+        /// <param name="data">The location to store the data. Should be at least as large as count</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool GetMem(UInt64 pos, UInt64 count, UInt64[] data, bool _abide_slow = true)
+        {
+            for (UInt64 i = 0; i < count; ++i)
+            {
+                if (!GetMem(pos + i, 8, out UInt64 temp, _abide_slow)) return false;
+                data[i] = (byte)temp;
+            }
+
+            return true;
+        }
+        /// <summary>
+        /// Writes a series of 8-byte words to memory. Returns true iff successful, otherwise fails with OutOfBounds
+        /// </summary>
+        /// <param name="pos">The position in memory to begin writing</param>
+        /// <param name="count">The number of words to write</param>
+        /// <param name="data">The data to write. Should be at least as large as count</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool SetMem(UInt64 pos, UInt64 count, UInt64[] data, bool _abide_slow = true)
+        {
+            for (UInt64 i = 0; i < count; ++i)
+                if (!SetMem(pos + i, 8, data[i], _abide_slow)) return false;
+
+            return true;
+        }
+
+        /// <summary>
+        /// Reads a null-terminated string from memory. Returns true if successful, otherwise fails with OutOfBounds and returns false
+        /// </summary>
+        /// <param name="pos">the address in memory of the first character in the string</param>
+        /// <param name="charsize">the size of each character in bytes</param>
+        /// <param name="str">the resulting string</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool GetString(UInt64 pos, UInt64 charsize, out string str, bool _abide_slow = true)
+        {
+            // use builder for efficiency
+            StringBuilder b = new StringBuilder();
+            UInt64 val;
+
+            // read the string from memory
+            for (UInt64 i = 0; ; ++i)
+            {
+                // get a char from memory
+                if (!GetMem(pos + i * charsize, charsize, out val, _abide_slow)) { str = null; return false; }
+
+                // add if non-null, otherwise done
+                if (val != 0) b.Append((char)val);
+                else break;
+            }
+
+            // return the resulting string
+            str = b.ToString();
+            return true;
+        }
+        /// <summary>
+        /// Writes a null-terminated string to memory. Returns true if successful, otherwise fails with OutOfBounds and returns false
+        /// </summary>
+        /// <param name="pos">the address in memory of the first character to write</param>
+        /// <param name="charsize">the size of each character in bytes</param>
+        /// <param name="str">the string to write</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool SetString(UInt64 pos, UInt64 charsize, string str, bool _abide_slow = true)
+        {
+            // read the string from memory
+            for (UInt64 i = 0; i < (UInt64)str.Length; ++i)
+                if (!SetMem(pos + i * charsize, charsize, str[(int)i], _abide_slow)) return false;
+
+            // write the null terminator
+            if (!SetMem(pos + (UInt64)str.Length * charsize, charsize, 0, _abide_slow)) return false;
+
+            return true;
+        }
+
+        /// <summary>
+        /// Gets a value at and advances the execution pointer (fails with OutOfBounds if invalid)
+        /// </summary>
+        /// <param name="size">Number of bytes to read</param>
+        /// <param name="res">The result</param>
+        private bool GetMemAdv(UInt64 size, out UInt64 res)
+        {
+            bool r = GetMem(Pos, size, out res);
+            Pos += size;
+
+            return r;
+        }
+        // [1: literal][3: m1][1: -m2][3: m2]   ([4: r1][4: r2])   ([64: imm])
+        /// <summary>
+        /// Gets an address and advances the execution pointer
+        /// </summary>
+        /// <param name="res">resulting address</param>
+        private bool GetAddressAdv(out UInt64 res)
+        {
+            res = 0; // initialize out param
+
+            UInt64 mults, regs = 0, imm = 0; // the mult codes, regs, and literal
+
+            // parse the address
+            if (!GetMemAdv(1, out mults) || (mults & 0x77) != 0 && !GetMemAdv(1, out regs) || (mults & 0x80) != 0 && !GetMemAdv(8, out imm)) return false;
+
+            // compute the result into res
+            res = Mult((mults >> 4) & 7) * Registers[regs >> 4].x64 + Mult(mults & 7, mults & 8) * Registers[regs & 15].x64 + imm;
+
+            // got an address
+            return true;
+        }
+
+        /// <summary>
+        /// Pushes a value onto the stack
+        /// </summary>
+        /// <param name="size">the size of the value (in bytes)</param>
+        /// <param name="val">the value to push</param>
+        public bool Push(UInt64 size, UInt64 val)
+        {
+            Registers[15].x64 -= size;
+            return SetMem(Registers[15].x64, size, val);
+        }
+        /// <summary>
+        /// Pops a value from the stack
+        /// </summary>
+        /// <param name="size">the size of the value (in bytes)</param>
+        /// <param name="val">the resulting value</param>
+        public bool Pop(UInt64 size, out UInt64 val)
+        {
+            if (!GetMem(Registers[15].x64, size, out val)) return false;
+            Registers[15].x64 += size;
+            return true;
+        }
+
+        // -------------
+        // -- File IO --
+        // -------------
+
+        /// <summary>
+        /// Finds the first available file descriptor. Returns the index of the available spot, or UInt64.MaxValue upon failure
+        /// </summary>
+        private UInt64 FindOpenFileDescriptor()
+        {
+            for (int i = 0; i < FileDescriptors.Length; ++i)
+                if (FileDescriptors[i] == null) return (UInt64)i;
+
+            return UInt64.MaxValue;
+        }
+
+        /// <summary>
+        /// Opens a file in the specified mode. Returns the file descriptor created if successful, or UInt64.MaxValue upon failure
+        /// </summary>
+        /// <param name="path">the path of the file to open</param>
+        /// <param name="mode">the mode to open the file in (see System.IO.FileAccess)"/></param>
+        public UInt64 FS_Open(string path, UInt64 mode)
+        {
+            UInt64 index = FindOpenFileDescriptor();
+            if (index == UInt64.MaxValue) return UInt64.MaxValue;
+
+            FileStream f; // resulting stream
+
+            // attempt to open the file
+            try { f = new FileStream(path, FileMode.OpenOrCreate, (FileAccess)mode); }
+            catch (Exception) { return UInt64.MaxValue; }
+            
+            // store in file descriptors
+            FileDescriptors[index] = f;
+            return index;
+        }
+        /// <summary>
+        /// Closes a file. Returns true if successful, otherwise failes with IOFailure and returns false
+        /// </summary>
+        /// <param name="fd">The file descriptor to close</param>
+        public bool FS_Close(UInt64 fd)
+        {
+            // attempt to close the file
+            try { FileDescriptors[fd].Close(); FileDescriptors[fd] = null; }
+            catch (Exception) { Fail(ErrorCode.IOFailure); return false; }
+
+            // file closed successfully
+            return true;
+        }
+
+        /// <summary>
+        /// Attempts to read a series of bytes from the file and store them in memory
+        /// </summary>
+        /// <param name="fd">the file descriptor to use</param>
+        /// <param name="pos">the position in memory to store the read data</param>
+        /// <param name="count">the number of bytes to read</param>
+        public UInt64 FS_Read(UInt64 fd, UInt64 pos, UInt64 count)
+        {
+            // attempt to read from the file into memory
+            try { return (UInt64)FileDescriptors[fd].Read(Memory, (int)pos, (int)count); }
+            catch (Exception) { Fail(ErrorCode.IOFailure); return 0; }
+        }
+        /// <summary>
+        /// Attempts to write a series of bytes from memory to the file
+        /// </summary>
+        /// <param name="fd">the file descriptor to use</param>
+        /// <param name="pos">the position in memory of the data to write</param>
+        /// <param name="count">the number of bytes to read</param>
+        public bool FS_Write(UInt64 fd, UInt64 pos, UInt64 count)
+        {
+            // attempt to read from memory to the file
+            try { FileDescriptors[fd].Write(Memory, (int)pos, (int)count); return true; }
+            catch (Exception) { Fail(ErrorCode.IOFailure); return false; }
+        }
+
+        /// <summary>
+        /// Moves a file. Returns true iff successful
+        /// </summary>
+        /// <param name="from">the file to move</param>
+        /// <param name="to">the destination path</param>
+        public bool FS_Move(string from, string to)
+        {
+            // attempt the move operation
+            try { File.Move(from, to); return true; }
+            catch (Exception) { return false; }
         }
 
         // --------------
@@ -2340,9 +2788,44 @@ namespace csx64
         {
             None, EmptyResult, SymbolRedefinition, MissingSymbol, FormatError
         }
-        internal enum PatchError
+        private enum PatchError
         {
             None, Unevaluated, Error
+        }
+
+        public struct AssembleResult
+        {
+            /// <summary>
+            /// The error that occurred (or None for success)
+            /// </summary>
+            public AssembleError Error;
+            /// <summary>
+            /// What caused the error
+            /// </summary>
+            public string ErrorMsg;
+
+            public AssembleResult(AssembleError error, string errorMsg)
+            {
+                Error = error;
+                ErrorMsg = errorMsg;
+            }
+        }
+        public struct LinkResult
+        {
+            /// <summary>
+            /// The error that occurred (or None for success)
+            /// </summary>
+            public LinkError Error;
+            /// <summary>
+            /// What caused the error
+            /// </summary>
+            public string ErrorMsg;
+
+            public LinkResult(LinkError error, string errorMsg)
+            {
+                Error = error;
+                ErrorMsg = errorMsg;
+            }
         }
 
         /// <summary>
@@ -2795,6 +3278,10 @@ namespace csx64
             /// </summary>
             public Expr Expr;
         }
+
+        /// <summary>
+        /// Represents an assembled object file used to create an executable
+        /// </summary>
         public class ObjectFile
         {
             /// <summary>
@@ -2824,85 +3311,1048 @@ namespace csx64
             public ObjectFile file;
             public int line;
 
-            public string rawline;
+            //public string rawline;
             public string[] label_defs; // must be array for ref params
             public string op;
             public UInt64 sizecode;
             public string[] args;       // must be array for ref params
 
             public string last_static_label;
-            public Tuple<AssembleError, string> err;
+            public AssembleResult res;
 
             public UInt64 time;
+
+            // ------------------------
+            // -- Assembly Functions --
+            // ------------------------
+
+            public const UInt64 EmissionMaxMultiplier = 1000000;
+            private const char EmissionMultiplierChar = ':';
+
+            public bool SplitLine(string rawline)
+            {
+                // (label: label: ...) (op(:size) (arg, arg, ...))
+
+                int pos = 0, end; // position in line parsing
+                int quote;        // index of openning quote in args
+
+                List<string> tokens = new List<string>();
+                StringBuilder b = new StringBuilder();
+
+                // parse labels
+                for (; pos < rawline.Length; pos = end)
+                {
+                    // skip leading white space
+                    for (; pos < rawline.Length && char.IsWhiteSpace(rawline[pos]); ++pos) ;
+                    // get a white space-delimited token
+                    for (end = pos; end < rawline.Length && !char.IsWhiteSpace(rawline[end]); ++end) ;
+
+                    // if it's a label, add to tokens
+                    if (pos != end && rawline[end - 1] == ':') tokens.Add(rawline.Substring(pos, end - pos - 1));
+                    // otherwise we're done with labels
+                    else break; // break ensures we also keep pos pointing to start of next section
+                }
+                label_defs = tokens.ToArray(); // dump tokens as label defs
+                tokens.Clear(); // empty tokens for reuse
+
+                // parse op
+                if (pos < rawline.Length)
+                {
+                    // get up till size separator or white space
+                    for (end = pos; end < rawline.Length && rawline[end] != ':' && !char.IsWhiteSpace(rawline[end]); ++end) ;
+
+                    // make sure we got a well-formed op
+                    if (pos == end) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Operation size specification encountered without an operation"); return false; }
+
+                    // save this as op
+                    op = rawline.Substring(pos, end - pos);
+
+                    // if we got a size specification
+                    if (end < rawline.Length && rawline[end] == ':')
+                    {
+                        pos = end + 1; // position to beginning of size specification
+
+                        // if starting parenthetical section
+                        if (pos < rawline.Length && rawline[pos] == '(')
+                        {
+                            int depth = 1; // parenthetical depth
+
+                            // get till depth of zero
+                            for (end = pos + 1; end < rawline.Length && depth > 0; ++end)
+                            {
+                                if (rawline[end] == '(') ++depth;
+                                else if (rawline[end] == ')') --depth;
+                            }
+
+                            if (depth != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched parenthesis encountered in operation size specification"); return false; }
+                        }
+                        // ohterwise standard imm
+                        else
+                        {
+                            // take all legal chars
+                            for (end = pos; end < rawline.Length && (rawline[end] == '_' || char.IsLetterOrDigit(rawline[end])); ++end) ;
+                        }
+
+                        // make sure we didn't end on non-white space
+                        if (end < rawline.Length && !char.IsWhiteSpace(rawline[end])) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Size parameter must be separated from arguments by white space"); return false; }
+
+                        // parse the read size code
+                        if (!TryParseSizecode(rawline.Substring(pos, end - pos).RemoveWhiteSpace(), out sizecode))
+                        { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse operation size specification\n-> {res.ErrorMsg}"); return false; }
+                    }
+                    // otherwise use default size (64-bit)
+                    else sizecode = 3;
+
+                    pos = end; // pass parsed section before next section
+                }
+                // otherwise there is no op
+                else op = string.Empty;
+
+                // parse the rest of the line as comma-separated tokens
+                for (; pos < rawline.Length; ++pos)
+                {
+                    // skip leading white space
+                    for (; pos < rawline.Length && char.IsWhiteSpace(rawline[pos]); ++pos) ;
+                    // when pos reaches end of token, we're done parsing
+                    if (pos >= rawline.Length) break;
+
+                    b.Clear(); // clear the string builder
+
+                    // find the next terminator (comma-separated)
+                    for (quote = -1; pos < rawline.Length && (rawline[pos] != ',' || quote >= 0); ++pos)
+                    {
+                        if (rawline[pos] == '"' || rawline[pos] == '\'')
+                            quote = quote < 0 ? pos : (rawline[pos] == rawline[quote] ? -1 : quote);
+
+                        // omit white space unless in a quote
+                        if (quote >= 0 || !char.IsWhiteSpace(rawline[pos])) b.Append(rawline[pos]);
+                    }
+
+                    // make sure we closed any quotations
+                    if (quote >= 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Unmatched quotation encountered in argument list"); return false; }
+
+                    // make sure arg isn't empty
+                    if (b.Length == 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Empty operation argument encountered"); return false; }
+
+                    // add this token
+                    tokens.Add(b.ToString());
+                }
+                // output tokens to assemble args
+                args = tokens.ToArray();
+
+                // successfully parsed line
+                return true;
+            }
+
+            public static bool IsValidLabel(string token)
+            {
+                // can't be nothing
+                if (token.Length == 0) return false;
+
+                // first char is underscore or letter
+                if (token[0] != '_' && !char.IsLetter(token[0])) return false;
+                // all other chars may additionally be numbers
+                for (int i = 1; i < token.Length; ++i)
+                    if (token[i] != '_' && !char.IsLetterOrDigit(token[i])) return false;
+
+                return true;
+            }
+            public bool MutateLabel(ref string label)
+            {
+                // if defining a local label
+                if (label[0] == '.')
+                {
+                    string sub = label.Substring(1); // local symbol name
+
+                    // local name can't be empty
+                    if (!IsValidLabel(sub)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Local label name must be legal"); return false; }
+                    // can't make a local label before any non-local ones exist
+                    if (last_static_label == null) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: Cannot define a local label before the first static label"); return false; }
+                    
+                    // mutate the label
+                    label = $"__local_{time:x16}_{last_static_label}_{sub}";
+                }
+
+                return true;
+            }
+
+            public void AppendVal(UInt64 size, UInt64 val)
+            {
+                // write the value (little-endian)
+                for (ushort i = 0; i < size; ++i)
+                    file.Data.Add((byte)(val >> (8 * i)));
+            }
+            public bool TryAppendExpr(UInt64 size, Expr expr, int type = 3)
+            {
+                string err = null; // evaluation error
+
+                // create the hole data
+                HoleData data = new HoleData() { Address = (UInt64)file.Data.Count, Size = size, Line = line, Expr = expr };
+                // write a dummy (all 1's for easy manual identification)
+                AppendVal(size, 0xffffffffffffffff);
+
+                // try to patch it
+                switch (TryPatchHole(file.Data, file.Symbols, data, ref err))
+                {
+                    case PatchError.None: break;
+                    case PatchError.Unevaluated: file.Holes.Add(data); break;
+                    case PatchError.Error: res = new AssembleResult(AssembleError.ArgError, $"line {line}: Error encountered while patching expression\n-> {err}"); return false;
+
+                    default: throw new ArgumentException("Unknown patch error encountered");
+                }
+
+                return true;
+            }
+            public bool TryAppendAddress(UInt64 a, UInt64 b, Expr hole)
+            {
+                // [1: literal][3: m1][1: -m2][3: m2]   ([4: r1][4: r2])   ([64: imm])
+                AppendVal(1, a);
+                if ((a & 0x77) != 0) AppendVal(1, b);
+                if ((a & 0x80) != 0) { if (!TryAppendExpr(8, hole)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append address base\n-> {res.ErrorMsg}"); return false; } }
+
+                return true;
+            }
+
+            public static readonly Dictionary<Expr.OPs, int> Precedence = new Dictionary<Expr.OPs, int>()
+            {
+                { Expr.OPs.Mul, 5 },
+                { Expr.OPs.Div, 5 },
+                { Expr.OPs.Mod, 5 },
+
+                { Expr.OPs.Add, 6 },
+                { Expr.OPs.Sub, 6 },
+
+                { Expr.OPs.SL, 7 },
+                { Expr.OPs.SR, 7 },
+
+                { Expr.OPs.Less, 9 },
+                { Expr.OPs.LessE, 9 },
+                { Expr.OPs.Great, 9 },
+                { Expr.OPs.GreatE, 9 },
+
+                { Expr.OPs.Eq, 10 },
+                { Expr.OPs.Neq, 10 },
+
+                { Expr.OPs.BitAnd, 11 },
+                { Expr.OPs.BitXor, 12 },
+                { Expr.OPs.BitOr, 13 },
+                { Expr.OPs.LogAnd, 14 },
+                { Expr.OPs.LogOr, 15 },
+
+                { Expr.OPs.NullCoalesce, 99 },
+                { Expr.OPs.Pair, 100 },
+                { Expr.OPs.Condition, 100 }
+            };
+            public static readonly List<char> UnaryOps = new List<char>() { '+', '-', '~', '!', '*', '/' };
+
+            public static bool TryGetOp(string token, int pos, out Expr.OPs op, out int oplen)
+            {
+                // default to invalid op
+                op = Expr.OPs.None;
+                oplen = 0;
+
+                // try to take as many characters as possible (greedy)
+                if (pos + 2 <= token.Length)
+                {
+                    oplen = 2; // record oplen
+                    switch (token.Substring(pos, 2))
+                    {
+                        case "<<": op = Expr.OPs.SL; return true;
+                        case ">>": op = Expr.OPs.SR; return true;
+
+                        case "<=": op = Expr.OPs.LessE; return true;
+                        case ">=": op = Expr.OPs.GreatE; return true;
+
+                        case "==": op = Expr.OPs.Eq; return true;
+                        case "!=": op = Expr.OPs.Neq; return true;
+
+                        case "&&": op = Expr.OPs.LogAnd; return true;
+                        case "||": op = Expr.OPs.LogOr; return true;
+
+                        case "??": op = Expr.OPs.NullCoalesce; return true;
+                    }
+                }
+                if (pos + 1 <= token.Length)
+                {
+                    oplen = 1; // record oplen
+                    switch (token[pos])
+                    {
+                        case '*': op = Expr.OPs.Mul; return true;
+                        case '/': op = Expr.OPs.Div; return true;
+                        case '%': op = Expr.OPs.Mod; return true;
+
+                        case '+': op = Expr.OPs.Add; return true;
+                        case '-': op = Expr.OPs.Sub; return true;
+
+                        case '<': op = Expr.OPs.Less; return true;
+                        case '>': op = Expr.OPs.Great; return true;
+
+                        case '&': op = Expr.OPs.BitAnd; return true;
+                        case '^': op = Expr.OPs.BitXor; return true;
+                        case '|': op = Expr.OPs.BitOr; return true;
+
+                        case '?': op = Expr.OPs.Condition; return true;
+                        case ':': op = Expr.OPs.Pair; return true;
+                    }
+                }
+
+                // if nothing found, fail
+                return false;
+            }
+            public bool TryParseImm(string token, out Expr hole)
+            {
+                hole = null; // initially-nulled result
+
+                Expr temp; // temporary for node creation
+
+                int pos = 0, end; // position in token
+                int depth;        // parenthesis depth
+
+                bool numeric; // flags for enabling exponent notation for floating-point
+                bool exp;
+
+                bool binPair = false;          // marker if tree contains complete binary pairs (i.e. N+1 values and N binary ops)
+                int unpaired_conditionals = 0; // number of unpaired conditional ops
+
+                Expr.OPs op = Expr.OPs.None; // extracted binary op (initialized so compiler doesn't complain)
+                int oplen = 0;               // length of operator found (in characters)
+
+                string err = null; // error location for hole evaluation
+
+                Stack<char> unaryOps = new Stack<char>(8); // holds unary ops for processing
+                Stack<Expr> stack = new Stack<Expr>();     // the stack used to manage operator precedence rules
+
+                // top of stack shall be refered to as current
+
+                stack.Push(null); // stack will always have a null at its base (simplifies code slightly)
+
+                if (token.Length == 0) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: Empty expression encountered"); return false; }
+
+                while (pos < token.Length)
+                {
+                    // -- read val(op) -- //
+
+                    // consume unary ops
+                    for (; pos < token.Length && UnaryOps.Contains(token[pos]); ++pos) unaryOps.Push(token[pos]);
+
+                    depth = 0; // initial depth of 0
+
+                    numeric = pos < token.Length && char.IsDigit(token[pos]); // flag if this is a numeric literal
+                    exp = false; // no exponent yet
+
+                    // find next binary op
+                    for (end = pos; end < token.Length && (depth > 0 || !TryGetOp(token, end, out op, out oplen) || (numeric && exp)); ++end)
+                    {
+                        if (token[end] == '(') ++depth;
+                        else if (token[end] == ')') --depth;
+                        else if (numeric && token[end] == 'e' || token[end] == 'E') exp = true; // e or E begins exponent
+                        else if (numeric && token[end] == '+' || token[end] == '-' || char.IsDigit(token[end])) exp = false; // + or - or a digit ends exponent safety net
+
+                        // can't ever have negative depth
+                        if (depth < 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched parenthesis \"{token}\""); return false; }
+                    }
+                    // if depth isn't back to 0, there was a parens mismatch
+                    if (depth != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched parenthesis \"{token}\""); return false; }
+                    // if pos == end we'll have an empty token
+                    if (pos == end) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Empty token encountered in expression \"{token}\""); return false; }
+
+                    // -- process value -- //
+                    {
+                        // -- convert value to an expression tree --
+
+                        // if sub-expression
+                        if (token[pos] == '(')
+                        {
+                            // parse it into temp
+                            if (!TryParseImm(token.Substring(pos + 1, end - pos - 2), out temp)) return false;
+                        }
+                        // otherwise is value
+                        else
+                        {
+                            // get the value to insert
+                            string val = token.Substring(pos, end - pos);
+
+                            // mutate it
+                            if (!MutateLabel(ref val)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse imm \"{token}\"\n-> {res.ErrorMsg}"); return false; }
+
+                            // create the hole for it
+                            temp = new Expr() { Value = val };
+
+                            // it either needs to be evaluatable or a valid label name
+                            if (!temp.Evaluate(file.Symbols, out UInt64 _res, out bool floating, ref err) && !IsValidLabel(val))
+                            { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to resolve symbol as a valid imm \"{val}\"\n-> {err}"); return false; }
+                        }
+
+                        // -- handle unary op by modifying subtree --
+
+                        // handle the unary ops in terms of binary ops (stack provides right-to-left evaluation)
+                        while (unaryOps.Count > 0)
+                        {
+                            char uop = unaryOps.Pop();
+                            switch (uop)
+                            {
+                                case '+': break;
+                                case '-': temp = new Expr() { OP = Expr.OPs.Neg, Left = temp }; break;
+                                case '~': temp = new Expr() { OP = Expr.OPs.BitNot, Left = temp }; break;
+                                case '!': temp = new Expr() { OP = Expr.OPs.LogNot, Left = temp }; break;
+                                case '*': temp = new Expr() { OP = Expr.OPs.Float, Left = temp }; break;
+                                case '/': temp = new Expr() { OP = Expr.OPs.Int, Left = temp }; break;
+
+                                default: throw new NotImplementedException($"unary op \'{uop}\' not implemented");
+                            }
+                        }
+
+                        // -- append subtree to main tree --
+
+                        // if no tree yet, use this one
+                        if (hole == null) hole = temp;
+                        // otherwise append to current (guaranteed to be defined by second pass)
+                        else
+                        {
+                            //if (stack.Peek().Left == null) stack.Peek().Left = temp; else stack.Peek().Right = temp;
+
+                            // put it in the right (guaranteed by this algorithm to be empty)
+                            stack.Peek().Right = temp;
+                        }
+
+                        // flag as a valid binary pair
+                        binPair = true;
+                    }
+
+                    // -- process op -- //
+                    if (end < token.Length)
+                    {
+                        // ternary conditional has special rules
+                        if (op == Expr.OPs.Pair)
+                        {
+                            // seek out nearest conditional without a pair
+                            for (; stack.Peek() != null && (stack.Peek().OP != Expr.OPs.Condition || stack.Peek().Right.OP == Expr.OPs.Pair); stack.Pop()) ;
+
+                            // if we didn't find anywhere to put it, this is an error
+                            if (stack.Peek() == null) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expression contained a ternary conditional pair without a corresponding condition \"{token}\""); return false; }
+                        }
+                        // right-to-left operators
+                        else if (op == Expr.OPs.Condition)
+                        {
+                            // wind current up to correct precedence (right-to-left evaluation, so don't skip equal precedence)
+                            for (; stack.Peek() != null && Precedence[stack.Peek().OP] < Precedence[op]; stack.Pop()) ;
+                        }
+                        // left-to-right operators
+                        else
+                        {
+                            // wind current up to correct precedence (left-to-right evaluation, so also skip equal precedence)
+                            for (; stack.Peek() != null && Precedence[stack.Peek().OP] <= Precedence[op]; stack.Pop()) ;
+                        }
+
+                        // if we have a valid current
+                        if (stack.Peek() != null)
+                        {
+                            // splice in the new operator, moving current's right sub-tree to left of new node
+                            stack.Push(stack.Peek().Right = new Expr() { OP = op, Left = stack.Peek().Right });
+                        }
+                        // otherwise we'll have to move the root
+                        else
+                        {
+                            // splice in the new operator, moving entire tree to left of new node
+                            stack.Push(hole = new Expr() { OP = op, Left = hole });
+                        }
+
+                        binPair = false; // flag as invalid binary pair
+
+                        // update unpaired conditionals
+                        if (op == Expr.OPs.Condition) ++unpaired_conditionals;
+                        else if (op == Expr.OPs.Pair) --unpaired_conditionals;
+                    }
+
+                    // pass last delimiter
+                    pos = end + oplen;
+                }
+
+                // handle binary pair mismatch
+                if (!binPair) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expression contained a mismatched binary op: \"{token}\""); return false; }
+
+                // make sure all conditionals were matched
+                if (unpaired_conditionals != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expression contained {unpaired_conditionals} incomplete ternary {(unpaired_conditionals == 1 ? "conditional" : "conditionals")}"); return false; }
+
+                return true;
+            }
+            public bool TryParseInstantImm(string token, out UInt64 val, out bool floating)
+            {
+                string err = null; // error location for evaluation
+
+                if (!TryParseImm(token, out Expr hole)) { val = 0; floating = false; return false; }
+                if (!hole.Evaluate(file.Symbols, out val, out floating, ref err)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to parse instant imm \"{token}\"\n-> {err}"); return false; }
+
+                return true;
+            }
+
+            public bool TryParseRegister(string token, out UInt64 val)
+            {
+                val = 0;
+
+                // registers prefaced with $
+                if (token.Length < 2 || token[0] != '$') { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Invalid register format encountered \"{token}\""); return false; }
+
+                int end = 0; // ending of register expression token
+
+                // if this starts parenthetical region
+                if (token[1] == '(')
+                {
+                    int depth = 1; // depth of 1
+
+                    // start searching for ending parens after first parens
+                    for (end = 2; end < token.Length && depth > 0; ++end)
+                    {
+                        if (token[end] == '(') ++depth;
+                        else if (token[end] == ')') --depth;
+                    }
+
+                    // make sure we reached zero depth
+                    if (depth != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched parenthesis in register expression \"{token.Substring(1, end - 1)}\""); return false; }
+                }
+                // otherwise normal symbol
+                else
+                {
+                    // take all legal chars
+                    for (end = 1; end < token.Length && (char.IsLetterOrDigit(token[end]) || token[end] == '_'); ++end) ;
+                }
+
+                // make sure we consumed the entire string
+                if (end != token.Length) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expressions used as register ids must be parenthesized"); return false; }
+
+                // register index must be instant imm
+                if (!TryParseInstantImm(token.Substring(1, end - 1), out val, out bool floating)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to parse register index \"{token.Substring(1, end - 1)}\"\n-> {res.ErrorMsg}"); return false; }
+                
+                // ensure not floating and in proper range
+                if (floating) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Attempt to use floating point value to specify register \"{token}\""); return false; }
+                if (val >= 16) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Register index out of range \"{token}\" (evaluated to {val})"); return false; }
+
+                return true;
+            }
+            public bool TryParseSizecode(string token, out UInt64 val)
+            {
+                // size code must be instant imm
+                if (!TryParseInstantImm(token, out val, out bool floating)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to parse size code \"{token}\"\n-> {res.ErrorMsg}"); return false; }
+
+                // ensure not floating
+                if (floating) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to use floating point value to specify register size \"{token}\""); return false; }
+
+                // convert to size code
+                switch (val)
+                {
+                    case 8: val = 0; return true;
+                    case 16: val = 1; return true;
+                    case 32: val = 2; return true;
+                    case 64: val = 3; return true;
+
+                    default: res = new AssembleResult(AssembleError.ArgError, $"line {line}: Invalid register size: {val}"); return false;
+                }
+            }
+            public bool TryParseMultcode(string token, out UInt64 val)
+            {
+                // mult code must be instant imm
+                if (!TryParseInstantImm(token, out val, out bool floating)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to parse mult code \"{token}\"\n-> {res.ErrorMsg}"); return false; }
+
+                // ensure not floating
+                if (floating) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to use floating point value to specify size multiplier \"{token}\""); return false; }
+
+                // convert to mult code
+                switch (val)
+                {
+                    case 0: val = 0; return true;
+                    case 1: val = 1; return true;
+                    case 2: val = 2; return true;
+                    case 4: val = 3; return true;
+                    case 8: val = 4; return true;
+                    case 16: val = 5; return true;
+                    case 32: val = 6; return true;
+                    case 64: val = 7; return true;
+
+                    default: res = new AssembleResult(AssembleError.ArgError, $"line {line}: Invalid size multiplier: {val}"); return false;
+                }
+            }
+
+            public bool TryParseAddressReg(string label, ref Expr hole, out UInt64 m, out bool neg)
+            {
+                m = 0; neg = false; // initialize out params
+
+                Stack<Expr> path = new Stack<Expr>();
+                List<Expr> list = new List<Expr>();
+
+                string err = string.Empty; // evaluation error
+
+                // while we can find this symbol
+                while (hole.Find(label, path))
+                {
+                    // move path into list
+                    while (path.Count > 0) list.Add(path.Pop());
+
+                    // if it doesn't have a mult section
+                    if (list.Count == 1 || list.Count > 1 && list[1].OP != Expr.OPs.Mul)
+                    {
+                        // add in a multiplier of 1
+                        list[0].OP = Expr.OPs.Mul;
+                        list[0].Left = new Expr() { Value = "1" };
+                        list[0].Right = new Expr() { Value = list[0].Value };
+
+                        // insert new register location as beginning of path
+                        list.Insert(0, list[0].Right);
+                    }
+
+                    // start 2 above (just above regular mult code)
+                    for (int i = 2; i < list.Count;)
+                    {
+                        switch (list[i].OP)
+                        {
+                            case Expr.OPs.Add: case Expr.OPs.Sub: case Expr.OPs.Neg: ++i; break;
+
+                            case Expr.OPs.Mul:
+                                {
+                                    // toward leads to register, mult leads to mult value
+                                    Expr toward = list[i - 1], mult = list[i].Left == list[i - 1] ? list[i].Right : list[i].Left;
+
+                                    // if pos is add/sub, we need to distribute
+                                    if (toward.OP == Expr.OPs.Add || toward.OP == Expr.OPs.Sub)
+                                    {
+                                        // swap operators with toward
+                                        list[i].OP = toward.OP;
+                                        toward.OP = Expr.OPs.Mul;
+
+                                        // create the distribution node
+                                        Expr temp = new Expr() { OP = Expr.OPs.Mul, Left = mult };
+
+                                        // compute right and transfer mult to toward
+                                        if (toward.Left == list[i - 2]) { temp.Right = toward.Right; toward.Right = mult; }
+                                        else { temp.Right = toward.Left; toward.Left = mult; }
+
+                                        // add it in
+                                        if (list[i].Left == mult) list[i].Left = temp; else list[i].Right = temp;
+                                    }
+                                    // if pos is mul, we need to combine with pre-existing mult code
+                                    else if (toward.OP == Expr.OPs.Mul)
+                                    {
+                                        // create the combination node
+                                        Expr temp = new Expr() { OP = Expr.OPs.Mul, Left = mult, Right = toward.Left == list[i - 2] ? toward.Right : toward.Left };
+
+                                        // add it in
+                                        if (list[i].Left == mult)
+                                        {
+                                            list[i].Left = temp; // replace mult with combination
+                                            list[i].Right = list[i - 2]; // bump up toward
+                                        }
+                                        else
+                                        {
+                                            list[i].Right = temp;
+                                            list[i].Left = list[i - 2];
+                                        }
+
+                                        // remove the skipped list[i - 1]
+                                        list.RemoveAt(i - 1);
+                                    }
+                                    // if pos is neg, we need to put the negative on the mult
+                                    else if (toward.OP == Expr.OPs.Neg)
+                                    {
+                                        // create the combinartion node
+                                        Expr temp = new Expr() { OP = Expr.OPs.Neg, Left = mult };
+
+                                        // add it in
+                                        if (list[i].Left == mult)
+                                        {
+                                            list[i].Left = temp; // replace mult with combination
+                                            list[i].Right = list[i - 2]; // bump up toward
+                                        }
+                                        else
+                                        {
+                                            list[i].Right = temp;
+                                            list[i].Left = list[i - 2];
+                                        }
+
+                                        // remove the skipped list[i - 1]
+                                        list.RemoveAt(i - 1);
+                                    }
+                                    // otherwise something horrible happened (this should never happen, but is left in for sanity-checking and future-proofing)
+                                    else throw new ArgumentException($"Unknown address simplification step: {toward.OP}");
+
+                                    --i; // decrement i to follow the multiplication all the way down the rabbit hole
+                                    if (i < 2) i = 2; // but if it gets under the starting point, reset it
+
+                                    break;
+                                }
+
+                            default: res = new AssembleResult(AssembleError.FormatError, $"line {line}: Register may not be connected by {list[i].OP}"); return false;
+                        }
+                    }
+
+                    // -- finally done with all the algebra -- //
+
+                    // extract mult code fragment
+                    if (!(list[1].Left == list[0] ? list[1].Right : list[1].Left).Evaluate(file.Symbols, out UInt64 val, out bool floating, ref err))
+                    { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to evaluate register multiplier as an instant imm\n-> {err}"); return false; }
+                    // make sure it's not floating-point
+                    if (floating) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Register multiplier may not be floating-point"); return false; }
+
+                    // look through from top to bottom
+                    for (int i = list.Count - 1; i >= 2; --i)
+                    {
+                        // if this will negate the register
+                        if (list[i].OP == Expr.OPs.Neg || list[i].OP == Expr.OPs.Sub && list[i].Right == list[i - 1])
+                        {
+                            // negate found partial mult
+                            val = ~val + 1;
+                        }
+                    }
+
+                    // remove the register section from the expression (replace with integral 0)
+                    list[1].OP = Expr.OPs.None;
+                    list[1].Left = list[1].Right = null;
+                    list[1].Value = "0";
+
+                    m += val; // add extracted mult to total mult
+                    list.Clear(); // clear list for next pass
+                }
+
+                // -- final task: get mult code and negative flag -- //
+
+                // if m is pretty big, it's negative
+                if (m > 64) { m = ~m + 1; neg = true; } else neg = false;
+                // only other thing is transforming the multiplier into a mult code
+                switch (m)
+                {
+                    case 0: m = 0; break;
+                    case 1: m = 1; break;
+                    case 2: m = 2; break;
+                    case 4: m = 3; break;
+                    case 8: m = 4; break;
+                    case 16: m = 5; break;
+                    case 32: m = 6; break;
+                    case 64: m = 7; break;
+
+                    default: res = new AssembleResult(AssembleError.ArgError, $"line {line}: Invalid register multiplier encountered ({m.MakeSigned()})"); return false;
+                }
+
+                // register successfully parsed
+                return true;
+            }
+            public bool TryParseAddress(string token, out UInt64 a, out UInt64 b, out Expr hole)
+            {
+                a = b = 0;
+                hole = new Expr();
+
+                // must be of [*] format
+                if (token.Length < 3 || token[0] != '[' || token[token.Length - 1] != ']') { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Invalid address format encountered \"{token}\""); return false; }
+
+                int pos, end; // parsing positions
+
+                UInt64 temp = 0; // parsing temporaries
+                bool btemp = false;
+
+                int reg_count = 0; // number of registers parsed
+                UInt64 r1 = 0, m1 = 0, r2 = 0, m2 = 0; // final register info
+                bool n1 = false, n2 = false;
+
+                string preface = $"__reg_{time:x16}"; // preface used for registers
+                string err = string.Empty; // evaluation error
+
+                List<UInt64> regs = new List<UInt64>(); // the registers found in the expression
+
+                // replace registers with temporary names
+                while (true)
+                {
+                    // find the next register marker
+                    for (pos = 1; pos < token.Length && token[pos] != '$'; ++pos) ;
+                    // if this starts parenthetical region
+                    if (pos + 1 < token.Length && token[pos + 1] == '(')
+                    {
+                        int depth = 1; // depth of 1
+
+                        // start searching for ending parens after first parens
+                        for (end = pos + 2; end < token.Length && depth > 0; ++end)
+                        {
+                            if (token[end] == '(') ++depth;
+                            else if (token[end] == ')') --depth;
+                        }
+
+                        // make sure we reached zero depth
+                        if (depth != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched parenthesis in register expression \"{token.Substring(pos, end - pos)}\""); return false; }
+                    }
+                    // otherwise normal symbol
+                    else
+                    {
+                        // take all legal chars
+                        for (end = pos + 1; end < token.Length && (char.IsLetterOrDigit(token[end]) || token[end] == '_'); ++end) ;
+                    }
+
+                    // break out if we've reached the end
+                    if (pos >= token.Length) break;
+
+                    // parse this as a register
+                    if (!TryParseRegister(token.Substring(pos, end - pos), out temp)) return false;
+
+                    // put it in a register slot
+                    if (!regs.Contains(temp)) regs.Add(temp);
+
+                    // modify the register label in the expression to be a legal symbol name
+                    token = $"{token.Substring(0, pos)}{preface}_{temp}{token.Substring(end)}";
+                }
+
+                // turn into an expression
+                if (!TryParseImm(token.Substring(1, token.Length - 2), out hole)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse address expression\n-> {res.ErrorMsg}"); return false; }
+
+                // look through each register found
+                foreach (UInt64 reg in regs)
+                {
+                    // get the register data
+                    if (!TryParseAddressReg($"{preface}_{reg}", ref hole, out temp, out btemp)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to extract register data\n-> {res.ErrorMsg}"); return false; }
+
+                    // if the multiplier was nonzero, the register is really being used
+                    if (temp != 0)
+                    {
+                        // put it into an available r slot
+                        if (reg_count == 0) { r1 = reg; m1 = temp; n1 = btemp; }
+                        else if (reg_count == 1) { r2 = reg; m2 = temp; n2 = btemp; }
+                        else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Can't use more than 2 registers to specify an address"); return false; }
+
+                        ++reg_count; // mark this slot as filled
+                    }
+                }
+
+                // make sure only one register is negative
+                if (n1 && n2) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Only one register may be negative in an address expression"); return false; }
+                // if the negative register is r1, swap with r2
+                if (n1)
+                {
+                    Utility.Swap(ref r1, ref r2);
+                    Utility.Swap(ref m1, ref m2);
+                    Utility.Swap(ref n1, ref n2);
+                }
+
+                // if we can evaluate the hole to zero, there is no hole (null it)
+                if (hole.Evaluate(file.Symbols, out temp, out btemp, ref err) && temp == 0) hole = null;
+
+                // -- apply final touches -- //
+
+                // [1: literal][3: m1][1: -m2][3: m2]   [4: r1][4: r2]   ([64: imm])
+                a = (hole != null ? 128 : 0ul) | (m1 << 4) | (n2 ? 8 : 0ul) | m2;
+                b = (r1 << 4) | r2;
+
+                // address successfully parsed
+                return true;
+            }
+
+            // -- op formats -- //
+
+            public bool TryProcessBinaryOp(OPCode op, int _b_sizecode = -1, UInt64 sizemask = 15)
+            {
+                UInt64 a, b, c; // parsing temporaries
+                Expr hole1, hole2;
+
+                if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 2 args"); return false; }
+                if ((Size(sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
+
+                AppendVal(1, (UInt64)op);
+
+                UInt64 b_sizecode = _b_sizecode == -1 ? sizecode : (UInt64)_b_sizecode;
+
+                // reg, *
+                if (args[0][0] == '$')
+                {
+                    if (!TryParseRegister(args[0], out a)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as a register\n-> {res.ErrorMsg}"); return false; }
+
+                    // reg, reg
+                    if (args[1][0] == '$')
+                    {
+                        if (!TryParseRegister(args[1], out b)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as a register\n-> {res.ErrorMsg}"); return false; }
+
+                        AppendVal(1, (a << 4) | (sizecode << 2) | 2);
+                        AppendVal(1, b);
+                    }
+                    // reg, mem
+                    else if (args[1][0] == '[')
+                    {
+                        if (!TryParseAddress(args[1], out b, out c, out hole1)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as an address\n-> {res.ErrorMsg}"); return false; }
+
+                        AppendVal(1, (a << 4) | (sizecode << 2) | 1);
+                        if (!TryAppendAddress(b, c, hole1)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                    }
+                    // reg, imm
+                    else
+                    {
+                        if (!TryParseImm(args[1], out hole1)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as an imm\n-> {res.ErrorMsg}"); return false; }
+
+                        AppendVal(1, (a << 4) | (sizecode << 2) | 0);
+                        if (!TryAppendExpr(Size(b_sizecode), hole1)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                    }
+                }
+                // mem, *
+                else if (args[0][0] == '[')
+                {
+                    if (!TryParseAddress(args[0], out a, out b, out hole1)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as an address\n-> {res.ErrorMsg}"); return false; }
+
+                    // mem, reg
+                    if (args[1][0] == '$')
+                    {
+                        if (!TryParseRegister(args[1], out c)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as a register\n-> {res.ErrorMsg}"); return false; }
+
+                        AppendVal(1, (sizecode << 2) | 2);
+                        AppendVal(1, 16 | c);
+                        if (!TryAppendAddress(a, b, hole1)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; };
+                    }
+                    // mem, mem
+                    else if (args[1][0] == '[') { res = new AssembleResult(AssembleError.FormatError, $"line {line}: {op} does not support memory-to-memory"); return false; }
+                    // mem, imm
+                    else
+                    {
+                        if (!TryParseImm(args[1], out hole2)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as an imm\n-> {res.ErrorMsg}"); return false; }
+
+                        AppendVal(1, (sizecode << 2) | 3);
+                        if (!TryAppendExpr(Size(b_sizecode), hole2)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                        if (!TryAppendAddress(a, b, hole1)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                    }
+                }
+                else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Destination must be register or memory"); return false; }
+
+                return true;
+            }
+            public bool TryProcessUnaryOp(OPCode op, UInt64 sizemask = 15)
+            {
+                UInt64 a, b;
+                Expr hole;
+
+                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 1 arg"); return false; }
+                if ((Size(sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
+
+                AppendVal(1, (UInt64)op);
+
+                // reg
+                if (args[0][0] == '$')
+                {
+                    if (!TryParseRegister(args[0], out a)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as a register\n-> {res.ErrorMsg}"); return false; }
+
+                    AppendVal(1, (a << 4) | (sizecode << 2) | 0);
+                }
+                // mem
+                else if (args[0][0] == '[')
+                {
+                    if (!TryParseAddress(args[0], out a, out b, out hole)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as an address\n-> {res.ErrorMsg}"); return false; }
+
+                    AppendVal(1, (sizecode << 2) | 1);
+                    if (!TryAppendAddress(a, b, hole)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                }
+                // imm
+                else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Destination must be register or memory"); return false; }
+
+                return true;
+            }
+            public bool TryProcessJump(OPCode op)
+            {
+                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 1 arg"); return false; }
+
+                if (!TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr hole)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Jump expected address as first arg\n-> {res.ErrorMsg}"); return false; }
+
+                AppendVal(1, (UInt64)op);
+                if (!TryAppendAddress(a, b, hole)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+
+                return true;
+            }
+            public bool TryProcessEmission()
+            {
+                if (args.Length == 0) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Emission expected at least one value"); return false; }
+
+                Expr hole = new Expr(); // initially empty hole (to allow for buffer shorthand e.x. "emit x32")
+                UInt64 mult;
+                bool floating;
+
+                for (int i = 0; i < args.Length; ++i)
+                {
+                    if (args[i].Length == 0) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Emission encountered empty argument"); return false; }
+
+                    // if a multiplier
+                    if (args[i][0] == EmissionMultiplierChar)
+                    {
+                        // get the multiplier and ensure is valid
+                        if (!TryParseInstantImm(args[i].Substring(1), out mult, out floating)) return false;
+                        if (floating) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Emission multiplier cannot be floating point"); return false; }
+                        if (mult > EmissionMaxMultiplier) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Emission multiplier cannot exceed {EmissionMaxMultiplier}. Got {mult}"); return false; }
+                        if (mult == 0) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Emission multiplier cannot be zero"); return false; }
+
+                        // account for first written value
+                        if (i > 0 && args[i - 1][0] != EmissionMultiplierChar) --mult;
+
+                        for (UInt64 j = 0; j < mult; ++j)
+                            if (!TryAppendExpr(Size(sizecode), hole)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                    }
+                    // if a string
+                    else if (args[i][0] == '"' || args[i][0] == '\'')
+                    {
+                        if (args[i][0] != args[i][args[i].Length - 1]) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: String literal must be enclosed in single or double quotes"); return false; }
+
+                        // dump the contents into memory
+                        for (int j = 1; j < args[i].Length - 1; ++j)
+                        {
+                            // make sure there's no string splicing
+                            if (args[i][j] == args[i][0]) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: String emission prematurely reached a terminating quote"); return false; }
+
+                            AppendVal(Size(sizecode), args[i][j]);
+                        }
+                    }
+                    // otherwise is a value
+                    else
+                    {
+                        // get the value
+                        if (!TryParseImm(args[i], out hole)) return false;
+
+                        // make one of them
+                        if (!TryAppendExpr(Size(sizecode), hole)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                    }
+                }
+
+                return true;
+            }
+            public bool TryProcessIMMRM(OPCode op)
+            {
+                UInt64 a, b;
+                Expr hole;
+
+                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 1 arg"); return false; }
+
+                AppendVal(1, (UInt64)op);
+
+                // reg
+                if (args[0][0] == '$')
+                {
+                    if (!TryParseRegister(args[0], out a)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as a register\n-> {res.ErrorMsg}"); return false; }
+
+                    AppendVal(1, (a << 4) | (sizecode << 2) | 1);
+                }
+                // mem
+                else if (args[0][0] == '[')
+                {
+                    if (!TryParseAddress(args[0], out a, out b, out hole)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as an address\n-> {res.ErrorMsg}"); return false; }
+
+                    AppendVal(1, (sizecode << 2) | 2);
+                    if (!TryAppendAddress(a, b, hole)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                }
+                // imm
+                else
+                {
+                    if (!TryParseImm(args[0], out hole)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as an imm\n-> {res.ErrorMsg}"); return false; }
+
+                    AppendVal(1, (sizecode << 2) | 0);
+                    if (!TryAppendExpr(Size(sizecode), hole)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                }
+
+                return true;
+            }
         }
 
         /// <summary>
-        /// The maximum value for an emission multiplier
+        /// Attempts to patch the hole. returns PatchError.None on success
         /// </summary>
-        public const UInt64 EmissionMaxMultiplier = 1000000;
-
-        private static bool Write<T>(T arr, UInt64 pos, UInt64 size, UInt64 val) where T : IList<byte>
-        {
-            // make sure we're not exceeding memory bounds
-            if (pos < 0 || pos + size > (UInt64)arr.LongCount()) return false;
-
-            // write the value (little-endian)
-            for (ushort i = 0; i < size; ++i)
-                arr[(int)pos + i] = (byte)(val >> (8 * i)); // POTENTIAL SIZE LIMITATION
-
-            return true;
-        }
-        private static bool Read(byte[] arr, UInt64 pos, UInt64 size, ref UInt64 res)
-        {
-            // make sure we're not exceeding memory bounds
-            if (pos < 0 || pos + size > (UInt64)arr.LongLength) return false;
-
-            // read the value (little-endian)
-            res = 0;
-            for (ushort i = 0; i < size; ++i)
-                res |= (UInt64)arr[pos + i] << (8 * i);
-
-            return true;
-        }
-
-        private static void AppendVal(AssembleArgs args, UInt64 size, UInt64 val)
-        {
-            // write the value (little-endian)
-            for (ushort i = 0; i < size; ++i)
-                args.file.Data.Add((byte)(val >> (8 * i)));
-        }
-        private static bool TryAppendHole(AssembleArgs args, UInt64 size, Expr hole, int type = 3)
-        {
-            string err = null; // evaluation error
-
-            // create the hole data
-            HoleData data = new HoleData() { Address = (UInt64)args.file.Data.LongCount(), Size = size, Line = args.line, Expr = hole };
-            // write a dummy (all 1's for easy manual identification)
-            AppendVal(args, size, 0xffffffffffffffff);
-
-            // try to patch it
-            switch (TryPatchHole(args.file.Symbols, args.file.Data, data, ref err))
-            {
-                case PatchError.None: break;
-                case PatchError.Unevaluated: args.file.Holes.Add(data); break;
-                case PatchError.Error: args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Error encountered while patching expression\n-> {err}"); return false;
-
-                default: throw new ArgumentException("Unknown patch error encountered");
-            }
-
-            return true;
-        }
-        private static bool TryAppendAddress(AssembleArgs args, UInt64 a, UInt64 b, Expr hole)
-        {
-            // [1: literal][3: m1][1: -m2][3: m2]   ([4: r1][4: r2])   ([64: imm])
-            AppendVal(args, 1, a);
-            if ((a & 0x77) != 0) AppendVal(args, 1, b);
-            if ((a & 0x80) != 0) { if (!TryAppendHole(args, 8, hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append address base\n-> {args.err.Item2}"); return false; } }
-            
-            return true;
-        }
-
-        private static PatchError TryPatchHole<T>(Dictionary<string, Expr> symbols, T res, HoleData data, ref string err) where T : IList<byte>
+        /// <param name="res">data array to patch</param>
+        /// <param name="symbols">the symbols used for lookup</param>
+        /// <param name="data">the hole's data</param>
+        /// <param name="err">the resulting error on failure</param>
+        private static PatchError TryPatchHole<T>(T res, Dictionary<string, Expr> symbols, HoleData data, ref string err) where T : IList<byte>
         {
             // if we can fill it immediately, do so
             if (data.Expr.Evaluate(symbols, out UInt64 val, out bool floating, ref err))
@@ -2913,14 +4363,14 @@ namespace csx64
                     // only 64-bit and 32-bit are supported
                     switch (data.Size)
                     {
-                        case 8: Write(res, data.Address, 8, val); break;
-                        case 4: Write(res, data.Address, 4, FloatAsUInt64((float)AsDouble(val))); break;
+                        case 8: res.Write(data.Address, 8, val); break;
+                        case 4: res.Write(data.Address, 4, FloatAsUInt64((float)AsDouble(val))); break;
 
                         default: err = $"line {data.Line}: Attempt to use unsupported floating-point size"; return PatchError.Error;
                     }
                 }
                 // otherwise it's integral
-                else Write(res, data.Address, data.Size, val);
+                else res.Write(data.Address, data.Size, val);
             }
             else { err = $"line {data.Line}: Failed to evaluate expression\n-> {err}"; return PatchError.Unevaluated; }
 
@@ -2928,988 +4378,36 @@ namespace csx64
             return PatchError.None;
         }
 
-        private static bool SplitLine(AssembleArgs args)
-        {
-            // (label: label: ...) (op(:size) (arg, arg, ...))
-
-            int pos = 0, end; // position in line parsing
-            int quote;        // index of openning quote in args
-
-            List<string> tokens = new List<string>();
-            StringBuilder b = new StringBuilder();
-
-            // parse labels
-            for (; pos < args.rawline.Length; pos = end)
-            {
-                // skip leading white space
-                for (; pos < args.rawline.Length && char.IsWhiteSpace(args.rawline[pos]); ++pos) ;
-                // get a white space-delimited token
-                for (end = pos; end < args.rawline.Length && !char.IsWhiteSpace(args.rawline[end]); ++end) ;
-
-                // if it's a label, add to tokens
-                if (pos != end && args.rawline[end - 1] == ':') tokens.Add(args.rawline.Substring(pos, end - pos - 1));
-                // otherwise we're done with labels
-                else break; // break ensures we also keep pos pointing to start of next section
-            }
-            args.label_defs = tokens.ToArray(); // dump tokens as label defs
-            tokens.Clear(); // empty tokens for reuse
-
-            // parse op
-            if (pos < args.rawline.Length)
-            {
-                // get up till size separator or white space
-                for (end = pos; end < args.rawline.Length && args.rawline[end] != ':' && !char.IsWhiteSpace(args.rawline[end]); ++end) ;
-
-                // make sure we got a well-formed op
-                if (pos == end) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Operation size specification encountered without an operation"); return false; }
-                
-                // save this as op
-                args.op = args.rawline.Substring(pos, end - pos);
-
-                // if we got a size specification
-                if (end < args.rawline.Length && args.rawline[end] == ':')
-                {
-                    pos = end + 1; // position to beginning of size specification
-
-                    // if starting parenthetical section
-                    if (pos < args.rawline.Length && args.rawline[pos] == '(')
-                    {
-                        int depth = 1; // parenthetical depth
-
-                        // get till depth of zero
-                        for (end = pos + 1; end < args.rawline.Length && depth > 0; ++end)
-                        {
-                            if (args.rawline[end] == '(') ++depth;
-                            else if (args.rawline[end] == ')') --depth;
-                        }
-
-                        if (depth != 0) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Mismatched parenthesis encountered in operation size specification"); return false; }
-                    }
-                    // ohterwise standard imm
-                    else
-                    {
-                        // take all legal chars
-                        for (end = pos; end < args.rawline.Length && (args.rawline[end] == '_' || char.IsLetterOrDigit(args.rawline[end])); ++end) ;
-                    }
-
-                    // make sure we didn't end on non-white space
-                    if (end < args.rawline.Length && !char.IsWhiteSpace(args.rawline[end])) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Size parameter must be separated from arguments by white space"); return false; }
-
-                    // parse the read size code
-                    if (!TryParseSizecode(args, args.rawline.Substring(pos, end - pos).RemoveWhiteSpace(), out args.sizecode))
-                    { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse operation size specification\n-> {args.err.Item2}"); return false; }
-                }
-                // otherwise use default size (64-bit)
-                else args.sizecode = 3;
-
-                pos = end; // pass parsed section before next section
-            }
-            // otherwise there is no op
-            else args.op = string.Empty;
-
-            // parse the rest of the line as comma-separated tokens
-            for (; pos < args.rawline.Length; ++pos)
-            {
-                // skip leading white space
-                for (; pos < args.rawline.Length && char.IsWhiteSpace(args.rawline[pos]); ++pos) ;
-                // when pos reaches end of token, we're done parsing
-                if (pos >= args.rawline.Length) break;
-
-                b.Clear(); // clear the string builder
-
-                // find the next terminator (comma-separated)
-                for (quote = -1; pos < args.rawline.Length && (args.rawline[pos] != ',' || quote >= 0); ++pos)
-                {
-                    if (args.rawline[pos] == '"' || args.rawline[pos] == '\'')
-                        quote = quote < 0 ? pos : (args.rawline[pos] == args.rawline[quote] ? -1 : quote);
-
-                    // omit white space unless in a quote
-                    if (quote >= 0 || !char.IsWhiteSpace(args.rawline[pos])) b.Append(args.rawline[pos]);
-                }
-
-                // make sure we closed any quotations
-                if (quote >= 0) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Unmatched quotation encountered in argument list"); return false; }
-
-                // make sure arg isn't empty
-                if (b.Length == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Empty operation argument encountered"); return false; }
-
-                // add this token
-                tokens.Add(b.ToString());
-            }
-            // output tokens to assemble args
-            args.args = tokens.ToArray();
-
-            // successfully parsed line
-            return true;
-        }
-
-        private static readonly Dictionary<Expr.OPs, int> Precedence = new Dictionary<Expr.OPs, int>()
-        {
-            { Expr.OPs.Mul, 5 },
-            { Expr.OPs.Div, 5 },
-            { Expr.OPs.Mod, 5 },
-
-            { Expr.OPs.Add, 6 },
-            { Expr.OPs.Sub, 6 },
-
-            { Expr.OPs.SL, 7 },
-            { Expr.OPs.SR, 7 },
-
-            { Expr.OPs.Less, 9 },
-            { Expr.OPs.LessE, 9 },
-            { Expr.OPs.Great, 9 },
-            { Expr.OPs.GreatE, 9 },
-
-            { Expr.OPs.Eq, 10 },
-            { Expr.OPs.Neq, 10 },
-
-            { Expr.OPs.BitAnd, 11 },
-            { Expr.OPs.BitXor, 12 },
-            { Expr.OPs.BitOr, 13 },
-            { Expr.OPs.LogAnd, 14 },
-            { Expr.OPs.LogOr, 15 },
-
-            { Expr.OPs.NullCoalesce, 99 },
-            { Expr.OPs.Pair, 100 },
-            { Expr.OPs.Condition, 100 }
-        };
-        private static readonly List<char> UnaryOps = new List<char>() { '+', '-', '~', '!', '*', '/' };
-
-        private static bool TryGetOp(string token, int pos, out Expr.OPs op, out int oplen)
-        {
-            // default to invalid op
-            op = Expr.OPs.None;
-            oplen = 0;
-
-            // try to take as many characters as possible (greedy)
-            if (pos + 2 <= token.Length)
-            {
-                oplen = 2; // record oplen
-                switch (token.Substring(pos, 2))
-                {
-                    case "<<": op = Expr.OPs.SL; return true;
-                    case ">>": op = Expr.OPs.SR; return true;
-
-                    case "<=": op = Expr.OPs.LessE; return true;
-                    case ">=": op = Expr.OPs.GreatE; return true;
-
-                    case "==": op = Expr.OPs.Eq; return true;
-                    case "!=": op = Expr.OPs.Neq; return true;
-
-                    case "&&": op = Expr.OPs.LogAnd; return true;
-                    case "||": op = Expr.OPs.LogOr; return true;
-
-                    case "??": op = Expr.OPs.NullCoalesce; return true;
-                }
-            }
-            if (pos + 1 <= token.Length)
-            {
-                oplen = 1; // record oplen
-                switch (token[pos])
-                {
-                    case '*': op = Expr.OPs.Mul; return true;
-                    case '/': op = Expr.OPs.Div; return true;
-                    case '%': op = Expr.OPs.Mod; return true;
-
-                    case '+': op = Expr.OPs.Add; return true;
-                    case '-': op = Expr.OPs.Sub; return true;
-
-                    case '<': op = Expr.OPs.Less; return true;
-                    case '>': op = Expr.OPs.Great; return true;
-
-                    case '&': op = Expr.OPs.BitAnd; return true;
-                    case '^': op = Expr.OPs.BitXor; return true;
-                    case '|': op = Expr.OPs.BitOr; return true;
-
-                    case '?': op = Expr.OPs.Condition; return true;
-                    case ':': op = Expr.OPs.Pair; return true;
-                }
-            }
-
-            // if nothing found, fail
-            return false;
-        }
-        private static bool TryParseImm(AssembleArgs args, string token, out Expr hole)
-        {
-            hole = null; // initially-nulled result
-
-            Expr temp; // temporary for node creation
-            
-            int pos = 0, end; // position in token
-            int depth;        // parenthesis depth
-
-            bool numeric; // flags for enabling exponent notation for floating-point
-            bool exp;
-
-            bool binPair = false;          // marker if tree contains complete binary pairs (i.e. N+1 values and N binary ops)
-            int unpaired_conditionals = 0; // number of unpaired conditional ops
-
-            Expr.OPs op = Expr.OPs.None; // extracted binary op (initialized so compiler doesn't complain)
-            int oplen = 0;               // length of operator found (in characters)
-
-            string err = null; // error location for hole evaluation
-
-            Stack<char> unaryOps = new Stack<char>(8); // holds unary ops for processing
-            Stack<Expr> stack = new Stack<Expr>();     // the stack used to manage operator precedence rules
-
-            // top of stack shall be refered to as current
-
-            stack.Push(null); // stack will always have a null at its base (simplifies code slightly)
-
-            if (token.Length == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Empty expression encountered"); return false; }
-
-            while (pos < token.Length)
-            {
-                // -- read val(op) -- //
-
-                // consume unary ops
-                for (; pos < token.Length && UnaryOps.Contains(token[pos]); ++pos) unaryOps.Push(token[pos]);
-
-                depth = 0; // initial depth of 0
-
-                numeric = pos < token.Length && char.IsDigit(token[pos]); // flag if this is a numeric literal
-                exp = false; // no exponent yet
-
-                // find next binary op
-                for (end = pos; end < token.Length && (depth > 0 || !TryGetOp(token, end, out op, out oplen) || (numeric && exp)); ++end)
-                {
-                    if (token[end] == '(') ++depth;
-                    else if (token[end] == ')') --depth;
-                    else if (numeric && token[end] == 'e' || token[end] == 'E') exp = true; // e or E begins exponent
-                    else if (numeric && token[end] == '+' || token[end] == '-' || char.IsDigit(token[end])) exp = false; // + or - or a digit ends exponent safety net
-
-                    // can't ever have negative depth
-                    if (depth < 0) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Mismatched parenthesis \"{token}\""); return false; }
-                }
-                // if depth isn't back to 0, there was a parens mismatch
-                if (depth != 0) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Mismatched parenthesis \"{token}\""); return false; }
-                // if pos == end we'll have an empty token
-                if (pos == end) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Empty token encountered in expression \"{token}\""); return false; }
-
-                // -- process value -- //
-                {
-                    // -- convert value to an expression tree --
-
-                    // if sub-expression
-                    if (token[pos] == '(')
-                    {
-                        // parse it into temp
-                        if (!TryParseImm(args, token.Substring(pos + 1, end - pos - 2), out temp)) return false;
-                    }
-                    // otherwise is value
-                    else
-                    {
-                        // get the value to insert
-                        string val = token.Substring(pos, end - pos);
-
-                        // mutate it
-                        if (!MutateLabel(args, ref val)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse imm \"{token}\"\n-> {args.err.Item2}"); return false; }
-
-                        // create the hole for it
-                        temp = new Expr() { Value = val };
-
-                        // it either needs to be evaluatable or a valid label name
-                        if (!temp.Evaluate(args.file.Symbols, out UInt64 res, out bool floating, ref err) && !IsValidLabel(val))
-                        { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to resolve symbol as a valid imm \"{val}\"\n-> {err}"); return false; }
-                    }
-
-                    // -- handle unary op by modifying subtree --
-
-                    // handle the unary ops in terms of binary ops (stack provides right-to-left evaluation)
-                    while (unaryOps.Count > 0)
-                    {
-                        char uop = unaryOps.Pop();
-                        switch (uop)
-                        {
-                            case '+': break;
-                            case '-': temp = new Expr() { OP = Expr.OPs.Neg, Left = temp }; break;
-                            case '~': temp = new Expr() { OP = Expr.OPs.BitNot, Left = temp }; break;
-                            case '!': temp = new Expr() { OP = Expr.OPs.LogNot, Left = temp }; break;
-                            case '*': temp = new Expr() { OP = Expr.OPs.Float, Left = temp }; break;
-                            case '/': temp = new Expr() { OP = Expr.OPs.Int, Left = temp }; break;
-
-                            default: throw new NotImplementedException($"unary op \'{uop}\' not implemented");
-                        }
-                    }
-
-                    // -- append subtree to main tree --
-
-                    // if no tree yet, use this one
-                    if (hole == null) hole = temp;
-                    // otherwise append to current (guaranteed to be defined by second pass)
-                    else
-                    {
-                        //if (stack.Peek().Left == null) stack.Peek().Left = temp; else stack.Peek().Right = temp;
-
-                        // put it in the right (guaranteed by this algorithm to be empty)
-                        stack.Peek().Right = temp;
-                    }
-
-                    // flag as a valid binary pair
-                    binPair = true;
-                }
-
-                // -- process op -- //
-                if (end < token.Length)
-                {
-                    // ternary conditional has special rules
-                    if (op == Expr.OPs.Pair)
-                    {
-                        // seek out nearest conditional without a pair
-                        for (; stack.Peek() != null && (stack.Peek().OP != Expr.OPs.Condition || stack.Peek().Right.OP == Expr.OPs.Pair); stack.Pop()) ;
-
-                        // if we didn't find anywhere to put it, this is an error
-                        if (stack.Peek() == null) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Expression contained a ternary conditional pair without a corresponding condition \"{token}\""); return false; }
-                    }
-                    // right-to-left operators
-                    else if (op == Expr.OPs.Condition)
-                    {
-                        // wind current up to correct precedence (right-to-left evaluation, so don't skip equal precedence)
-                        for (; stack.Peek() != null && Precedence[stack.Peek().OP] < Precedence[op]; stack.Pop()) ;
-                    }
-                    // left-to-right operators
-                    else
-                    {
-                        // wind current up to correct precedence (left-to-right evaluation, so also skip equal precedence)
-                        for (; stack.Peek() != null && Precedence[stack.Peek().OP] <= Precedence[op]; stack.Pop()) ;
-                    }
-
-                    // if we have a valid current
-                    if (stack.Peek() != null)
-                    {
-                        // splice in the new operator, moving current's right sub-tree to left of new node
-                        stack.Push(stack.Peek().Right = new Expr() { OP = op, Left = stack.Peek().Right });
-                    }
-                    // otherwise we'll have to move the root
-                    else
-                    {
-                        // splice in the new operator, moving entire tree to left of new node
-                        stack.Push(hole = new Expr() { OP = op, Left = hole });
-                    }
-
-                    binPair = false; // flag as invalid binary pair
-
-                    // update unpaired conditionals
-                    if (op == Expr.OPs.Condition) ++unpaired_conditionals;
-                    else if (op == Expr.OPs.Pair) --unpaired_conditionals;
-                }
-
-                // pass last delimiter
-                pos = end + oplen;
-            }
-
-            // handle binary pair mismatch
-            if (!binPair) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Expression contained a mismatched binary op: \"{token}\""); return false; }
-
-            // make sure all conditionals were matched
-            if (unpaired_conditionals != 0) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Expression contained {unpaired_conditionals} incomplete ternary {(unpaired_conditionals == 1 ? "conditional" : "conditionals")}"); return false; }
-
-            return true;
-        }
-        private static bool TryParseInstantImm(AssembleArgs args, string token, out UInt64 res, out bool floating)
-        {
-            string err = null; // error location for evaluation
-
-            if (!TryParseImm(args, token, out Expr hole)) { res = 0; floating = false; return false; }
-            if (!hole.Evaluate(args.file.Symbols, out res, out floating, ref err)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to parse instant imm \"{token}\"\n-> {err}"); return false; }
-
-            return true;
-        }
-
-        private static bool TryParseRegister(AssembleArgs args, string token, out UInt64 res)
-        {
-            res = 0;
-
-            // registers prefaced with $
-            if (token.Length < 2 || token[0] != '$') { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Invalid register format encountered \"{token}\""); return false; }
-
-            int end = 0; // ending of register expression token
-
-            // if this starts parenthetical region
-            if (token[1] == '(')
-            {
-                int depth = 1; // depth of 1
-
-                // start searching for ending parens after first parens
-                for (end = 2; end < token.Length && depth > 0; ++end)
-                {
-                    if (token[end] == '(') ++depth;
-                    else if (token[end] == ')') --depth;
-                }
-
-                // make sure we reached zero depth
-                if (depth != 0) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Mismatched parenthesis in register expression \"{token.Substring(1, end - 1)}\""); return false; }
-            }
-            // otherwise normal symbol
-            else
-            {
-                // take all legal chars
-                for (end = 1; end < token.Length && (char.IsLetterOrDigit(token[end]) || token[end] == '_'); ++end) ;
-            }
-
-            // make sure we consumed the entire string
-            if (end != token.Length) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Expressions used as register ids must be parenthesized"); return false; }
-
-            // register index must be instant imm
-            if (!TryParseInstantImm(args, token.Substring(1, end - 1), out res, out bool floating)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to parse register index \"{token.Substring(1, end - 1)}\"\n-> {args.err.Item2}"); return false; }
-
-            // ensure not floating and in proper range
-            if (floating) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Attempt to use floating point value to specify register \"{token}\""); return false; }
-            if (res >= 16) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Register index out of range \"{token}\" (evaluated to {res})"); return false; }
-
-            return true;
-        }
-        private static bool TryParseSizecode(AssembleArgs args, string token, out UInt64 res)
-        {
-            // size code must be instant imm
-            if (!TryParseInstantImm(args, token, out res, out bool floating)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to parse size code \"{token}\"\n-> {args.err.Item2}"); return false; }
-
-            // ensure not floating
-            if (floating) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Attempt to use floating point value to specify register size \"{token}\" -> {res}"); return false; }
-
-            // convert to size code
-            switch (res)
-            {
-                case 8: res = 0; return true;
-                case 16: res = 1; return true;
-                case 32: res = 2; return true;
-                case 64: res = 3; return true;
-
-                default: args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Invalid register size: {res}"); return false;
-            }
-        }
-        private static bool TryParseMultcode(AssembleArgs args, string token, out UInt64 res)
-        {
-            // mult code must be instant imm
-            if (!TryParseInstantImm(args, token, out res, out bool floating)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to parse mult code \"{token}\"\n-> {args.err.Item2}"); return false; }
-
-            // ensure not floating
-            if (floating) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Attempt to use floating point value to specify size multiplier \"{token}\" -> {res}"); return false; }
-
-            // convert to mult code
-            switch (res)
-            {
-                case 0: res = 0; return true;
-                case 1: res = 1; return true;
-                case 2: res = 2; return true;
-                case 4: res = 3; return true;
-                case 8: res = 4; return true;
-                case 16: res = 5; return true;
-                case 32: res = 6; return true;
-                case 64: res = 7; return true;
-
-                default: args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Invalid size multiplier: {res}"); return false;
-            }
-        }
-
-        private static bool TryParseAddressReg(AssembleArgs args, string label, ref Expr hole, out UInt64 m, out bool neg)
-        {
-            m = 0; neg = false; // initialize out params
-
-            Stack<Expr> path = new Stack<Expr>();
-            List<Expr> list = new List<Expr>();
-
-            string err = string.Empty; // evaluation error
-
-            // while we can find this symbol
-            while (hole.Find(label, path))
-            {
-                // move path into list
-                while (path.Count > 0) list.Add(path.Pop());
-
-                // if it doesn't have a mult section
-                if (list.Count == 1 || list.Count > 1 && list[1].OP != Expr.OPs.Mul)
-                {
-                    // add in a multiplier of 1
-                    list[0].OP = Expr.OPs.Mul;
-                    list[0].Left = new Expr() { Value = "1" };
-                    list[0].Right = new Expr() { Value = list[0].Value };
-
-                    // insert new register location as beginning of path
-                    list.Insert(0, list[0].Right);
-                }
-
-                // start 2 above (just above regular mult code)
-                for (int i = 2; i < list.Count; )
-                {
-                    switch (list[i].OP)
-                    {
-                        case Expr.OPs.Add: case Expr.OPs.Sub: case Expr.OPs.Neg: ++i; break;
-
-                        case Expr.OPs.Mul:
-                            {
-                                // toward leads to register, mult leads to mult value
-                                Expr toward = list[i - 1], mult = list[i].Left == list[i - 1] ? list[i].Right : list[i].Left;
-
-                                // if pos is add/sub, we need to distribute
-                                if (toward.OP == Expr.OPs.Add || toward.OP == Expr.OPs.Sub)
-                                {
-                                    // swap operators with toward
-                                    list[i].OP = toward.OP;
-                                    toward.OP = Expr.OPs.Mul;
-
-                                    // create the distribution node
-                                    Expr temp = new Expr() { OP = Expr.OPs.Mul, Left = mult };
-
-                                    // compute right and transfer mult to toward
-                                    if (toward.Left == list[i - 2]) { temp.Right = toward.Right; toward.Right = mult; }
-                                    else { temp.Right = toward.Left; toward.Left = mult; }
-
-                                    // add it in
-                                    if (list[i].Left == mult) list[i].Left = temp; else list[i].Right = temp;
-                                }
-                                // if pos is mul, we need to combine with pre-existing mult code
-                                else if (toward.OP == Expr.OPs.Mul)
-                                {
-                                    // create the combination node
-                                    Expr temp = new Expr() { OP = Expr.OPs.Mul, Left = mult, Right = toward.Left == list[i - 2] ? toward.Right : toward.Left };
-
-                                    // add it in
-                                    if (list[i].Left == mult)
-                                    {
-                                        list[i].Left = temp; // replace mult with combination
-                                        list[i].Right = list[i - 2]; // bump up toward
-                                    }
-                                    else
-                                    {
-                                        list[i].Right = temp;
-                                        list[i].Left = list[i - 2];
-                                    }
-
-                                    // remove the skipped list[i - 1]
-                                    list.RemoveAt(i - 1);
-                                }
-                                // if pos is neg, we need to put the negative on the mult
-                                else if (toward.OP == Expr.OPs.Neg)
-                                {
-                                    // create the combinartion node
-                                    Expr temp = new Expr() { OP = Expr.OPs.Neg, Left = mult };
-
-                                    // add it in
-                                    if (list[i].Left == mult)
-                                    {
-                                        list[i].Left = temp; // replace mult with combination
-                                        list[i].Right = list[i - 2]; // bump up toward
-                                    }
-                                    else
-                                    {
-                                        list[i].Right = temp;
-                                        list[i].Left = list[i - 2];
-                                    }
-
-                                    // remove the skipped list[i - 1]
-                                    list.RemoveAt(i - 1);
-                                }
-                                // otherwise something horrible happened (this should never happen, but is left in for sanity-checking and future-proofing)
-                                else throw new ArgumentException($"Unknown address simplification step: {toward.OP}");
-
-                                --i; // decrement i to follow the multiplication all the way down the rabbit hole
-                                if (i < 2) i = 2; // but if it gets under the starting point, reset it
-
-                                break;
-                            }
-
-                        default: args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Register may not be connected by {list[i].OP}"); return false;
-                    }
-                }
-
-                // -- finally done with all the algebra -- //
-                
-                // extract mult code fragment
-                if (!(list[1].Left == list[0] ? list[1].Right : list[1].Left).Evaluate(args.file.Symbols, out UInt64 val, out bool floating, ref err))
-                { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to evaluate register multiplier as an instant imm\n-> {err}"); return false; }
-                // make sure it's not floating-point
-                if (floating) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Register multiplier may not be floating-point"); return false; }
-
-                // look through from top to bottom
-                for (int i = list.Count - 1; i >= 2; --i)
-                {
-                    // if this will negate the register
-                    if (list[i].OP == Expr.OPs.Neg || list[i].OP == Expr.OPs.Sub && list[i].Right == list[i - 1])
-                    {
-                        // negate found partial mult
-                        val = ~val + 1;
-                    }
-                }
-
-                // remove the register section from the expression (replace with integral 0)
-                list[1].OP = Expr.OPs.None;
-                list[1].Left = list[1].Right = null;
-                list[1].Value = "0";
-
-                m += val; // add extracted mult to total mult
-                list.Clear(); // clear list for next pass
-            }
-
-            // -- final task: get mult code and negative flag -- //
-
-            // if m is pretty big, it's negative
-            if (m > 64) { m = ~m + 1; neg = true; } else neg = false;
-            // only other thing is transforming the multiplier into a mult code
-            switch (m)
-            {
-                case 0: m = 0; break;
-                case 1: m = 1; break;
-                case 2: m = 2; break;
-                case 4: m = 3; break;
-                case 8: m = 4; break;
-                case 16: m = 5; break;
-                case 32: m = 6; break;
-                case 64: m = 7; break;
-
-                default: args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Invalid register multiplier encountered ({m.MakeSigned()})"); return false;
-            }
-
-            // register successfully parsed
-            return true;
-        }
-        private static bool TryParseAddress(AssembleArgs args, string token, out UInt64 a, out UInt64 b, out Expr hole)
-        {
-            a = b = 0;
-            hole = new Expr();
-
-            // must be of [*] format
-            if (token.Length < 3 || token[0] != '[' || token[token.Length - 1] != ']') { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Invalid address format encountered \"{token}\""); return false; }
-
-            int pos, end; // parsing positions
-
-            UInt64 temp = 0; // parsing temporaries
-            bool btemp = false;
-
-            int reg_count = 0; // number of registers parsed
-            UInt64 r1 = 0, m1 = 0, r2 = 0, m2 = 0; // final register info
-            bool n1 = false, n2 = false;
-
-            string preface = $"__reg_{args.time:x16}"; // preface used for registers
-            string err = string.Empty; // evaluation error
-
-            List<UInt64> regs = new List<UInt64>(); // the registers found in the expression
-
-            // replace registers with temporary names
-            while (true)
-            {
-                // find the next register marker
-                for (pos = 1; pos < token.Length && token[pos] != '$'; ++pos) ;
-                // if this starts parenthetical region
-                if (pos + 1 < token.Length && token[pos + 1] == '(')
-                {
-                    int depth = 1; // depth of 1
-
-                    // start searching for ending parens after first parens
-                    for (end = pos + 2; end < token.Length && depth > 0; ++end)
-                    {
-                        if (token[end] == '(') ++depth;
-                        else if (token[end] == ')') --depth;
-                    }
-
-                    // make sure we reached zero depth
-                    if (depth != 0) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Mismatched parenthesis in register expression \"{token.Substring(pos, end - pos)}\""); return false; }
-                }
-                // otherwise normal symbol
-                else
-                {
-                    // take all legal chars
-                    for (end = pos + 1; end < token.Length && (char.IsLetterOrDigit(token[end]) || token[end] == '_'); ++end) ;
-                }
-
-                // break out if we've reached the end
-                if (pos >= token.Length) break;
-
-                // parse this as a register
-                if (!TryParseRegister(args, token.Substring(pos, end - pos), out temp)) return false;
-
-                // put it in a register slot
-                if (!regs.Contains(temp)) regs.Add(temp);
-
-                // modify the register label in the expression to be a legal symbol name
-                token = $"{token.Substring(0, pos)}{preface}_{temp}{token.Substring(end)}";
-            }
-            
-            // turn into an expression
-            if (!TryParseImm(args, token.Substring(1, token.Length - 2), out hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse address expression\n-> {args.err.Item2}"); return false; }
-
-            // look through each register found
-            foreach (UInt64 reg in regs)
-            {
-                // get the register data
-                if (!TryParseAddressReg(args, $"{preface}_{reg}", ref hole, out temp, out btemp)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to extract register data\n-> {args.err.Item2}"); return false; }
-
-                // if the multiplier was nonzero, the register is really being used
-                if (temp != 0)
-                {
-                    // put it into an available r slot
-                    if (reg_count == 0) { r1 = reg; m1 = temp; n1 = btemp; }
-                    else if (reg_count == 1) { r2 = reg; m2 = temp; n2 = btemp; }
-                    else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Can't use more than 2 registers to specify an address"); return false; }
-
-                    ++reg_count; // mark this slot as filled
-                }
-            }
-
-            // make sure only one register is negative
-            if (n1 && n2) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Only one register may be negative in an address expression"); return false; }
-            // if the negative register is r1, swap with r2
-            if (n1)
-            {
-                Utility.Swap(ref r1, ref r2);
-                Utility.Swap(ref m1, ref m2);
-                Utility.Swap(ref n1, ref n2);
-            }
-
-            // if we can evaluate the hole to zero, there is no hole (null it)
-            if (hole.Evaluate(args.file.Symbols, out temp, out btemp, ref err) && temp == 0) hole = null;
-
-            // -- apply final touches -- //
-
-            // [1: literal][3: m1][1: -m2][3: m2]   [4: r1][4: r2]   ([64: imm])
-            a = (hole != null ? 128 : 0ul) | (m1 << 4) | (n2 ? 8 : 0ul) | m2;
-            b = (r1 << 4) | r2;
-
-            // address successfully parsed
-            return true;
-        }
-
-        private static bool IsValidLabel(string token)
-        {
-            // can't be nothing
-            if (token.Length == 0) return false;
-
-            // first char is underscore or letter
-            if (token[0] != '_' && !char.IsLetter(token[0])) return false;
-            // all other chars may additionally be numbers
-            for (int i = 1; i < token.Length; ++i)
-                if (token[i] != '_' && !char.IsLetterOrDigit(token[i])) return false;
-
-            return true;
-        }
-        private static bool MutateLabel(AssembleArgs args, ref string label)
-        {
-            // if defining a local label
-            if (label[0] == '.')
-            {
-                string sub = label.Substring(1); // local symbol name
-
-                // local name can't be empty
-                if (!IsValidLabel(sub)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Local label name must be legal"); return false; }
-                // can't make a local label before any non-local ones exist
-                if (args.last_static_label == null) { args.err = new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Cannot define a local label before the first static label"); return false; }
-
-                // mutate the label
-                label = $"__local_{args.time:x16}_{args.last_static_label}_{sub}";
-            }
-
-            return true;
-        }
-
-        public static UInt64 Time()
-        {
-            return DateTime.UtcNow.Ticks.MakeUnsigned();
-        }
-
-        private static bool TryProcessBinaryOp(AssembleArgs args, OPCode op, int _b_sizecode = -1, UInt64 sizemask = 15)
-        {
-            UInt64 a, b, c; // parsing temporaries
-            Expr hole1, hole2;
-
-            if (args.args.Length != 2) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: {op} expected 2 args"); return false; }
-            if ((Size(args.sizecode) & sizemask) == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.UsageError, $"line {args.line}: {op} does not support the specified size code"); return false; }
-
-            AppendVal(args, 1, (UInt64)op);
-
-            UInt64 b_sizecode = _b_sizecode == -1 ? args.sizecode : (UInt64)_b_sizecode;
-
-            // reg, *
-            if (args.args[0][0] == '$')
-            {
-                if (!TryParseRegister(args, args.args[0], out a)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[0]}\" as a register\n-> {args.err.Item2}"); return false; }
-
-                // reg, reg
-                if (args.args[1][0] == '$')
-                {
-                    if (!TryParseRegister(args, args.args[1], out b)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[1]}\" as a register\n-> {args.err.Item2}"); return false; }
-
-                    AppendVal(args, 1, (a << 4) | (args.sizecode << 2) | 2);
-                    AppendVal(args, 1, b);
-                }
-                // reg, mem
-                else if (args.args[1][0] == '[')
-                {
-                    if (!TryParseAddress(args, args.args[1], out b, out c, out hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[1]}\" as an address\n-> {args.err.Item2}"); return false; }
-
-                    AppendVal(args, 1, (a << 4) | (args.sizecode << 2) | 1);
-                    if (!TryAppendAddress(args, b, c, hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
-                }
-                // reg, imm
-                else
-                {
-                    if (!TryParseImm(args, args.args[1], out hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[1]}\" as an imm\n-> {args.err.Item2}"); return false; }
-
-                    AppendVal(args, 1, (a << 4) | (args.sizecode << 2) | 0);
-                    if (!TryAppendHole(args, Size(b_sizecode), hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
-                }
-            }
-            // mem, *
-            else if (args.args[0][0] == '[')
-            {
-                if (!TryParseAddress(args, args.args[0], out a, out b, out hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[0]}\" as an address\n-> {args.err.Item2}"); return false; }
-
-                // mem, reg
-                if (args.args[1][0] == '$')
-                {
-                    if (!TryParseRegister(args, args.args[1], out c)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[1]}\" as a register\n-> {args.err.Item2}"); return false; }
-
-                    AppendVal(args, 1, (args.sizecode << 2) | 2);
-                    AppendVal(args, 1, 16 | c);
-                    if (!TryAppendAddress(args, a, b, hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; };
-                }
-                // mem, mem
-                else if (args.args[1][0] == '[') { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: {op} does not support memory-to-memory"); return false; }
-                // mem, imm
-                else
-                {
-                    if (!TryParseImm(args, args.args[1], out hole2)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[1]}\" as an imm\n-> {args.err.Item2}"); return false; }
-
-                    AppendVal(args, 1, (args.sizecode << 2) | 3);
-                    if (!TryAppendHole(args, Size(b_sizecode), hole2)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
-                    if (!TryAppendAddress(args, a, b, hole1)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
-                }
-            }
-            else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Destination must be register or memory"); return false; }
-
-            return true;
-        }
-        private static bool TryProcessUnaryOp(AssembleArgs args, OPCode op, UInt64 sizemask = 15)
-        {
-            UInt64 a, b;
-            Expr hole;
-
-            if (args.args.Length != 1) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: {op} expected 1 arg"); return false; }
-            if ((Size(args.sizecode) & sizemask) == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.UsageError, $"line {args.line}: {op} does not support the specified size code"); return false; }
-
-            AppendVal(args, 1, (UInt64)op);
-
-            // reg
-            if (args.args[0][0] == '$')
-            {
-                if (!TryParseRegister(args, args.args[0], out a)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[0]}\" as a register\n-> {args.err.Item2}"); return false; }
-
-                AppendVal(args, 1, (a << 4) | (args.sizecode << 2) | 0);
-            }
-            // mem
-            else if (args.args[0][0] == '[')
-            {
-                if (!TryParseAddress(args, args.args[0], out a, out b, out hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[0]}\" as an address\n-> {args.err.Item2}"); return false; }
-
-                AppendVal(args, 1, (args.sizecode << 2) | 1);
-                if (!TryAppendAddress(args, a, b, hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
-            }
-            // imm
-            else { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Destination must be register or memory"); return false; }
-
-            return true;
-        }
-        private static bool TryProcessJump(AssembleArgs args, OPCode op)
-        {
-            if (args.args.Length != 1) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: {op} expected 1 arg"); return false; }
-
-            if (!TryParseAddress(args, args.args[0], out UInt64 a, out UInt64 b, out Expr hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Jump expected address as first arg\n-> {args.err.Item2}"); return false; }
-
-            AppendVal(args, 1, (UInt64)op);
-            if (!TryAppendAddress(args, a, b, hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
-
-            return true;
-        }
-        private static bool TryProcessEmission(AssembleArgs args)
-        {
-            if (args.args.Length == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: Emission expected at least one value"); return false; }
-
-            Expr hole = new Expr(); // initially empty hole (to allow for buffer shorthand e.x. "emit x32")
-            UInt64 mult;
-            bool floating;
-
-            for (int i = 0; i < args.args.Length; ++i)
-            {
-                if (args.args[i].Length == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Emission encountered empty argument"); return false; }
-
-                // if a multiplier
-                if (args.args[i][0] == '#')
-                {
-                    // get the multiplier and ensure is valid
-                    if (!TryParseInstantImm(args, args.args[i].Substring(1), out mult, out floating)) return false;
-                    if (floating) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Emission multiplier cannot be floating point"); return false; }
-                    if (mult > EmissionMaxMultiplier) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Emission multiplier cannot exceed {EmissionMaxMultiplier}. Got {mult}"); return false; }
-                    if (mult == 0) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Emission multiplier cannot be zero"); return false; }
-
-                    // account for first written value
-                    if (i > 0 && args.args[i - 1][0] != '#') --mult;
-
-                    for (UInt64 j = 0; j < mult; ++j)
-                        if (!TryAppendHole(args, Size(args.sizecode), hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
-                }
-                // if a string
-                else if (args.args[i][0] == '"' || args.args[i][0] == '\'')
-                {
-                    if (args.args[i][0] != args.args[i][args.args[i].Length - 1]) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: String literal must be enclosed in single or double quotes"); return false; }
-
-                    // dump the contents into memory
-                    for (int j = 1; j < args.args[i].Length - 1; ++j)
-                    {
-                        // make sure there's no string splicing
-                        if (args.args[i][j] == args.args[i][0]) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: String emission prematurely reached a terminating quote"); return false; }
-
-                        AppendVal(args, Size(args.sizecode), args.args[i][j]);
-                    }
-                }
-                // otherwise is a value
-                else
-                {
-                    // get the value
-                    if (!TryParseImm(args, args.args[i], out hole)) return false;
-
-                    // make one of them
-                    if (!TryAppendHole(args, Size(args.sizecode), hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
-                }
-            }
-
-            return true;
-        }
-        private static bool TryProcessXMULXDIV(AssembleArgs args, OPCode op)
-        {
-            UInt64 a, b;
-            Expr hole;
-
-            if (args.args.Length != 1) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: {op} expected 1 arg"); return false; }
-
-            AppendVal(args, 1, (UInt64)op);
-
-            // reg
-            if (args.args[0][0] == '$')
-            {
-                if (!TryParseRegister(args, args.args[0], out a)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[0]}\" as a register\n-> {args.err.Item2}"); return false; }
-
-                AppendVal(args, 1, (a << 4) | (args.sizecode << 2) | 1);
-            }
-            // mem
-            else if (args.args[0][0] == '[')
-            {
-                if (!TryParseAddress(args, args.args[0], out a, out b, out hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[0]}\" as an address\n-> {args.err.Item2}"); return false; }
-
-                AppendVal(args, 1, (args.sizecode << 2) | 2);
-                if (!TryAppendAddress(args, a, b, hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
-            }
-            // imm
-            else
-            {
-                if (!TryParseImm(args, args.args[0], out hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[0]}\" as an imm\n-> {args.err.Item2}"); return false; }
-
-                AppendVal(args, 1, (args.sizecode << 2) | 0);
-                if (!TryAppendHole(args, Size(args.sizecode), hole)) { args.err = new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}"); return false; }
-            }
-
-            return true;
-        }
-
-        public static Tuple<AssembleError, string> Assemble(string code, out ObjectFile file)
+        /// <summary>
+        /// Stores all the external predefined symbols that are not defined by the assembler itself
+        /// </summary>
+        private static Dictionary<string, Expr> PredefinedSymbols = new Dictionary<string, Expr>();
+
+        /// <summary>
+        /// Creates a new predefined symbol for the assembler
+        /// </summary>
+        /// <param name="key">the symol name</param>
+        /// <param name="value">the symbol value</param>
+        public static void DefineSymbol(string key, string value) { PredefinedSymbols.Add(key, new Expr() { Value = value }); }
+        /// <summary>
+        /// Creates a new predefined symbol for the assembler
+        /// </summary>
+        /// <param name="key">the symol name</param>
+        /// <param name="value">the symbol value</param>
+        public static void DefineSymbol(string key, UInt64 value) { PredefinedSymbols.Add(key, new Expr() { IntResult = value }); }
+        /// <summary>
+        /// Creates a new predefined symbol for the assembler
+        /// </summary>
+        /// <param name="key">the symol name</param>
+        /// <param name="value">the symbol value</param>
+        public static void DefineSymbol(string key, double value) { PredefinedSymbols.Add(key, new Expr() { FloatResult = value }); }
+
+        /// <summary>
+        /// Assembles the code into an object file
+        /// </summary>
+        /// <param name="code">the code to assemble</param>
+        /// <param name="file">the resulting object file if no errors occur</param>
+        public static AssembleResult Assemble(string code, out ObjectFile file)
         {
             file = new ObjectFile();
             AssembleArgs args = new AssembleArgs()
@@ -3918,15 +4416,15 @@ namespace csx64
                 line = 0,
 
                 last_static_label = null,
-                err = null,
+                res = default(AssembleResult),
 
-                time = Time()
+                time = Time
             };
 
-            // predefined symbols
-            args.file.Symbols = new Dictionary<string, Expr>()
+            // create the table of predefined symbols
+            args.file.Symbols = new Dictionary<string, Expr>(PredefinedSymbols)
             {
-                ["__time__"] = new Expr() { IntResult = Time() },
+                ["__time__"] = new Expr() { IntResult = args.time },
                 ["__version__"] = new Expr() { IntResult = Version },
 
                 ["__pinf__"] = new Expr() { FloatResult = double.PositiveInfinity },
@@ -3957,7 +4455,7 @@ namespace csx64
                 string test = "1.2ee2";
                 //string test = "a?b?c:d:e?f:g";
 
-                if (!TryParseImm(args, test, out Expr _test)) MessageBox.Show(args.err.ToString());
+                if (!args.TryParseImm(test, out Expr _test)) MessageBox.Show(args.err.ToString());
                 MessageBox.Show(_test.ToString());
 
                 if (!_test.Evaluate(file.Symbols, out a, out floating, ref err)) MessageBox.Show(err);
@@ -3967,7 +4465,7 @@ namespace csx64
 
 
 
-            if (code.Length == 0) return new Tuple<AssembleError, string>(AssembleError.EmptyFile, "The file was empty");
+            if (code.Length == 0) return new AssembleResult(AssembleError.EmptyFile, "The file was empty");
 
             while (pos < code.Length)
             {
@@ -3976,8 +4474,7 @@ namespace csx64
 
                 ++args.line; // advance line counter
                 // split the line
-                args.rawline = code.Substring(pos, end - pos);
-                if (!SplitLine(args)) return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse line\n-> {args.err.Item2}");
+                if (!args.SplitLine(code.Substring(pos, end - pos))) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Failed to parse line\n-> {args.res.ErrorMsg}");
                 // if the separator was a comment character, consume the rest of the line as well as no-op
                 if (end < code.Length && code[end] == '#')
                     for (; end < code.Length && code[end] != '\n'; ++end) ;
@@ -3989,10 +4486,10 @@ namespace csx64
 
                     // handle local mutation
                     if (label.Length > 0 && label[0] != '.') args.last_static_label = label;
-                    if (!MutateLabel(args, ref label)) return args.err;
+                    if (!args.MutateLabel(ref label)) return args.res;
 
-                    if (!IsValidLabel(label)) return new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Symbol name \"{label}\" invalid");
-                    if (file.Symbols.ContainsKey(label)) return new Tuple<AssembleError, string>(AssembleError.SymbolRedefinition, $"line {args.line}: Symbol \"{label}\" was already defined");
+                    if (!AssembleArgs.IsValidLabel(label)) return new AssembleResult(AssembleError.InvalidLabel, $"line {args.line}: Symbol name \"{label}\" invalid");
+                    if (file.Symbols.ContainsKey(label)) return new AssembleResult(AssembleError.SymbolRedefinition, $"line {args.line}: Symbol \"{label}\" was already defined");
 
                     // add the symbol as an address (uses illegal symbol #base, which will be defined at link time)
                     file.Symbols.Add(label, new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Value = "#base" }, Right = new Expr() { Value = file.Data.LongCount().MakeUnsigned().ToString() } });
@@ -4004,18 +4501,18 @@ namespace csx64
                     switch (args.op.ToUpper())
                     {
                         case "GLOBAL":
-                            if (args.args.Length == 0) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: GLOBAL expected at least one symbol to export");
+                            if (args.args.Length == 0) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: GLOBAL expected at least one symbol to export");
 
                             foreach (string symbol in args.args)
                             {
                                 // special error message for using global on local labels
-                                if (symbol[0] == '.') return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Cannot export local symbols");
+                                if (symbol[0] == '.') return new AssembleResult(AssembleError.ArgError, $"line {args.line}: Cannot export local symbols");
 
                                 // test name for legality
-                                if (!IsValidLabel(symbol)) return new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Invalid symbol name \"{symbol}\"");
+                                if (!AssembleArgs.IsValidLabel(symbol)) return new AssembleResult(AssembleError.InvalidLabel, $"line {args.line}: Invalid symbol name \"{symbol}\"");
 
                                 // don't add to global table twice
-                                if (file.GlobalSymbols.Contains(symbol)) return new Tuple<AssembleError, string>(AssembleError.SymbolRedefinition, $"line {args.line}: Attempt to export symbol \"{symbol}\" multiple times");
+                                if (file.GlobalSymbols.Contains(symbol)) return new AssembleResult(AssembleError.SymbolRedefinition, $"line {args.line}: Attempt to export symbol \"{symbol}\" multiple times");
 
                                 // add it to the globals list
                                 file.GlobalSymbols.Add(symbol);
@@ -4023,23 +4520,23 @@ namespace csx64
 
                             break;
                         case "DEF":
-                            if (args.args.Length != 2) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: DEF expected 2 args");
+                            if (args.args.Length != 2) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: DEF expected 2 args");
 
                             // mutate and test name for legality
-                            if (!MutateLabel(args, ref args.args[0])) return args.err;
-                            if (!IsValidLabel(args.args[0])) return new Tuple<AssembleError, string>(AssembleError.InvalidLabel, $"line {args.line}: Invalid label name \"{args.args[0]}\"");
+                            if (!args.MutateLabel(ref args.args[0])) return args.res;
+                            if (!AssembleArgs.IsValidLabel(args.args[0])) return new AssembleResult(AssembleError.InvalidLabel, $"line {args.line}: Invalid label name \"{args.args[0]}\"");
 
                             // get the expression
-                            if (!TryParseImm(args, args.args[1], out hole)) return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: DEF expected an expression as third arg\n-> {args.err.Item2}");
+                            if (!args.TryParseImm(args.args[1], out hole)) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: DEF expected an expression as third arg\n-> {args.res.ErrorMsg}");
 
                             // don't redefine a symbol
-                            if (file.Symbols.ContainsKey(args.args[0])) return new Tuple<AssembleError, string>(AssembleError.SymbolRedefinition, $"line {args.line}: Symbol \"{args.args[0]}\" was already defined");
+                            if (file.Symbols.ContainsKey(args.args[0])) return new AssembleResult(AssembleError.SymbolRedefinition, $"line {args.line}: Symbol \"{args.args[0]}\" was already defined");
 
                             // add it to the dictionary
                             file.Symbols.Add(args.args[0], hole);
                             break;
 
-                        case "EMIT": if (!TryProcessEmission(args)) return args.err; break;
+                        case "EMIT": if (!args.TryProcessEmission()) return args.res; break;
 
                         // --------------------------
                         // -- OPCode assembly impl --
@@ -4047,90 +4544,90 @@ namespace csx64
 
                         // [8: op]
                         case "NOP":
-                            if (args.args.Length != 0) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: NOP expected 0 args");
-                            AppendVal(args, 1, (UInt64)OPCode.NOP);
+                            if (args.args.Length != 0) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: NOP expected 0 args");
+                            args.AppendVal(1, (UInt64)OPCode.NOP);
                             break;
                         case "STOP":
-                            if (args.args.Length != 0) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: STOP expected 0 args");
-                            AppendVal(args, 1, (UInt64)OPCode.STOP);
+                            if (args.args.Length != 0) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: STOP expected 0 args");
+                            args.AppendVal(1, (UInt64)OPCode.STOP);
                             break;
                         case "SYSCALL":
-                            if (args.args.Length != 0) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: SYSCALL expected 0 args");
-                            AppendVal(args, 1, (UInt64)OPCode.SYSCALL);
+                            if (args.args.Length != 0) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: SYSCALL expected 0 args");
+                            args.AppendVal(1, (UInt64)OPCode.SYSCALL);
                             break;
 
-                        case "MOV": if (!TryProcessBinaryOp(args, OPCode.MOV)) return args.err; break;
+                        case "MOV": if (!args.TryProcessBinaryOp(OPCode.MOV)) return args.res; break;
 
-                        case "MOVA": case "MOVNBE": if (!TryProcessBinaryOp(args, OPCode.MOVa)) return args.err; break;
-                        case "MOVAE": case "MOVNB": if (!TryProcessBinaryOp(args, OPCode.MOVae)) return args.err; break;
-                        case "MOVB": case "MOVNAE": if (!TryProcessBinaryOp(args, OPCode.MOVb)) return args.err; break;
-                        case "MOVBE": case "MOVNA": if (!TryProcessBinaryOp(args, OPCode.MOVbe)) return args.err; break;
+                        case "MOVA": case "MOVNBE": if (!args.TryProcessBinaryOp(OPCode.MOVa)) return args.res; break;
+                        case "MOVAE": case "MOVNB": if (!args.TryProcessBinaryOp(OPCode.MOVae)) return args.res; break;
+                        case "MOVB": case "MOVNAE": if (!args.TryProcessBinaryOp(OPCode.MOVb)) return args.res; break;
+                        case "MOVBE": case "MOVNA": if (!args.TryProcessBinaryOp(OPCode.MOVbe)) return args.res; break;
 
-                        case "MOVG": case "MOVNLE": if (!TryProcessBinaryOp(args, OPCode.MOVg)) return args.err; break;
-                        case "MOVGE": case "MOVNL": if (!TryProcessBinaryOp(args, OPCode.MOVge)) return args.err; break;
-                        case "MOVL": case "MOVNGE": if (!TryProcessBinaryOp(args, OPCode.MOVl)) return args.err; break;
-                        case "MOVLE": case "MOVNG": if (!TryProcessBinaryOp(args, OPCode.MOVle)) return args.err; break;
+                        case "MOVG": case "MOVNLE": if (!args.TryProcessBinaryOp(OPCode.MOVg)) return args.res; break;
+                        case "MOVGE": case "MOVNL": if (!args.TryProcessBinaryOp(OPCode.MOVge)) return args.res; break;
+                        case "MOVL": case "MOVNGE": if (!args.TryProcessBinaryOp(OPCode.MOVl)) return args.res; break;
+                        case "MOVLE": case "MOVNG": if (!args.TryProcessBinaryOp(OPCode.MOVle)) return args.res; break;
 
-                        case "MOVZ": case "MOVE": if (!TryProcessBinaryOp(args, OPCode.MOVz)) return args.err; break;
-                        case "MOVNZ": case "MOVNE": if (!TryProcessBinaryOp(args, OPCode.MOVnz)) return args.err; break;
-                        case "MOVS": if (!TryProcessBinaryOp(args, OPCode.MOVs)) return args.err; break;
-                        case "MOVNS": if (!TryProcessBinaryOp(args, OPCode.MOVns)) return args.err; break;
-                        case "MOVP": case "MOVPE": if (!TryProcessBinaryOp(args, OPCode.MOVp)) return args.err; break;
-                        case "MOVNP": case "MOVPO": if (!TryProcessBinaryOp(args, OPCode.MOVnp)) return args.err; break;
-                        case "MOVO": if (!TryProcessBinaryOp(args, OPCode.MOVo)) return args.err; break;
-                        case "MOVNO": if (!TryProcessBinaryOp(args, OPCode.MOVno)) return args.err; break;
-                        case "MOVC": if (!TryProcessBinaryOp(args, OPCode.MOVc)) return args.err; break;
-                        case "MOVNC": if (!TryProcessBinaryOp(args, OPCode.MOVnc)) return args.err; break;
+                        case "MOVZ": case "MOVE": if (!args.TryProcessBinaryOp(OPCode.MOVz)) return args.res; break;
+                        case "MOVNZ": case "MOVNE": if (!args.TryProcessBinaryOp(OPCode.MOVnz)) return args.res; break;
+                        case "MOVS": if (!args.TryProcessBinaryOp(OPCode.MOVs)) return args.res; break;
+                        case "MOVNS": if (!args.TryProcessBinaryOp(OPCode.MOVns)) return args.res; break;
+                        case "MOVP": case "MOVPE": if (!args.TryProcessBinaryOp(OPCode.MOVp)) return args.res; break;
+                        case "MOVNP": case "MOVPO": if (!args.TryProcessBinaryOp(OPCode.MOVnp)) return args.res; break;
+                        case "MOVO": if (!args.TryProcessBinaryOp(OPCode.MOVo)) return args.res; break;
+                        case "MOVNO": if (!args.TryProcessBinaryOp(OPCode.MOVno)) return args.res; break;
+                        case "MOVC": if (!args.TryProcessBinaryOp(OPCode.MOVc)) return args.res; break;
+                        case "MOVNC": if (!args.TryProcessBinaryOp(OPCode.MOVnc)) return args.res; break;
 
                         case "SWAP":
-                            if (args.args.Length != 2) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: SWAP expected 2 args");
+                            if (args.args.Length != 2) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: SWAP expected 2 args");
 
-                            AppendVal(args, 1, (UInt64)OPCode.SWAP);
+                            args.AppendVal(1, (UInt64)OPCode.SWAP);
 
                             // reg, *
                             if (args.args[0][0] == '$')
                             {
-                                if(!TryParseRegister(args, args.args[0], out a)) return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[0]}\" as a register\n-> {args.err.Item2}");
+                                if(!args.TryParseRegister(args.args[0], out a)) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[0]}\" as a register\n-> {args.res.ErrorMsg}");
 
                                 // reg, reg
                                 if (args.args[1][0] == '$')
                                 {
-                                    if(!TryParseRegister(args, args.args[1], out b)) return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[1]}\" as a register\n-> {args.err.Item2}");
+                                    if(!args.TryParseRegister(args.args[1], out b)) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[1]}\" as a register\n-> {args.res.ErrorMsg}");
 
-                                    AppendVal(args, 1, (a << 4) | (args.sizecode << 2) | 0);
-                                    AppendVal(args, 1, b);
+                                    args.AppendVal(1, (a << 4) | (args.sizecode << 2) | 0);
+                                    args.AppendVal(1, b);
                                 }
                                 // reg, mem
                                 else if (args.args[1][0] == '[')
                                 {
-                                    if(!TryParseAddress(args, args.args[1], out b, out c, out hole)) return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[1]}\" as an address\n-> {args.err.Item2}");
+                                    if(!args.TryParseAddress(args.args[1], out b, out c, out hole)) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[1]}\" as an address\n-> {args.res.ErrorMsg}");
 
-                                    AppendVal(args, 1, (a << 4) | (args.sizecode << 2) | 1);
-                                    if (!TryAppendAddress(args, b, c, hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}");
+                                    args.AppendVal(1, (a << 4) | (args.sizecode << 2) | 1);
+                                    if (!args.TryAppendAddress(b, c, hole)) return new AssembleResult(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.res.ErrorMsg}");
                                 }
                                 // reg, imm
-                                else return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Cannot use SWAP with an imm");
+                                else return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Cannot use SWAP with an imm");
                             }
                             // mem, *
                             else if (args.args[0][0] == '[')
                             {
-                                if(!TryParseAddress(args, args.args[0], out a, out b, out hole)) return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[0]}\" as an address\n-> {args.err.Item2}");
+                                if(!args.TryParseAddress(args.args[0], out a, out b, out hole)) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[0]}\" as an address\n-> {args.res.ErrorMsg}");
 
                                 // mem, reg
                                 if (args.args[1][0] == '$')
                                 {
-                                    if (!TryParseRegister(args, args.args[1], out c)) return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[1]}\" as a register\n-> {args.err.Item2}");
+                                    if (!args.TryParseRegister(args.args[1], out c)) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[1]}\" as a register\n-> {args.res.ErrorMsg}");
 
-                                    AppendVal(args, 1, (c << 4) | (args.sizecode << 2) | 1);
-                                    if (!TryAppendAddress(args, a, b, hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value");
+                                    args.AppendVal(1, (c << 4) | (args.sizecode << 2) | 1);
+                                    if (!args.TryAppendAddress(a, b, hole)) return new AssembleResult(AssembleError.ArgError, $"line {args.line}: Failed to append value");
                                 }
                                 // mem, mem
-                                else if (args.args[1][0] == '[') return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Cannot use SWAP with two memory values");
+                                else if (args.args[1][0] == '[') return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Cannot use SWAP with two memory values");
                                 // mem, imm
-                                else return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Cannot use SWAP with an imm");
+                                else return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Cannot use SWAP with an imm");
                             }
                             // imm, *
-                            else return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Cannot use SWAP with an imm");
+                            else return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Cannot use SWAP with an imm");
 
                             break;
 
@@ -4138,184 +4635,184 @@ namespace csx64
                         case "SX":
                             a = (UInt64)OPCode.SX;
                             XEXTEND:
-                            if (args.args.Length != 2) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: XEXTEND expected 2 args");
+                            if (args.args.Length != 2) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: XEXTEND expected 2 args");
 
-                            if (!TryParseSizecode(args, args.args[0], out b)) return new Tuple<AssembleError, string>(AssembleError.MissingSize, $"line {args.line}: UEXTEND expected size parameter as second arg\n-> {args.err.Item2}");
-                            if (!TryParseRegister(args, args.args[1], out c)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: UEXTEND expected register parameter as third arg\n-> {args.err.Item2}");
+                            if (!args.TryParseSizecode(args.args[0], out b)) return new AssembleResult(AssembleError.MissingSize, $"line {args.line}: UEXTEND expected size parameter as second arg\n-> {args.res.ErrorMsg}");
+                            if (!args.TryParseRegister(args.args[1], out c)) return new AssembleResult(AssembleError.ArgError, $"line {args.line}: UEXTEND expected register parameter as third arg\n-> {args.res.ErrorMsg}");
 
-                            AppendVal(args, 1, a);
-                            AppendVal(args, 1, (c << 4) | (b << 2) | args.sizecode);
+                            args.AppendVal(1, a);
+                            args.AppendVal(1, (c << 4) | (b << 2) | args.sizecode);
 
                             break;
 
-                        case "UMUL": if (!TryProcessXMULXDIV(args, OPCode.UMUL)) return args.err; break;
-                        case "SMUL": if (!TryProcessXMULXDIV(args, OPCode.SMUL)) return args.err; break;
-                        case "UDIV": if (!TryProcessXMULXDIV(args, OPCode.UDIV)) return args.err; break;
-                        case "SDIV": if (!TryProcessXMULXDIV(args, OPCode.SDIV)) return args.err; break;
+                        case "UMUL": if (!args.TryProcessIMMRM(OPCode.UMUL)) return args.res; break;
+                        case "SMUL": if (!args.TryProcessIMMRM(OPCode.SMUL)) return args.res; break;
+                        case "UDIV": if (!args.TryProcessIMMRM(OPCode.UDIV)) return args.res; break;
+                        case "SDIV": if (!args.TryProcessIMMRM(OPCode.SDIV)) return args.res; break;
 
-                        case "ADD": if (!TryProcessBinaryOp(args, OPCode.ADD)) return args.err; break;
-                        case "SUB": if (!TryProcessBinaryOp(args, OPCode.SUB)) return args.err; break;
-                        case "BMUL": if (!TryProcessBinaryOp(args, OPCode.BMUL)) return args.err; break;
-                        case "BUDIV": if (!TryProcessBinaryOp(args, OPCode.BUDIV)) return args.err; break;
-                        case "BUMOD": if (!TryProcessBinaryOp(args, OPCode.BUMOD)) return args.err; break;
-                        case "BSDIV": if (!TryProcessBinaryOp(args, OPCode.BSDIV)) return args.err; break;
-                        case "BSMOD": if (!TryProcessBinaryOp(args, OPCode.BSMOD)) return args.err; break;
+                        case "ADD": if (!args.TryProcessBinaryOp(OPCode.ADD)) return args.res; break;
+                        case "SUB": if (!args.TryProcessBinaryOp(OPCode.SUB)) return args.res; break;
+                        case "BMUL": if (!args.TryProcessBinaryOp(OPCode.BMUL)) return args.res; break;
+                        case "BUDIV": if (!args.TryProcessBinaryOp(OPCode.BUDIV)) return args.res; break;
+                        case "BUMOD": if (!args.TryProcessBinaryOp(OPCode.BUMOD)) return args.res; break;
+                        case "BSDIV": if (!args.TryProcessBinaryOp(OPCode.BSDIV)) return args.res; break;
+                        case "BSMOD": if (!args.TryProcessBinaryOp(OPCode.BSMOD)) return args.res; break;
 
-                        case "SL": if (!TryProcessBinaryOp(args, OPCode.SL, 0)) return args.err; break;
-                        case "SR": if (!TryProcessBinaryOp(args, OPCode.SR, 0)) return args.err; break;
-                        case "SAL": if (!TryProcessBinaryOp(args, OPCode.SAL, 0)) return args.err; break;
-                        case "SAR": if (!TryProcessBinaryOp(args, OPCode.SAR, 0)) return args.err; break;
-                        case "RL": if (!TryProcessBinaryOp(args, OPCode.RL, 0)) return args.err; break;
-                        case "RR": if (!TryProcessBinaryOp(args, OPCode.RR, 0)) return args.err; break;
+                        case "SL": if (!args.TryProcessBinaryOp(OPCode.SL, 0)) return args.res; break;
+                        case "SR": if (!args.TryProcessBinaryOp(OPCode.SR, 0)) return args.res; break;
+                        case "SAL": if (!args.TryProcessBinaryOp(OPCode.SAL, 0)) return args.res; break;
+                        case "SAR": if (!args.TryProcessBinaryOp(OPCode.SAR, 0)) return args.res; break;
+                        case "RL": if (!args.TryProcessBinaryOp(OPCode.RL, 0)) return args.res; break;
+                        case "RR": if (!args.TryProcessBinaryOp(OPCode.RR, 0)) return args.res; break;
 
-                        case "AND": if (!TryProcessBinaryOp(args, OPCode.AND)) return args.err; break;
-                        case "OR": if (!TryProcessBinaryOp(args, OPCode.OR)) return args.err; break;
-                        case "XOR": if (!TryProcessBinaryOp(args, OPCode.XOR)) return args.err; break;
+                        case "AND": if (!args.TryProcessBinaryOp(OPCode.AND)) return args.res; break;
+                        case "OR": if (!args.TryProcessBinaryOp(OPCode.OR)) return args.res; break;
+                        case "XOR": if (!args.TryProcessBinaryOp(OPCode.XOR)) return args.res; break;
 
-                        case "CMP": if (!TryProcessBinaryOp(args, OPCode.CMP)) return args.err; break;
-                        case "TEST": if (!TryProcessBinaryOp(args, OPCode.TEST)) return args.err; break;
+                        case "CMP": if (!args.TryProcessBinaryOp(OPCode.CMP)) return args.res; break;
+                        case "TEST": if (!args.TryProcessBinaryOp(OPCode.TEST)) return args.res; break;
 
                         // [8: unary op]   [4: dest][2:][2: size]
-                        case "INC": if (!TryProcessUnaryOp(args, OPCode.INC)) return args.err; break;
-                        case "DEC": if (!TryProcessUnaryOp(args, OPCode.DEC)) return args.err; break;
-                        case "NEG": if (!TryProcessUnaryOp(args, OPCode.NEG)) return args.err; break;
-                        case "NOT": if (!TryProcessUnaryOp(args, OPCode.NOT)) return args.err; break;
-                        case "ABS": if (!TryProcessUnaryOp(args, OPCode.ABS)) return args.err; break;
-                        case "CMPZ": if (!TryProcessUnaryOp(args, OPCode.CMPZ)) return args.err; break;
+                        case "INC": if (!args.TryProcessUnaryOp(OPCode.INC)) return args.res; break;
+                        case "DEC": if (!args.TryProcessUnaryOp(OPCode.DEC)) return args.res; break;
+                        case "NEG": if (!args.TryProcessUnaryOp(OPCode.NEG)) return args.res; break;
+                        case "NOT": if (!args.TryProcessUnaryOp(OPCode.NOT)) return args.res; break;
+                        case "ABS": if (!args.TryProcessUnaryOp(OPCode.ABS)) return args.res; break;
+                        case "CMPZ": if (!args.TryProcessUnaryOp(OPCode.CMPZ)) return args.res; break;
 
                         // [8: la]   [4:][4: dest]   [address]
                         case "LA":
-                            if (args.args.Length != 2) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: LA expected 2 args");
-                            if (args.sizecode != 3) return new Tuple<AssembleError, string>(AssembleError.UsageError, $"line {args.line}: LA does not support the specified size code");
+                            if (args.args.Length != 2) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: LA expected 2 args");
+                            if (args.sizecode != 3) return new AssembleResult(AssembleError.UsageError, $"line {args.line}: LA does not support the specified size code");
 
-                            if (!TryParseRegister(args, args.args[0], out a)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: LA expecetd register as first arg\n-> {args.err.Item2}");
-                            if (!TryParseAddress(args, args.args[1], out b, out c, out hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: LA expected address as second arg\n-> {args.err.Item2}");
+                            if (!args.TryParseRegister(args.args[0], out a)) return new AssembleResult(AssembleError.ArgError, $"line {args.line}: LA expecetd register as first arg\n-> {args.res.ErrorMsg}");
+                            if (!args.TryParseAddress(args.args[1], out b, out c, out hole)) return new AssembleResult(AssembleError.ArgError, $"line {args.line}: LA expected address as second arg\n-> {args.res.ErrorMsg}");
 
-                            AppendVal(args, 1, (UInt64)OPCode.LA);
-                            AppendVal(args, 1, a);
-                            if (!TryAppendAddress(args, b, c, hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}");
+                            args.AppendVal(1, (UInt64)OPCode.LA);
+                            args.AppendVal(1, a);
+                            if (!args.TryAppendAddress(b, c, hole)) return new AssembleResult(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.res.ErrorMsg}");
 
                             break;
 
                         // [8: Jcc]   [address]
-                        case "JMP": if (!TryProcessJump(args, OPCode.JMP)) return args.err; break;
+                        case "JMP": if (!args.TryProcessJump(OPCode.JMP)) return args.res; break;
 
-                        case "JA": case "JNBE": if (!TryProcessJump(args, OPCode.Ja)) return args.err; break;
-                        case "JAE": case "JNB": if (!TryProcessJump(args, OPCode.Jae)) return args.err; break;
-                        case "JB": case "JNAE": if (!TryProcessJump(args, OPCode.Jb)) return args.err; break;
-                        case "JBE": case "JNA": if (!TryProcessJump(args, OPCode.Jbe)) return args.err; break;
+                        case "JA": case "JNBE": if (!args.TryProcessJump(OPCode.Ja)) return args.res; break;
+                        case "JAE": case "JNB": if (!args.TryProcessJump(OPCode.Jae)) return args.res; break;
+                        case "JB": case "JNAE": if (!args.TryProcessJump(OPCode.Jb)) return args.res; break;
+                        case "JBE": case "JNA": if (!args.TryProcessJump(OPCode.Jbe)) return args.res; break;
 
-                        case "JG": case "JNLE": if (!TryProcessJump(args, OPCode.Jg)) return args.err; break;
-                        case "JGE": case "JNL": if (!TryProcessJump(args, OPCode.Jge)) return args.err; break;
-                        case "JL": case "JNGE": if (!TryProcessJump(args, OPCode.Jl)) return args.err; break;
-                        case "JLE": case "JNG": if (!TryProcessJump(args, OPCode.Jle)) return args.err; break;
+                        case "JG": case "JNLE": if (!args.TryProcessJump(OPCode.Jg)) return args.res; break;
+                        case "JGE": case "JNL": if (!args.TryProcessJump(OPCode.Jge)) return args.res; break;
+                        case "JL": case "JNGE": if (!args.TryProcessJump(OPCode.Jl)) return args.res; break;
+                        case "JLE": case "JNG": if (!args.TryProcessJump(OPCode.Jle)) return args.res; break;
 
-                        case "JZ": case "JE": if (!TryProcessJump(args, OPCode.Jz)) return args.err; break;
-                        case "JNZ": case "JNE": if (!TryProcessJump(args, OPCode.Jnz)) return args.err; break;
-                        case "JS": if (!TryProcessJump(args, OPCode.Js)) return args.err; break;
-                        case "JNS": if (!TryProcessJump(args, OPCode.Jns)) return args.err; break;
-                        case "JP": case "JPE": if (!TryProcessJump(args, OPCode.Jp)) return args.err; break;
-                        case "JNP": case "JPO": if (!TryProcessJump(args, OPCode.Jnp)) return args.err; break;
-                        case "JO": if (!TryProcessJump(args, OPCode.Jo)) return args.err; break;
-                        case "JNO": if (!TryProcessJump(args, OPCode.Jno)) return args.err; break;
-                        case "JC": if (!TryProcessJump(args, OPCode.Jc)) return args.err; break;
-                        case "JNC": if (!TryProcessJump(args, OPCode.Jnc)) return args.err; break;
+                        case "JZ": case "JE": if (!args.TryProcessJump(OPCode.Jz)) return args.res; break;
+                        case "JNZ": case "JNE": if (!args.TryProcessJump(OPCode.Jnz)) return args.res; break;
+                        case "JS": if (!args.TryProcessJump(OPCode.Js)) return args.res; break;
+                        case "JNS": if (!args.TryProcessJump(OPCode.Jns)) return args.res; break;
+                        case "JP": case "JPE": if (!args.TryProcessJump(OPCode.Jp)) return args.res; break;
+                        case "JNP": case "JPO": if (!args.TryProcessJump(OPCode.Jnp)) return args.res; break;
+                        case "JO": if (!args.TryProcessJump(OPCode.Jo)) return args.res; break;
+                        case "JNO": if (!args.TryProcessJump(OPCode.Jno)) return args.res; break;
+                        case "JC": if (!args.TryProcessJump(OPCode.Jc)) return args.res; break;
+                        case "JNC": if (!args.TryProcessJump(OPCode.Jnc)) return args.res; break;
 
-                        case "FADD": if (!TryProcessBinaryOp(args, OPCode.FADD, -1, 12)) return args.err; break;
-                        case "FSUB": if (!TryProcessBinaryOp(args, OPCode.FSUB, -1, 12)) return args.err; break;
-                        case "FMUL": if (!TryProcessBinaryOp(args, OPCode.FMUL, -1, 12)) return args.err; break;
-                        case "FDIV": if (!TryProcessBinaryOp(args, OPCode.FDIV, -1, 12)) return args.err; break;
-                        case "FMOD": if (!TryProcessBinaryOp(args, OPCode.FMOD, -1, 12)) return args.err; break;
+                        case "FADD": if (!args.TryProcessBinaryOp(OPCode.FADD, -1, 12)) return args.res; break;
+                        case "FSUB": if (!args.TryProcessBinaryOp(OPCode.FSUB, -1, 12)) return args.res; break;
+                        case "FMUL": if (!args.TryProcessBinaryOp(OPCode.FMUL, -1, 12)) return args.res; break;
+                        case "FDIV": if (!args.TryProcessBinaryOp(OPCode.FDIV, -1, 12)) return args.res; break;
+                        case "FMOD": if (!args.TryProcessBinaryOp(OPCode.FMOD, -1, 12)) return args.res; break;
 
-                        case "FPOW": if (!TryProcessBinaryOp(args, OPCode.FPOW, -1, 12)) return args.err; break;
-                        case "FSQRT": if (!TryProcessUnaryOp(args, OPCode.FSQRT, 12)) return args.err; break;
-                        case "FEXP": if (!TryProcessUnaryOp(args, OPCode.FEXP, 12)) return args.err; break;
-                        case "FLN": if (!TryProcessUnaryOp(args, OPCode.FLN, 12)) return args.err; break;
-                        case "FNEG": if (!TryProcessUnaryOp(args, OPCode.FNEG, 12)) return args.err; break;
-                        case "FABS": if (!TryProcessUnaryOp(args, OPCode.FABS, 12)) return args.err; break;
-                        case "FCMPZ": if (!TryProcessUnaryOp(args, OPCode.FCMPZ, 12)) return args.err; break;
+                        case "FPOW": if (!args.TryProcessBinaryOp(OPCode.FPOW, -1, 12)) return args.res; break;
+                        case "FSQRT": if (!args.TryProcessUnaryOp(OPCode.FSQRT, 12)) return args.res; break;
+                        case "FEXP": if (!args.TryProcessUnaryOp(OPCode.FEXP, 12)) return args.res; break;
+                        case "FLN": if (!args.TryProcessUnaryOp(OPCode.FLN, 12)) return args.res; break;
+                        case "FNEG": if (!args.TryProcessUnaryOp(OPCode.FNEG, 12)) return args.res; break;
+                        case "FABS": if (!args.TryProcessUnaryOp(OPCode.FABS, 12)) return args.res; break;
+                        case "FCMPZ": if (!args.TryProcessUnaryOp(OPCode.FCMPZ, 12)) return args.res; break;
 
-                        case "FSIN": if (!TryProcessUnaryOp(args, OPCode.FSIN, 12)) return args.err; break;
-                        case "FCOS": if (!TryProcessUnaryOp(args, OPCode.FCOS, 12)) return args.err; break;
-                        case "FTAN": if (!TryProcessUnaryOp(args, OPCode.FTAN, 12)) return args.err; break;
+                        case "FSIN": if (!args.TryProcessUnaryOp(OPCode.FSIN, 12)) return args.res; break;
+                        case "FCOS": if (!args.TryProcessUnaryOp(OPCode.FCOS, 12)) return args.res; break;
+                        case "FTAN": if (!args.TryProcessUnaryOp(OPCode.FTAN, 12)) return args.res; break;
 
-                        case "FSINH": if (!TryProcessUnaryOp(args, OPCode.FSINH, 12)) return args.err; break;
-                        case "FCOSH": if (!TryProcessUnaryOp(args, OPCode.FCOSH, 12)) return args.err; break;
-                        case "FTANH": if (!TryProcessUnaryOp(args, OPCode.FTANH, 12)) return args.err; break;
+                        case "FSINH": if (!args.TryProcessUnaryOp(OPCode.FSINH, 12)) return args.res; break;
+                        case "FCOSH": if (!args.TryProcessUnaryOp(OPCode.FCOSH, 12)) return args.res; break;
+                        case "FTANH": if (!args.TryProcessUnaryOp(OPCode.FTANH, 12)) return args.res; break;
 
-                        case "FASIN": if (!TryProcessUnaryOp(args, OPCode.FASIN, 12)) return args.err; break;
-                        case "FACOS": if (!TryProcessUnaryOp(args, OPCode.FACOS, 12)) return args.err; break;
-                        case "FATAN": if (!TryProcessUnaryOp(args, OPCode.FATAN, 12)) return args.err; break;
-                        case "FATAN2": if (!TryProcessBinaryOp(args, OPCode.FATAN2, -1, 12)) return args.err; break;
+                        case "FASIN": if (!args.TryProcessUnaryOp(OPCode.FASIN, 12)) return args.res; break;
+                        case "FACOS": if (!args.TryProcessUnaryOp(OPCode.FACOS, 12)) return args.res; break;
+                        case "FATAN": if (!args.TryProcessUnaryOp(OPCode.FATAN, 12)) return args.res; break;
+                        case "FATAN2": if (!args.TryProcessBinaryOp(OPCode.FATAN2, -1, 12)) return args.res; break;
 
-                        case "FLOOR": if (!TryProcessUnaryOp(args, OPCode.FLOOR, 12)) return args.err; break;
-                        case "CEIL": if (!TryProcessUnaryOp(args, OPCode.CEIL, 12)) return args.err; break;
-                        case "ROUND": if (!TryProcessUnaryOp(args, OPCode.ROUND, 12)) return args.err; break;
-                        case "TRUNC": if (!TryProcessUnaryOp(args, OPCode.TRUNC, 12)) return args.err; break;
+                        case "FLOOR": if (!args.TryProcessUnaryOp(OPCode.FLOOR, 12)) return args.res; break;
+                        case "CEIL": if (!args.TryProcessUnaryOp(OPCode.CEIL, 12)) return args.res; break;
+                        case "ROUND": if (!args.TryProcessUnaryOp(OPCode.ROUND, 12)) return args.res; break;
+                        case "TRUNC": if (!args.TryProcessUnaryOp(OPCode.TRUNC, 12)) return args.res; break;
 
-                        case "FCMP": if (!TryProcessBinaryOp(args, OPCode.FCMP, -1, 12)) return args.err; break;
+                        case "FCMP": if (!args.TryProcessBinaryOp(OPCode.FCMP, -1, 12)) return args.res; break;
 
-                        case "FTOI": if (!TryProcessUnaryOp(args, OPCode.FTOI, 12)) return args.err; break;
-                        case "ITOF": if (!TryProcessUnaryOp(args, OPCode.ITOF, 12)) return args.err; break;
+                        case "FTOI": if (!args.TryProcessUnaryOp(OPCode.FTOI, 12)) return args.res; break;
+                        case "ITOF": if (!args.TryProcessUnaryOp(OPCode.ITOF, 12)) return args.res; break;
 
                         case "PUSH":
-                            if (args.args.Length != 1) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: PUSH expected 1 arg");
+                            if (args.args.Length != 1) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: PUSH expected 1 arg");
 
-                            AppendVal(args, 1, (UInt64)OPCode.PUSH);
+                            args.AppendVal(1, (UInt64)OPCode.PUSH);
 
-                            if (TryParseImm(args, args.args[0], out hole))
+                            if (args.TryParseImm(args.args[0], out hole))
                             {
-                                AppendVal(args, 1, (args.sizecode << 2) | 0);
-                                if (!TryAppendHole(args, Size(args.sizecode), hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}");
+                                args.AppendVal(1, (args.sizecode << 2) | 0);
+                                if (!args.TryAppendExpr(Size(args.sizecode), hole)) return new AssembleResult(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.res.ErrorMsg}");
                             }
-                            else if (TryParseRegister(args, args.args[0], out a))
+                            else if (args.TryParseRegister(args.args[0], out a))
                             {
-                                AppendVal(args, 1, (a << 4) | (args.sizecode << 2) | 1);
+                                args.AppendVal(1, (a << 4) | (args.sizecode << 2) | 1);
                             }
-                            else return new Tuple<AssembleError, string>(AssembleError.FormatError, $"line {args.line}: Couldn't parse \"{args.args[0]}\" as an imm or register");
+                            else return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Couldn't parse \"{args.args[0]}\" as an imm or register");
 
                             break;
                         case "POP":
-                            if (args.args.Length != 1) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: POP expected 1 arg");
+                            if (args.args.Length != 1) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: POP expected 1 arg");
 
-                            if (!TryParseRegister(args, args.args[0], out a)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: POP expected register as second arg\n-> {args.err.Item2}");
+                            if (!args.TryParseRegister(args.args[0], out a)) return new AssembleResult(AssembleError.ArgError, $"line {args.line}: POP expected register as second arg\n-> {args.res.ErrorMsg}");
 
-                            AppendVal(args, 1, (UInt64)OPCode.POP);
-                            AppendVal(args, 1, (a << 4) | (args.sizecode << 2));
+                            args.AppendVal(1, (UInt64)OPCode.POP);
+                            args.AppendVal(1, (a << 4) | (args.sizecode << 2));
 
                             break;
                         case "CALL":
-                            if (args.args.Length != 1) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: CALL expected 1 arg");
-                            if (!TryParseAddress(args, args.args[0], out a, out b, out hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: CALL expected address as first arg\n-> {args.err.Item2}");
+                            if (args.args.Length != 1) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: CALL expected 1 arg");
+                            if (!args.TryParseAddress(args.args[0], out a, out b, out hole)) return new AssembleResult(AssembleError.ArgError, $"line {args.line}: CALL expected address as first arg\n-> {args.res.ErrorMsg}");
 
-                            AppendVal(args, 1, (UInt64)OPCode.CALL);
-                            if (!TryAppendAddress(args, a, b, hole)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.err.Item2}");
+                            args.AppendVal(1, (UInt64)OPCode.CALL);
+                            if (!args.TryAppendAddress(a, b, hole)) return new AssembleResult(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.res.ErrorMsg}");
 
                             break;
                         case "RET":
-                            if (args.args.Length != 0) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: CALL expected 0 args");
+                            if (args.args.Length != 0) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: CALL expected 0 args");
 
-                            AppendVal(args, 1, (UInt64)OPCode.RET);
+                            args.AppendVal(1, (UInt64)OPCode.RET);
 
                             break;
 
-                        case "BSWAP": if (!TryProcessUnaryOp(args, OPCode.BSWAP)) return args.err; break;
-                        case "BEXTR": if (!TryProcessBinaryOp(args, OPCode.BEXTR, 1)) return args.err; break;
-                        case "BLSI": if (!TryProcessUnaryOp(args, OPCode.BLSI)) return args.err; break;
-                        case "BLSMSK": if (!TryProcessUnaryOp(args, OPCode.BLSMSK)) return args.err; break;
-                        case "BLSR": if (!TryProcessUnaryOp(args, OPCode.BLSR)) return args.err; break;
-                        case "ANDN": if (!TryProcessBinaryOp(args, OPCode.ANDN)) return args.err; break;
+                        case "BSWAP": if (!args.TryProcessUnaryOp(OPCode.BSWAP)) return args.res; break;
+                        case "BEXTR": if (!args.TryProcessBinaryOp(OPCode.BEXTR, 1)) return args.res; break;
+                        case "BLSI": if (!args.TryProcessUnaryOp(OPCode.BLSI)) return args.res; break;
+                        case "BLSMSK": if (!args.TryProcessUnaryOp(OPCode.BLSMSK)) return args.res; break;
+                        case "BLSR": if (!args.TryProcessUnaryOp(OPCode.BLSR)) return args.res; break;
+                        case "ANDN": if (!args.TryProcessBinaryOp(OPCode.ANDN)) return args.res; break;
 
                         case "GETF": a = (UInt64)OPCode.GETF; goto GETSETF;
                         case "SETF":
                             a = (UInt64)OPCode.SETF;
                             GETSETF:
-                            if (args.args.Length != 1) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: GETF expected one arg");
-                            if (!TryParseRegister(args, args.args[0], out b)) return new Tuple<AssembleError, string>(AssembleError.UsageError, $"line {args.line}: GETF expected arg one to be a register");
-                            if (args.sizecode != 3) return new Tuple<AssembleError, string>(AssembleError.UsageError, $"line {args.line}: GETF does not support the specified size code");
+                            if (args.args.Length != 1) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: GETF expected one arg");
+                            if (!args.TryParseRegister(args.args[0], out b)) return new AssembleResult(AssembleError.UsageError, $"line {args.line}: GETF expected arg one to be a register");
+                            if (args.sizecode != 3) return new AssembleResult(AssembleError.UsageError, $"line {args.line}: GETF does not support the specified size code");
 
-                            AppendVal(args, 1, a);
-                            AppendVal(args, 1, b);
+                            args.AppendVal(1, a);
+                            args.AppendVal(1, b);
 
                             break;
 
@@ -4325,9 +4822,9 @@ namespace csx64
                             // 3 args explicit step
                             else if (args.args.Length == 3)
                             {
-                                if (!TryParseInstantImm(args, args.args[2], out a, out floating))
-                                    return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: LOOP third argument (explicit step) expected an instant imm");
-                                if (floating) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: LOOP third argument (explicit step) may not be floating-point");
+                                if (!args.TryParseInstantImm(args.args[2], out a, out floating))
+                                    return new AssembleResult(AssembleError.ArgError, $"line {args.line}: LOOP third argument (explicit step) expected an instant imm");
+                                if (floating) return new AssembleResult(AssembleError.ArgError, $"line {args.line}: LOOP third argument (explicit step) may not be floating-point");
 
                                 switch (a)
                                 {
@@ -4336,32 +4833,34 @@ namespace csx64
                                     case 4: a = 2; break;
                                     case 8: a = 3; break;
 
-                                    default: return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: LOOP third argument (explicit step) must be 1, 2, 4, or 8");
+                                    default: return new AssembleResult(AssembleError.ArgError, $"line {args.line}: LOOP third argument (explicit step) must be 1, 2, 4, or 8");
                                 }
                             }
-                            else return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: LOOP expected two args (3 for explicit step)");
+                            else return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: LOOP expected two args (3 for explicit step)");
 
-                            if (!TryParseRegister(args, args.args[0], out b)) return new Tuple<AssembleError, string>(AssembleError.UsageError, $"line {args.line}: LOOP expected register as first arg");
-                            if (!TryParseAddress(args, args.args[1], out c, out d, out hole)) return new Tuple<AssembleError, string>(AssembleError.UsageError, $"line {args.line}: LOOP expected an address as second arg");
+                            if (!args.TryParseRegister(args.args[0], out b)) return new AssembleResult(AssembleError.UsageError, $"line {args.line}: LOOP expected register as first arg");
+                            if (!args.TryParseAddress(args.args[1], out c, out d, out hole)) return new AssembleResult(AssembleError.UsageError, $"line {args.line}: LOOP expected an address as second arg");
 
-                            AppendVal(args, 1, (UInt64)OPCode.LOOP);
-                            AppendVal(args, 1, (b << 4) | (args.sizecode << 2) | a);
-                            if (!TryAppendAddress(args, c, d, hole)) return args.err;
+                            args.AppendVal(1, (UInt64)OPCode.LOOP);
+                            args.AppendVal(1, (b << 4) | (args.sizecode << 2) | a);
+                            if (!args.TryAppendAddress(c, d, hole)) return args.res;
 
                             break;
 
                         case "FX":
-                            if (args.args.Length != 2) return new Tuple<AssembleError, string>(AssembleError.ArgCount, $"line {args.line}: XEXTEND expected 2 args");
+                            if (args.args.Length != 2) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: XEXTEND expected 2 args");
 
-                            if (!TryParseSizecode(args, args.args[0], out a)) return new Tuple<AssembleError, string>(AssembleError.MissingSize, $"line {args.line}: UEXTEND expected size parameter as second arg\n-> {args.err.Item2}");
-                            if (!TryParseRegister(args, args.args[1], out b)) return new Tuple<AssembleError, string>(AssembleError.ArgError, $"line {args.line}: UEXTEND expected register parameter as third arg\n-> {args.err.Item2}");
+                            if (!args.TryParseSizecode(args.args[0], out a)) return new AssembleResult(AssembleError.MissingSize, $"line {args.line}: UEXTEND expected size parameter as second arg\n-> {args.res.ErrorMsg}");
+                            if (!args.TryParseRegister(args.args[1], out b)) return new AssembleResult(AssembleError.ArgError, $"line {args.line}: UEXTEND expected register parameter as third arg\n-> {args.res.ErrorMsg}");
 
-                            AppendVal(args, 1, (UInt64)OPCode.FX);
-                            AppendVal(args, 1, (b << 4) | (a << 2) | args.sizecode);
+                            args.AppendVal(1, (UInt64)OPCode.FX);
+                            args.AppendVal(1, (b << 4) | (a << 2) | args.sizecode);
 
                             break;
 
-                        default: return new Tuple<AssembleError, string>(AssembleError.UnknownOp, $"line {args.line}: Unknown operation \"{args.op}\"");
+                        case "SLP": if (!args.TryProcessIMMRM(OPCode.SLP)) return args.res; break;
+
+                        default: return new AssembleResult(AssembleError.UnknownOp, $"line {args.line}: Unknown operation \"{args.op}\"");
                     }
                 }
 
@@ -4370,7 +4869,7 @@ namespace csx64
             }
 
             // make sure all global symbols were actually defined prior to link-time
-            foreach (string str in file.GlobalSymbols) if (!file.Symbols.ContainsKey(str)) return new Tuple<AssembleError, string>(AssembleError.UnknownSymbol, $"Global symbol \"{str}\" was never defined");
+            foreach (string str in file.GlobalSymbols) if (!file.Symbols.ContainsKey(str)) return new AssembleResult(AssembleError.UnknownSymbol, $"Global symbol \"{str}\" was never defined");
 
             // evaluate each symbol to link all internal symbols and minimize object file complexity
             foreach (var entry in file.Symbols) entry.Value.Evaluate(file.Symbols, out a, out floating, ref err);
@@ -4378,26 +4877,33 @@ namespace csx64
             // try to eliminate as many holes as possible (we want as clean an object file as possible)
             for (int i = file.Holes.Count - 1; i >= 0; --i)
             {
-                switch (TryPatchHole(file.Symbols, file.Data, file.Holes[i], ref err))
+                switch (TryPatchHole(file.Data, file.Symbols, file.Holes[i], ref err))
                 {
                     case PatchError.None: file.Holes.RemoveAt(i); break; // remove the hole if we solved it
                     case PatchError.Unevaluated: break;
-                    case PatchError.Error: return new Tuple<AssembleError, string>(AssembleError.ArgError, err);
+                    case PatchError.Error: return new AssembleResult(AssembleError.ArgError, err);
 
                     default: throw new ArgumentException("Unknown patch error encountered");
                 }
             }
 
             // return no error
-            return new Tuple<AssembleError, string>(AssembleError.None, string.Empty);
+            return new AssembleResult(AssembleError.None, string.Empty);
         }
-        public static Tuple<LinkError, string> Link(ref byte[] res, params ObjectFile[] objs)
+        /// <summary>
+        /// Links the object files together and creates an executable
+        /// </summary>
+        /// <param name="res">the resulting executable data if no errors occur</param>
+        /// <param name="objs">the object files to link</param>
+        public static LinkResult Link(out byte[] res, params ObjectFile[] objs)
         {
+            res = null; // initially null result
+
             // get total size of objet files
             UInt64 filesize = 0;
             foreach (ObjectFile obj in objs) filesize += (UInt64)obj.Data.LongCount();
             // if zero, there is nothing to link
-            if (filesize == 0) return new Tuple<LinkError, string>(LinkError.EmptyResult, "Resulting file is empty");
+            if (filesize == 0) return new LinkResult(LinkError.EmptyResult, "Resulting file is empty");
 
             res = new byte[filesize + 10]; // give it enough memory to write the whole file plus a header
             filesize = 10;                 // set size to after header (points to writing position)
@@ -4442,9 +4948,9 @@ namespace csx64
                 foreach (string symbol in objs[i].GlobalSymbols)
                 {
                     // don't redefine the same symbol
-                    if (G_symbols.ContainsKey(symbol)) return new Tuple<LinkError, string>(LinkError.SymbolRedefinition, $"Global symbol \"{symbol}\" was already defined");
+                    if (G_symbols.ContainsKey(symbol)) return new LinkResult(LinkError.SymbolRedefinition, $"Global symbol \"{symbol}\" was already defined");
                     // make sure the symbol exists in locals dictionary (if using built-in assembler above, this should never happen with valid object files)
-                    if (!symbols[i].TryGetValue(symbol, out Expr hole)) return new Tuple<LinkError, string>(LinkError.MissingSymbol, $"Global symbol \"{symbol}\" undefined");
+                    if (!symbols[i].TryGetValue(symbol, out Expr hole)) return new LinkResult(LinkError.MissingSymbol, $"Global symbol \"{symbol}\" undefined");
 
                     // add to global symbols
                     G_symbols.Add(symbol, hole);
@@ -4470,13 +4976,13 @@ namespace csx64
                     HoleData data = new HoleData { Address = _data.Address + offsets[i], Size = _data.Size, Line = _data.Line, Expr = _data.Expr.Clone() };
 
                     // try to patch it
-                    PatchError _err = TryPatchHole(symbols[i], res, data, ref err);
-                    if (_err == PatchError.Unevaluated) _err = TryPatchHole(G_symbols, res, data, ref err);
+                    PatchError _err = TryPatchHole(res, symbols[i], data, ref err);
+                    if (_err == PatchError.Unevaluated) _err = TryPatchHole(res, G_symbols, data, ref err);
                     switch (_err)
                     {
                         case PatchError.None: break;
-                        case PatchError.Unevaluated: return new Tuple<LinkError, string>(LinkError.MissingSymbol, err);
-                        case PatchError.Error: return new Tuple<LinkError, string>(LinkError.FormatError, err);
+                        case PatchError.Unevaluated: return new LinkResult(LinkError.MissingSymbol, err);
+                        case PatchError.Error: return new LinkResult(LinkError.FormatError, err);
 
                         default: throw new ArgumentException("Unknown patch error encountered");
                     }
@@ -4484,15 +4990,15 @@ namespace csx64
             }
 
             // write the header
-            if (main == null) return new Tuple<LinkError, string>(LinkError.MissingSymbol, "No entry point \"main\"");
-            if (!main.Evaluate(G_symbols, out val, out floating, ref err)) return new Tuple<LinkError, string>(LinkError.MissingSymbol, $"Failed to evaluate global symbol \"main\"\n-> {err}");
+            if (main == null) return new LinkResult(LinkError.MissingSymbol, "No entry point \"main\"");
+            if (!main.Evaluate(G_symbols, out val, out floating, ref err)) return new LinkResult(LinkError.MissingSymbol, $"Failed to evaluate global symbol \"main\"\n-> {err}");
 
-            Write(res, 0, 1, (UInt64)OPCode.JMP);
-            Write(res, 1, 1, 0x80);
-            Write(res, 2, 8, val);
+            res.Write(0, 1, (UInt64)OPCode.JMP);
+            res.Write(1, 1, 0x80);
+            res.Write(2, 8, val);
 
             // linked successfully
-            return new Tuple<LinkError, string>(LinkError.None, string.Empty);
+            return new LinkResult(LinkError.None, string.Empty);
         }
     }
 }

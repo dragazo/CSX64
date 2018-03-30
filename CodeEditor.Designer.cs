@@ -35,9 +35,10 @@
             // 
             this.MainTabs.Dock = System.Windows.Forms.DockStyle.Fill;
             this.MainTabs.Location = new System.Drawing.Point(0, 0);
+            this.MainTabs.Multiline = true;
             this.MainTabs.Name = "MainTabs";
             this.MainTabs.SelectedIndex = 0;
-            this.MainTabs.Size = new System.Drawing.Size(810, 378);
+            this.MainTabs.Size = new System.Drawing.Size(784, 378);
             this.MainTabs.TabIndex = 0;
             this.MainTabs.MouseClick += new System.Windows.Forms.MouseEventHandler(this.MainTabs_MouseClick);
             // 
@@ -45,7 +46,7 @@
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(810, 378);
+            this.ClientSize = new System.Drawing.Size(784, 378);
             this.Controls.Add(this.MainTabs);
             this.Name = "CodeEditor";
             this.Text = "CodeEditor";

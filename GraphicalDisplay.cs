@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -12,8 +13,58 @@ namespace csx64
 {
     public partial class GraphicalDisplay : Form
     {
+        /// <summary>
+        /// The time (in ms) to delay between tick cycles
+        /// </summary>
+        private const int RenderDelay = 1;
+
         public GraphicalComputer C = new GraphicalComputer();
         public UInt64 Ticks = 0;
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+
+            C.MousePos = e.Location;
+        }
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            // don't call base. we want everything to be handled by client code
+
+            C.MouseDelta += e.Delta;
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            // don't call base. we want everything to be handled by client code
+
+            C.MouseDown = e.Button;
+        }
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            // don't call base. we want everything to be handled by client code
+
+            C.MouseDown = MouseButtons.None;
+        }
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            // don't call base. we want everything to be handled by client code
+
+            C.KeyDown = e.Modifiers | e.KeyCode;
+        }
+        protected override void OnKeyUp(KeyEventArgs e)
+        {
+            // don't call base. we want everything to be handled by client code
+
+            C.KeyDown = Keys.None;
+        }
+
+        // ---------------------------------- //
+
+        /// <summary>
+        /// Called after every tick cycle with the number of ticks that have elapsed
+        /// </summary>
+        public event Action<UInt64> OnTickCycle = null;
 
         public GraphicalDisplay()
         {
@@ -22,8 +73,36 @@ namespace csx64
             // create the images
             C.RenderImage = new Bitmap(DisplayRectangle.Width, DisplayRectangle.Height);
             C.DisplayImage = new Bitmap(DisplayRectangle.Width, DisplayRectangle.Height);
-            // store size settings
-            C.ImageSize = DisplayRectangle.Size;
+            // and the graphics handle
+            C.Graphics = Graphics.FromImage(C.RenderImage);
+
+            // and the rendering tools
+            C.Brush = new SolidBrush(Color.Black);
+            C.Pen = new Pen(Color.Black);
+            C.Font = new Font(FontFamily.GenericSansSerif, 16);
+        }
+
+        private bool disposed = false;
+        protected override void Dispose(bool disposing)
+        {
+            if (!disposed)
+            {
+                if (disposing)
+                {
+                    // dispose the managed objects we allocated
+                    C.RenderImage.Dispose();
+                    C.DisplayImage.Dispose();
+                    C.Graphics.Dispose();
+
+                    C.Brush.Dispose();
+                    C.Pen.Dispose();
+                    C.Font.Dispose();
+                }
+
+                // ensure base dispose is called
+                base.Dispose(disposing);
+                disposed = true;
+            }
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -33,45 +112,46 @@ namespace csx64
             // render the graphics object over the display surface
             e.Graphics.DrawImage(C.DisplayImage, Point.Empty);
         }
-        protected override void OnResize(EventArgs e)
-        {
-            base.OnResize(e);
 
-            C.ImageSize = DisplayRectangle.Size; // update size settings
-            C.NeedsRender = true; // mark that we need a render
-
-            Invalidate();
-        }
-        protected override void OnMouseMove(MouseEventArgs e)
-        {
-            base.OnMouseMove(e);
-
-            // update computer mouse pos
-            C.MousePos = e.Location;
-        }
-
-        public event Action<UInt64> OnTickCycle = null;
+        /// <summary>
+        /// Begins execution
+        /// </summary>
         public async void Run()
         {
             Text = "Running";
-            Random r = new Random();
-
+            
             while (C.Running)
             {
-                await Task.Delay(10);
+                await Task.Delay(RenderDelay);
 
                 // tick processor
-                UInt64 i;
+                UInt32 i;
                 for (i = 0; i < 10000 && C.Tick(); ++i) ;
                 Ticks += i;
 
                 // acount for re-rendering
                 if (C.Invalidated)
                 {
+                    // swap render and display images
+                    Utility.Swap(ref C.RenderImage, ref C.DisplayImage);
+
+                    // if going to a different size
+                    if (C.RenderImage.Size != ClientRectangle.Size)
+                    {
+                        // create the new image
+                        C.RenderImage.Dispose();
+                        C.RenderImage = new Bitmap(ClientRectangle.Width, ClientRectangle.Height);
+                    }
+
+                    // create the new graphics handle
+                    C.Graphics.Dispose();
+                    C.Graphics = Graphics.FromImage(C.RenderImage);
+
                     C.Invalidated = false; // mark invalidation as filled
                     Invalidate(); // redraw the form
                 }
 
+                // notify tick cycle event
                 OnTickCycle?.Invoke(Ticks);
             }
 
@@ -81,138 +161,159 @@ namespace csx64
 
     public class GraphicalComputer : CSX64
     {
-        public Bitmap RenderImage = null, DisplayImage = null;
+        public enum GraphicalSyscallCodes
+        {
+            GetRenderSize = 64,
 
-        public Size ImageSize = System.Drawing.Size.Empty; //new Size(100, 100); // size to use for making new images
-        public Point MousePos = Point.Empty; // mouse position
+            GetMousePos, GetMouseDelta,
+            GetMouseDown, GetKeyDown,
+
+            SetBrush, SetPen, SetFont,
+
+            Render,
+            Clear,
+            FillRect, DrawRect,
+            FillEllipse, DrawEllipse,
+            DrawString, DrawStringBounded
+        }
+
+        static GraphicalComputer()
+        {
+            // create definitions for all the syscall codes
+            foreach (GraphicalSyscallCodes item in Enum.GetValues(typeof(GraphicalSyscallCodes)))
+                DefineSymbol($"sys_{item.ToString().ToLower()}", (UInt64)item);
+        }
+
+        public Bitmap RenderImage, DisplayImage;
+        public Graphics Graphics;
+
+        public Brush Brush;
+        public Pen Pen;
+        public Font Font;
+
+        // --------------- //
+
+        public Point MousePos = Point.Empty;
+        public int MouseDelta = 0;
+
+        public MouseButtons MouseDown = MouseButtons.None;
+        public Keys KeyDown = Keys.None;
 
         public bool Invalidated = false; // flag for if the processor has finished re-rendering
-        public bool NeedsRender = false; // flag for if the virtual operating system recommends re-rendering
 
         protected override bool Syscall()
         {
-            UInt64 val = 0; // parsing destination
+            Rectangle rect;
+            Point point;
+            string str;
             
-            Brush brush = null; // brush to use for filling
-            Pen pen = null;     // pen to use for drawing
-            Font font = null;   // font to use for drawing strings
-
-            Rectangle rect = new Rectangle();
-            Point point = new Point();
-            string str = null;
-
             bool ret = true; // return value (stored here because we need to dispose everything before returning)
-
+            
             // register 0 contains a 64-bit syscall code
             switch (GetRegister(0).x64)
             {
-                case 0: // get graphic surface dimensions
-                    GetRegister(1).x64 = (UInt64)RenderImage.Width;
-                    GetRegister(2).x64 = (UInt64)RenderImage.Height;
-                    break;
-                case 1: // ask if render needed (e.g. window resize)
-                    GetRegister(1).x8 = NeedsRender ? 1 : 0ul;
-                    break;
-                case 2: // render
-                    {
-                        // display the new render
-                        DisplayImage?.Dispose();
-                        DisplayImage = RenderImage;
-                        // make a new image to render
-                        RenderImage = new Bitmap(ImageSize.Width, ImageSize.Height);
-                    }
-                    Invalidated = true;  // flag as invalidated
-                    NeedsRender = false; // mark that we rendered
-                    break;
-                case 3: // mouse pos
-                    GetRegister(1).x64 = (UInt64)MousePos.X;
-                    GetRegister(2).x64 = (UInt64)MousePos.Y;
+                // -- data utilities -- //
+
+                case (UInt64)GraphicalSyscallCodes.GetRenderSize:
+                    GetRegister(1).x32 = (UInt64)RenderImage.Width;
+                    GetRegister(2).x32 = (UInt64)RenderImage.Height;
                     break;
 
-                // -- drawing utilities --
-
-                case 4: // clear ($1 32:color)
-                    if (RenderImage == null || !GetMem(GetRegister(1).x64, 4, ref val)) { ret = false; break; }
-                    using (Graphics g = Graphics.FromImage(RenderImage)) g.Clear(Color.FromArgb((int)val));
+                case (UInt64)GraphicalSyscallCodes.GetMousePos:
+                    GetRegister(1).x32 = (UInt64)MousePos.X;
+                    GetRegister(2).x32 = (UInt64)MousePos.Y;
+                    break;
+                case (UInt64)GraphicalSyscallCodes.GetMouseDelta:
+                    GetFlags().Z = (GetRegister(1).x64 = ((Int64)MouseDelta).MakeUnsigned()) == 0;
+                    MouseDelta = 0;
                     break;
 
-                case 5: // fill rect ($1 brush) ($2 rect)
-                    if (RenderImage == null || !GetBrush(GetRegister(1).x64, ref brush) || !GetRect(GetRegister(2).x64, ref rect)) { ret = false; break; }
-                    using (Graphics g = Graphics.FromImage(RenderImage)) g.FillRectangle(brush, rect);
-                    break;
-                case 6: // draw rect ($1 pen) ($2 rect)
-                    if (RenderImage == null || !GetPen(GetRegister(1).x64, ref pen) || !GetRect(GetRegister(2).x64, ref rect)) { ret = false; break; }
-                    using (Graphics g = Graphics.FromImage(RenderImage)) g.DrawRectangle(pen, rect);
+                case (UInt64)GraphicalSyscallCodes.GetMouseDown: GetFlags().Z = (GetRegister(1).x64 = (UInt64)MouseDown) == 0; break;
+                case (UInt64)GraphicalSyscallCodes.GetKeyDown: GetFlags().Z = (GetRegister(1).x64 = (UInt64)KeyDown) == 0; break;
+
+                // -- drawing settings -- //
+
+                case (UInt64)GraphicalSyscallCodes.SetBrush: return GetBrush(GetRegister(1).x64);
+                case (UInt64)GraphicalSyscallCodes.SetPen: return GetPen(GetRegister(1).x64);
+                case (UInt64)GraphicalSyscallCodes.SetFont: return GetFont(GetRegister(1).x64);
+
+                // -- drawing utilities -- //
+
+                case (UInt64)GraphicalSyscallCodes.Render: Invalidated = true; break;
+
+                case (UInt64)GraphicalSyscallCodes.Clear: // ($1 32:color)
+                    Graphics.Clear(Color.FromArgb((int)GetRegister(1).x32));
                     break;
 
-                case 7: // fill ellipse ($1 brush) ($2 rect)
-                    if (RenderImage == null || !GetBrush(GetRegister(1).x64, ref brush) || !GetRect(GetRegister(2).x64, ref rect)) { ret = false; break; }
-                    using (Graphics g = Graphics.FromImage(RenderImage)) g.FillEllipse(brush, rect);
+                case (UInt64)GraphicalSyscallCodes.FillRect: // ($1 rect)
+                    if (!GetRect(GetRegister(1).x64, out rect)) { ret = false; break; }
+                    Graphics.FillRectangle(Brush, rect);
                     break;
-                case 8: // draw ellipse ($1 pen) ($2 rect)
-                    if (RenderImage == null || !GetPen(GetRegister(1).x64, ref pen) || !GetRect(GetRegister(2).x64, ref rect)) { ret = false; break; }
-                    using (Graphics g = Graphics.FromImage(RenderImage)) g.DrawEllipse(pen, rect);
-                    break;
-
-                case 9: // draw string ($1 brush) ($2 font) ($3 point) ($4 string) ($5 length)
-                    if (RenderImage == null || !GetBrush(GetRegister(1).x64, ref brush) || !GetFont(GetRegister(2).x64, ref font)
-                        || !GetPoint(GetRegister(3).x64, ref point) || !GetString(GetRegister(4).x64, GetRegister(5).x64, ref str)) { ret = false; break; }
-                    using (Graphics g = Graphics.FromImage(RenderImage)) g.DrawString(str, font, brush, point);
-                    MessageBox.Show(str);
-                    break;
-                case 10: // draw string ($1 brush) ($2 font) ($3 rect) ($4 string) ($5 length)
-                    if (RenderImage == null || !GetBrush(GetRegister(1).x64, ref brush) || !GetFont(GetRegister(2).x64, ref font)
-                        || !GetRect(GetRegister(3).x64, ref rect) || !GetString(GetRegister(4).x64, GetRegister(5).x64, ref str)) { ret = false; break; }
-                    using (Graphics g = Graphics.FromImage(RenderImage)) g.DrawString(str, font, brush, rect);
+                case (UInt64)GraphicalSyscallCodes.DrawRect: // ($1 rect)
+                    if (!GetRect(GetRegister(1).x64, out rect)) { ret = false; break; }
+                    Graphics.DrawRectangle(Pen, rect);
                     break;
 
+                case (UInt64)GraphicalSyscallCodes.FillEllipse: // ($1 rect)
+                    if (!GetRect(GetRegister(1).x64, out rect)) { ret = false; break; }
+                    Graphics.FillEllipse(Brush, rect);
+                    break;
+                case (UInt64)GraphicalSyscallCodes.DrawEllipse: // ($1 rect)
+                    if (!GetRect(GetRegister(1).x64, out rect)) { ret = false; break; }
+                    Graphics.DrawEllipse(Pen, rect);
+                    break;
+
+                case (UInt64)GraphicalSyscallCodes.DrawString: // ($1 point) ($2 string)
+                    if (!GetPoint(GetRegister(1).x64, out point) || !GetString(GetRegister(2).x64, 2, out str)) { ret = false; break; }
+                    Graphics.DrawString(str, Font, Brush, point);
+                    break;
+                case (UInt64)GraphicalSyscallCodes.DrawStringBounded: // ($1 rect) ($2 string)
+                    if (!GetRect(GetRegister(1).x64, out rect) || !GetString(GetRegister(2).x64, 2, out str)) { ret = false; break; }
+                    Graphics.DrawString(str, Font, Brush, rect);
+                    break;
                     
-
-                // otherwise refer to parent
-                default:
-                    ret = base.Syscall();
-                    break;
+                // otherwise defer to parent
+                default: ret = base.Syscall(); break;
             }
-
-            // dispose vars
-            brush?.Dispose();
-            pen?.Dispose();
-            font?.Dispose();
 
             // return result
             return ret;
         }
 
-        // (32:brush type, 32:color)
-        private bool GetBrush(UInt64 code, ref Brush brush)
+        // ptr struct {8:type, 32:forecolor, 32:backcolor}
+        private bool GetBrush(UInt64 pos)
         {
-            switch (code >> 32)
-            {
-                case 0: brush = new SolidBrush(Color.FromArgb((int)code)); return true;
+            if (!GetMem(pos, 1, out UInt64 _type) || !GetMem(pos + 1, 4, out UInt64 _fore) || !GetMem(pos + 5, 4, out UInt64 _back)) return false;
 
-                default: return false;
-            }
+            Color forecolor = Color.FromArgb((int)_fore);
+            Color backcolor = Color.FromArgb((int)_back);
+
+            Brush.Dispose();
+
+            // type: [1: category][7: settings]
+            if ((_type & 0x80) == 0) Brush = new SolidBrush(forecolor);
+            else Brush = new HatchBrush((HatchStyle)(_type & 0x7f), forecolor, backcolor);
+
+            return true;
         }
-        // (32:pen type, 32:color)
-        private bool GetPen(UInt64 code, ref Pen pen)
+        // ptr struct {32:pen type, 32:color}
+        private bool GetPen(UInt64 pos)
         {
-            pen = new Pen(Color.FromArgb((int)code));
+            if (!GetMem(pos, 4, out UInt64 _type) || !GetMem(pos + 4, 4, out UInt64 _color)) return false;
 
-            switch (code >> 32)
-            {
-                case 0: return true;
+            Pen.Dispose();
+            Pen = new Pen(Color.FromArgb((int)_color));
 
-                default: return false;
-            }
+            return true;
         }
-        // (16:font type, 16:font style, 32:size (integer 10th of point))
-        private bool GetFont(UInt64 code, ref Font font)
+        // ptr struct {16:font type, 16:font style, 32f:size}
+        private bool GetFont(UInt64 pos)
         {
-            FontFamily family;
-            FontStyle style = FontStyle.Regular;
+            if (!GetMem(pos, 2, out UInt64 _type) || !GetMem(pos + 2, 2, out UInt64 _style) || !GetMem(pos + 4, 4, out UInt64 _size)) return false;
 
             // get font type
-            switch (code >> 48)
+            FontFamily family;
+            switch (_type)
             {
                 case 0: family = FontFamily.GenericSansSerif; break;
                 case 1: family = FontFamily.GenericSerif; break;
@@ -221,59 +322,35 @@ namespace csx64
                 default: return false;
             }
 
-            // apply style (flags)
-            if (((code >> 32) & 1) != 0) style |= FontStyle.Bold;
-            if (((code >> 32) & 2) != 0) style |= FontStyle.Italic;
-            if (((code >> 32) & 4) != 0) style |= FontStyle.Underline;
-            if (((code >> 32) & 8) != 0) style |= FontStyle.Strikeout;
-
             // create the font
-            font = new Font(family, (code & 0xffffffff) / 10f, style);
+            Font.Dispose();
+            Font = new Font(family, AsFloat(_size), (FontStyle)_style);
+
             return true;
         }
 
         // ptr struct {32:x, 32:y, 32:width, 32:height}
-        private bool GetRect(UInt64 pos, ref Rectangle rect)
+        private bool GetRect(UInt64 pos, out Rectangle rect)
         {
-            UInt64 val = 0;
+            UInt64 x, y, w, h;
 
-            if (!GetMem(pos, 4, ref val)) return false;
-            rect.X = (int)val;
-            if (!GetMem(pos + 4, 4, ref val)) return false;
-            rect.Y = (int)val;
+            if (!GetMem(pos, 4, out x) || !GetMem(pos + 4, 4, out y) || !GetMem(pos + 8, 4, out w) || !GetMem(pos + 12, 4, out h))
+            { rect = Rectangle.Empty; return false; }
 
-            if (!GetMem(pos + 8, 4, ref val)) return false;
-            rect.Width = (int)val;
-            if (!GetMem(pos + 12, 4, ref val)) return false;
-            rect.Height = (int)val;
+            rect = new Rectangle((int)x, (int)y, (int)w, (int)h);
 
             return true;
         }
         // ptr struct {32:x, 32:y}
-        private bool GetPoint(UInt64 pos, ref Point point)
+        private bool GetPoint(UInt64 pos, out Point point)
         {
-            UInt64 val = 0;
+            UInt64 x, y;
 
-            if (!GetMem(pos, 4, ref val)) return false;
-            point.X = (int)val;
-            if (!GetMem(pos + 4, 4, ref val)) return false;
-            point.Y = (int)val;
+            if (!GetMem(pos, 4, out x) || !GetMem(pos + 4, 4, out y))
+            { point = Point.Empty; return false; }
+
+            point = new Point((int)x, (int)y);
             
-            return true;
-        }
-        private bool GetString(UInt64 pos, UInt64 length, ref string str)
-        {
-            StringBuilder b = new StringBuilder();
-            UInt64 val = 0;
-
-            // read the string from memory (UTF-16)
-            for (UInt64 i = 0; i < length; ++i)
-            {
-                if (!GetMem(pos + i * 2, 2, ref val)) return false;
-                b.Append((char)val);
-            }
-
-            str = b.ToString();
             return true;
         }
     }

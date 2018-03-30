@@ -24,11 +24,33 @@ namespace csx64
             }
         }
 
+        /// <summary>
+        /// The context menu used for program tabs
+        /// </summary>
+        private ContextMenuStrip Context;
+
         public CodeEditor()
         {
             InitializeComponent();
 
+            // create the context menu
+            Context = new ContextMenuStrip();
+            // create the context menu
+            Context.Items.Add("New Program", null, (o, e) => NewProgram());
+            Context.Items.Add("Remove", null, (o, e) => { MainTabs.TabPages.Remove((TabPage)Context.SourceControl); if (MainTabs.TabCount == 0) NewProgram(); });
+            Context.Items.Add("Rename", null, (o, e) =>
+            {
+                TabPage tab = (TabPage)Context.SourceControl;
+                using (RenameDialog d = new RenameDialog() { Result = tab.Text })
+                    if (d.ShowDialog() == DialogResult.OK) tab.Text = d.Result;
+            });
+            
+            // create the first program (cannot have zero files open)
             NewProgram();
+        }
+        ~CodeEditor()
+        {
+            Context.Dispose();
         }
 
         /// <summary>
@@ -44,18 +66,6 @@ namespace csx64
             CodeBox box = new CodeBox();
             box.Parent = tab;
             box.Dock = DockStyle.Fill;
-
-            // create its context menu
-            ContextMenuStrip m = tab.ContextMenuStrip = new ContextMenuStrip();
-
-            // give it menu items
-            m.Items.Add("Add", null, (o, e) => NewProgram());
-            m.Items.Add("Remove", null, (o, e) => { MainTabs.TabPages.Remove(tab); if (MainTabs.TabCount == 0) NewProgram(); });
-            m.Items.Add("Rename", null, (o, e) =>
-            {
-                using (RenameDialog d = new RenameDialog() { Result = tab.Text })
-                    if (d.ShowDialog() == DialogResult.OK) tab.Text = d.Result;
-            });
         }
 
         /// <summary>
@@ -69,7 +79,8 @@ namespace csx64
                 for (int i = 0; i < MainTabs.TabCount; ++i)
                     if (MainTabs.GetTabRect(i).Contains(e.Location))
                     {
-                        MainTabs.TabPages[i].ContextMenuStrip.Show(MainTabs.TabPages[i], 0, 0);
+                        // display the context menu on that tab
+                        Context.Show(MainTabs.TabPages[i], 0, 0);
                         break;
                     }
             }
