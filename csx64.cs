@@ -138,6 +138,16 @@ namespace csx64
         /// </summary>
         private const UInt64 PublicFlags = 0x1f;
 
+        /// <summary>
+        /// Indicates if rmdir will remove non-empty directories recursively
+        /// </summary>
+        private const bool RecursiveRmdir = false;
+
+        /// <summary>
+        /// The number of file descriptors available to the processor
+        /// </summary>
+        public const int NFileDescriptors = 16;
+
         // -----------
         // -- Types --
         // -----------
@@ -145,7 +155,7 @@ namespace csx64
         public enum ErrorCode
         {
             None, OutOfBounds, UnhandledSyscall, UndefinedBehavior, ArithmeticError, Abort,
-            IOFailure
+            IOFailure, FSDisabled, AccessViolation
         }
         public enum OPCode
         {
@@ -205,7 +215,14 @@ namespace csx64
         {
             Read, Write,
             Open, Close,
-            Move
+            Flush, Seek,
+
+            Move, Remove,
+            Mkdir, Rmdir
+        }
+        public enum SyscallResult
+        {
+            Failure, Success, Repeat
         }
 
         /// <summary>
@@ -314,7 +331,14 @@ namespace csx64
             {
                 get => (Flags & 0x20ul) != 0;
                 set => Flags = (Flags & ~0x20ul) | (value ? 0x20ul : 0);
-
+            }
+            /// <summary>
+            /// The flag that indicates that we're allowed to run commands that may potentially modify the file system
+            /// </summary>
+            public bool FileSystem
+            {
+                get => (Flags & 0x40ul) != 0;
+                set => Flags = (Flags & ~0x40ul) | (value ? 0x40ul : 0);
             }
         }
 
@@ -327,7 +351,16 @@ namespace csx64
 
         private byte[] Memory = null;
 
-        private FileStream[] FileDescriptors = new FileStream[4];
+        private Stream[] FileDescriptors = new Stream[NFileDescriptors];
+        /// <summary>
+        /// Marks if the file descriptor is managed (i.e. created by client code).
+        /// if file descriptor is not in use, this flag is undefined
+        /// </summary>
+        private bool[] FileDescriptor_Managed = new bool[NFileDescriptors];
+        /// <summary>
+        /// Marks if an unmanaged file descriptor is interactive. If fd is managed, this value is undefined
+        /// </summary>
+        private bool[] FileDescriptor_Interactive = new bool[NFileDescriptors];
 
         /// <summary>
         /// The current execution positon (executed on next tick)
@@ -337,6 +370,10 @@ namespace csx64
         /// Flag marking if the program is still executing
         /// </summary>
         public bool Running { get; protected set; }
+        /// <summary>
+        /// Returns if we're currently suspended pending data from an interactive unmanaged input stream. Execution will resume when this is false
+        /// </summary>
+        public bool SuspendedRead { get; set; }
 
         /// <summary>
         /// The number of ticks the processor is currently sleeping for
@@ -654,7 +691,7 @@ namespace csx64
                 case 0: if (!GetMemAdv(Size((s >> 2) & 3), out a)) return false; break;
                 case 1: a = Registers[s >> 4].Get((s >> 2) & 3); break;
                 case 2: if (!GetAddressAdv(out a) || !GetMem(a, Size((s >> 2) & 3), out a)) return false; break;
-                default: Fail(ErrorCode.UndefinedBehavior); { a = 0; return false; }
+                default: Terminate(ErrorCode.UndefinedBehavior); { a = 0; return false; }
             }
 
             return true;
@@ -752,7 +789,7 @@ namespace csx64
             if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
-            if (b == 0) { Fail(ErrorCode.ArithmeticError); return false; }
+            if (b == 0) { Terminate(ErrorCode.ArithmeticError); return false; }
 
             UInt64 res = Truncate(a / b, sizecode);
 
@@ -766,7 +803,7 @@ namespace csx64
             if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
-            if (b == 0) { Fail(ErrorCode.ArithmeticError); return false; }
+            if (b == 0) { Terminate(ErrorCode.ArithmeticError); return false; }
 
             UInt64 res = Truncate(a % b, sizecode);
 
@@ -781,7 +818,7 @@ namespace csx64
             if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
-            if (b == 0) { Fail(ErrorCode.ArithmeticError); return false; }
+            if (b == 0) { Terminate(ErrorCode.ArithmeticError); return false; }
 
             UInt64 res = Truncate((SignExtend(a, sizecode).MakeSigned() / SignExtend(b, sizecode).MakeSigned()).MakeUnsigned(), sizecode);
 
@@ -795,7 +832,7 @@ namespace csx64
             if (!FetchBinaryOpFormat(ref s, ref m, ref a, ref b)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
-            if (b == 0) { Fail(ErrorCode.ArithmeticError); return false; }
+            if (b == 0) { Terminate(ErrorCode.ArithmeticError); return false; }
 
             UInt64 res = Truncate((SignExtend(a, sizecode).MakeSigned() % SignExtend(b, sizecode).MakeSigned()).MakeUnsigned(), sizecode);
 
@@ -1024,7 +1061,7 @@ namespace csx64
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
 
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
         private bool ProcessFSUB(bool apply = true)
@@ -1051,7 +1088,7 @@ namespace csx64
                         return apply ? StoreBinaryOpFormat(s, m, FloatAsUInt64(res)) : true;
                     }
 
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
 
@@ -1079,7 +1116,7 @@ namespace csx64
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
 
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
 
@@ -1107,7 +1144,7 @@ namespace csx64
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
 
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
         private bool ProcessFMOD()
@@ -1134,7 +1171,7 @@ namespace csx64
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
 
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
 
@@ -1162,7 +1199,7 @@ namespace csx64
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
 
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
         private bool ProcessFSQRT()
@@ -1189,7 +1226,7 @@ namespace csx64
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
 
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
         private bool ProcessFEXP()
@@ -1216,7 +1253,7 @@ namespace csx64
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
 
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
         private bool ProcessFLN()
@@ -1243,7 +1280,7 @@ namespace csx64
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
 
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
         private bool ProcessFNEG()
@@ -1270,7 +1307,7 @@ namespace csx64
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
 
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
         private bool ProcessFABS()
@@ -1297,7 +1334,7 @@ namespace csx64
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
 
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
         private bool ProcessFCMPZ()
@@ -1324,7 +1361,7 @@ namespace csx64
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
 
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
 
@@ -1352,7 +1389,7 @@ namespace csx64
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
 
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
         private bool ProcessFCOS()
@@ -1379,7 +1416,7 @@ namespace csx64
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
 
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
         private bool ProcessFTAN()
@@ -1406,7 +1443,7 @@ namespace csx64
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
 
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
 
@@ -1434,7 +1471,7 @@ namespace csx64
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
 
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
         private bool ProcessFCOSH()
@@ -1461,7 +1498,7 @@ namespace csx64
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
 
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
         private bool ProcessFTANH()
@@ -1488,7 +1525,7 @@ namespace csx64
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
 
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
 
@@ -1516,7 +1553,7 @@ namespace csx64
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
 
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
         private bool ProcessFACOS()
@@ -1543,7 +1580,7 @@ namespace csx64
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
 
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
         private bool ProcessFATAN()
@@ -1570,7 +1607,7 @@ namespace csx64
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
 
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
         private bool ProcessFATAN2()
@@ -1597,7 +1634,7 @@ namespace csx64
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
 
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
         
@@ -1625,7 +1662,7 @@ namespace csx64
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
 
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
         private bool ProcessCEIL()
@@ -1652,7 +1689,7 @@ namespace csx64
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
 
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
         private bool ProcessROUND()
@@ -1679,7 +1716,7 @@ namespace csx64
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
 
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
         private bool ProcessTRUNC()
@@ -1706,7 +1743,7 @@ namespace csx64
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
 
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
 
@@ -1720,7 +1757,7 @@ namespace csx64
                 case 3: return StoreBinaryOpFormat(s, m, ((Int64)AsDouble(a)).MakeUnsigned());
                 case 2: return StoreBinaryOpFormat(s, m, ((Int64)AsFloat(a)).MakeUnsigned());
 
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
         private bool ProcessITOF()
@@ -1733,7 +1770,7 @@ namespace csx64
                 case 3: return StoreBinaryOpFormat(s, m, DoubleAsUInt64(a.MakeSigned()));
                 case 2: return StoreBinaryOpFormat(s, m, FloatAsUInt64(SignExtend(a, 2).MakeSigned()));
 
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
 
@@ -1829,28 +1866,28 @@ namespace csx64
 
             if (!FetchIMMRMFormat(out s, out a)) return false;
 
-            if (a == 0) { Fail(ErrorCode.ArithmeticError); return false; }
+            if (a == 0) { Terminate(ErrorCode.ArithmeticError); return false; }
 
             // switch through register sizes
             switch ((s >> 2) & 3)
             {
                 case 0:
                     full = Registers[0].x16 / a;
-                    if ((full >> 8) != 0) { Fail(ErrorCode.ArithmeticError); return false; }
+                    if ((full >> 8) != 0) { Terminate(ErrorCode.ArithmeticError); return false; }
                     Registers[1].x8 = Registers[0].x16 % a;
                     Registers[0].x8 = full;
                     Flags.C = Registers[1].x8 != 0;
                     break;
                 case 1:
                     full = Registers[0].x32 / a;
-                    if ((full >> 16) != 0) { Fail(ErrorCode.ArithmeticError); return false; }
+                    if ((full >> 16) != 0) { Terminate(ErrorCode.ArithmeticError); return false; }
                     Registers[1].x16 = Registers[0].x32 % a;
                     Registers[0].x16 = full;
                     Flags.C = Registers[1].x16 != 0;
                     break;
                 case 2:
                     full = Registers[0].x64 / a;
-                    if ((full >> 32) != 0) { Fail(ErrorCode.ArithmeticError); return false; }
+                    if ((full >> 32) != 0) { Terminate(ErrorCode.ArithmeticError); return false; }
                     Registers[1].x32 = Registers[0].x64 % a;
                     Registers[0].x32 = full;
                     Flags.C = Registers[1].x32 != 0;
@@ -1859,7 +1896,7 @@ namespace csx64
                     bigraw = (new BigInteger(Registers[1].x64) << 64) | new BigInteger(Registers[0].x64);
                     bigfull = bigraw / new BigInteger(a);
 
-                    if ((bigfull >> 64) != 0) { Fail(ErrorCode.ArithmeticError); return false; }
+                    if ((bigfull >> 64) != 0) { Terminate(ErrorCode.ArithmeticError); return false; }
 
                     Registers[1].x64 = (UInt64)(bigraw % new BigInteger(a));
                     Registers[0].x64 = (UInt64)bigfull;
@@ -1877,7 +1914,7 @@ namespace csx64
 
             if (!FetchIMMRMFormat(out s, out a)) return false;
 
-            if (a == 0) { Fail(ErrorCode.ArithmeticError); return false; }
+            if (a == 0) { Terminate(ErrorCode.ArithmeticError); return false; }
 
             // switch through register sizes
             switch ((s >> 2) & 3)
@@ -1887,7 +1924,7 @@ namespace csx64
                     _b = SignExtend(a, 0).MakeSigned();
                     full = _a / _b;
 
-                    if (full != (sbyte)full) { Fail(ErrorCode.ArithmeticError); return false; }
+                    if (full != (sbyte)full) { Terminate(ErrorCode.ArithmeticError); return false; }
 
                     Registers[0].x8 = full.MakeUnsigned();
                     Registers[1].x8 = (_a % _b).MakeUnsigned();
@@ -1899,7 +1936,7 @@ namespace csx64
                     _b = SignExtend(a, 1).MakeSigned();
                     full = _a / _b;
 
-                    if (full != (Int16)full) { Fail(ErrorCode.ArithmeticError); return false; }
+                    if (full != (Int16)full) { Terminate(ErrorCode.ArithmeticError); return false; }
 
                     Registers[0].x16 = full.MakeUnsigned();
                     Registers[1].x16 = (_a % _b).MakeUnsigned();
@@ -1911,7 +1948,7 @@ namespace csx64
                     _b = SignExtend(a, 2).MakeSigned();
                     full = _a / _b;
 
-                    if (full != (Int32)full) { Fail(ErrorCode.ArithmeticError); return false; }
+                    if (full != (Int32)full) { Terminate(ErrorCode.ArithmeticError); return false; }
 
                     Registers[0].x32 = full.MakeUnsigned();
                     Registers[1].x32 = (_a % _b).MakeUnsigned();
@@ -1923,7 +1960,7 @@ namespace csx64
                     bigraw = (new BigInteger(Registers[1].x64.MakeSigned()) << 64) + new BigInteger(Registers[0].x64.MakeSigned());
                     bigfull = bigraw / _b;
 
-                    if (bigfull != (Int64)bigfull) { Fail(ErrorCode.ArithmeticError); return false; }
+                    if (bigfull != (Int64)bigfull) { Terminate(ErrorCode.ArithmeticError); return false; }
 
                     Registers[1].x64 = ((Int64)(bigraw % _b)).MakeUnsigned();
                     Registers[0].x64 = ((Int64)bigfull).MakeUnsigned();
@@ -2050,6 +2087,9 @@ namespace csx64
             // allocate registers
             for (int i = 0; i < Registers.Length; ++i) Registers[i] = new Register();
 
+            // ensure file descriptors are nulled
+            for (int i = 0; i < NFileDescriptors; ++i) FileDescriptors[i] = null;
+
             // define initial state
             Running = false;
             Error = ErrorCode.None;
@@ -2086,8 +2126,7 @@ namespace csx64
             {
                 if (disposing)
                 {
-                    // close all the file descriptors
-                    for (UInt64 i = 0; i < (UInt64)FileDescriptors.Length; ++i) FS_Close(i);
+                    CloseFiles(); // close all the file descriptors
                 }
 
                 disposed = true;
@@ -2125,6 +2164,7 @@ namespace csx64
             // set execution state
             Pos = 0;
             Running = true;
+            SuspendedRead = false;
             Error = ErrorCode.None;
             Sleep = 0;
 
@@ -2132,18 +2172,17 @@ namespace csx64
         }
 
         /// <summary>
-        /// Causes the machine to fail. Releases unmanaged resources allocated during execution
+        /// Causes the machine to end execution and release various system resources (e.g. file handles).
         /// </summary>
         /// <param name="code">The error code to emit</param>
-        public void Fail(ErrorCode code)
+        public void Terminate(ErrorCode code = ErrorCode.None)
         {
             if (Running)
             {
                 Error = code;
                 Running = false;
 
-                // close all the file descriptors
-                for (UInt64 i = 0; i < (UInt64)FileDescriptors.Length; ++i) FS_Close(i);
+                CloseFiles(); // close all the file descriptors
             }
         }
 
@@ -2161,7 +2200,22 @@ namespace csx64
         /// Gets the file descriptor at the specified index. DO NOT CLOSE/OPEN THIS OBJECT. USE CLOSE/OPEN UTILITY FUNCTIONS
         /// </summary>
         /// <param name="index">the index of the file descriptor</param>
-        public FileStream GetFileDescriptor(int index) => FileDescriptors[index];
+        public Stream GetFileDescriptor(int index) => FileDescriptors[index];
+        /// <summary>
+        /// Sets the specified file descriptor. if the file descriptor index specified is currently in use, throws argument exception.
+        /// File descriptors set by this method are "unmanaged" and will not be closed upon termination.
+        /// </summary>
+        /// <param name="index">the index of the file descriptor to set</param>
+        /// <param name="stream">the stream to set to</param>
+        /// <exception cref="ArgumentException"></exception>
+        public void SetUnmanagedStream(int index, Stream stream, bool interactive)
+        {
+            if (FileDescriptors[index] != null) throw new ArgumentException($"File descriptor {index} was already in use");
+
+            FileDescriptors[index] = stream;
+            FileDescriptor_Managed[index] = false;
+            FileDescriptor_Interactive[index] = interactive;
+        }
 
         /// <summary>
         /// Handles syscall instructions from the processor. Returns true iff the syscall was handled successfully.
@@ -2174,10 +2228,10 @@ namespace csx64
             // requested syscall in R0
             switch (Registers[0].x64)
             {
-                // R1 fd, R2 pos, R3 count
+                // R1 fd, R2 data, R3 count
                 // R0 <- #bytes read
                 case (UInt64)SyscallCodes.Read: Registers[0].x64 = FS_Read(Registers[1].x64, Registers[2].x64, Registers[3].x64); return true;
-                // R1 fd, R2 pos, R3 count
+                // R1 fd, R2 data, R3 count
                 case (UInt64)SyscallCodes.Write: return FS_Write(Registers[1].x64, Registers[2].x64, Registers[3].x64);
                 
                 // R1 path, R2 mode
@@ -2186,13 +2240,19 @@ namespace csx64
                     if (!GetString(Registers[1].x64, 2, out str)) return false;
                     Registers[0].x64 = FS_Open(str, Registers[2].x64);
                     return true;
+
                 // R1 fd
                 case (UInt64)SyscallCodes.Close: return FS_Close(Registers[1].x64);
-                
+                case (UInt64)SyscallCodes.Flush: return FS_Flush(Registers[1].x64);
+
+                // R1 fd, R2 pos, R3 seek_mode (0 = begin, 1 = relative, 2 = end)
+                case (UInt64)SyscallCodes.Seek: return FS_Seek(Registers[1].x64, Registers[2].x64, Registers[3].x64);
+
                 // R1 from_path, R2 to_path
-                case (UInt64)SyscallCodes.Move:
-                    if (!GetString(Registers[1].x64, 2, out str) || !GetString(Registers[2].x64, 2, out str2)) return false;
-                    return FS_Move(str, str2);
+                case (UInt64)SyscallCodes.Move: return GetString(Registers[1].x64, 2, out str) && !GetString(Registers[2].x64, 2, out str2) && FS_Move(str, str2);
+                case (UInt64)SyscallCodes.Remove: return GetString(Registers[1].x64, 2, out str) && FS_Remove(str);
+                case (UInt64)SyscallCodes.Mkdir: return GetString(Registers[1].x64, 2, out str) && FS_Mkdir(str);
+                case (UInt64)SyscallCodes.Rmdir: return GetString(Registers[1].x64, 2, out str) && FS_Rmdir(str);
 
                 // ----------------------------------
 
@@ -2209,6 +2269,8 @@ namespace csx64
             // fail to execute ins if terminated
             if (!Running) return false;
 
+            // if we're suspended, no-op
+            if (SuspendedRead) return true;
             // if we're sleeping, no-op
             if (Sleep > 0) { --Sleep; return true; }
 
@@ -2221,8 +2283,8 @@ namespace csx64
             switch ((OPCode)a)
             {
                 case OPCode.NOP: return true;
-                case OPCode.STOP: Running = false; return true;
-                case OPCode.SYSCALL: if (Syscall()) return true; Fail(ErrorCode.UnhandledSyscall); return false;
+                case OPCode.STOP: Terminate(); return true;
+                case OPCode.SYSCALL: if (Syscall()) return true; Terminate(ErrorCode.UnhandledSyscall); return false;
 
                 case OPCode.MOV: return ProcessMOV();
 
@@ -2398,7 +2460,7 @@ namespace csx64
                                 case 2: return true;
                                 case 3: Registers[a >> 4].x64 = DoubleAsUInt64((double)AsFloat(Registers[a >> 4].x32)); return true;
 
-                                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                                default: Terminate(ErrorCode.UndefinedBehavior); return false;
                             }
 
                         case 3:
@@ -2407,17 +2469,17 @@ namespace csx64
                                 case 2: Registers[a >> 4].x32 = FloatAsUInt64((float)AsDouble(Registers[a >> 4].x64)); return true;
                                 case 3: return true;
 
-                                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                                default: Terminate(ErrorCode.UndefinedBehavior); return false;
                             }
 
-                        default: Fail(ErrorCode.UndefinedBehavior); return false;
+                        default: Terminate(ErrorCode.UndefinedBehavior); return false;
                     }
 
                 case OPCode.SLP: if (!FetchIMMRMFormat(out a, out b)) return false; Sleep = b; return true;
 
 
                 // otherwise, unknown opcode
-                default: Fail(ErrorCode.UndefinedBehavior); return false;
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
 
@@ -2440,7 +2502,7 @@ namespace csx64
                 return true;
             }
 
-            Fail(ErrorCode.OutOfBounds); return false;
+            Terminate(ErrorCode.OutOfBounds); return false;
         }
         /// <summary>
         /// Writes a value to memory (fails with OutOfBounds if invalid)
@@ -2457,7 +2519,7 @@ namespace csx64
                 return true;
             }
 
-            Fail(ErrorCode.OutOfBounds); return false;
+            Terminate(ErrorCode.OutOfBounds); return false;
         }
 
         /// <summary>
@@ -2690,9 +2752,9 @@ namespace csx64
             return true;
         }
 
-        // -------------
-        // -- File IO --
-        // -------------
+        // ---------------
+        // -- Stream IO --
+        // ---------------
 
         /// <summary>
         /// Finds the first available file descriptor. Returns the index of the available spot, or UInt64.MaxValue upon failure
@@ -2706,12 +2768,32 @@ namespace csx64
         }
 
         /// <summary>
-        /// Opens a file in the specified mode. Returns the file descriptor created if successful, or UInt64.MaxValue upon failure
+        /// Closes all the (managed) file descriptors that were allocated by client code.
+        /// Does not close streams provided by <see cref="SetUnmanagedStream(int, Stream)"/>, but does disassociate them
+        /// </summary>
+        private void CloseFiles()
+        {
+            // sever all files from this object
+            for (int i = 0; i < NFileDescriptors; ++i)
+                if (FileDescriptors[i] != null)
+                {
+                    // only close managed file descriptors
+                    if (FileDescriptor_Managed[i]) FS_Close((UInt64)i);
+                    else FileDescriptors[i] = null;
+                }
+        }
+
+        /// <summary>
+        /// Opens a file in the specified mode. Returns the file descriptor created if successful, or UInt64.MaxValue upon failure.
+        /// Streams opened with this method are "managed" and will be closed upon termination.
         /// </summary>
         /// <param name="path">the path of the file to open</param>
         /// <param name="mode">the mode to open the file in (see System.IO.FileAccess)"/></param>
         public UInt64 FS_Open(string path, UInt64 mode)
         {
+            // make sure we're allowed to do this
+            if (!Flags.FileSystem) { Terminate(ErrorCode.FSDisabled); return UInt64.MaxValue; }
+
             UInt64 index = FindOpenFileDescriptor();
             if (index == UInt64.MaxValue) return UInt64.MaxValue;
 
@@ -2723,17 +2805,24 @@ namespace csx64
             
             // store in file descriptors
             FileDescriptors[index] = f;
+            FileDescriptor_Managed[index] = true;
             return index;
         }
         /// <summary>
-        /// Closes a file. Returns true if successful, otherwise failes with IOFailure and returns false
+        /// Closes a file. Returns true if successful, otherwise failes with IOFailure and returns false.
+        /// Cannot be used to close an unmanaged stream set by <see cref="SetUnmanagedStream(int, Stream)"/>
         /// </summary>
         /// <param name="fd">The file descriptor to close</param>
         public bool FS_Close(UInt64 fd)
         {
+            // make sure fd is valid
+            if (fd >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
+            // we can't close an unmanaged stream
+            if (!FileDescriptor_Managed[fd]) { Terminate(ErrorCode.AccessViolation); return false; }
+
             // attempt to close the file
             try { FileDescriptors[fd].Close(); FileDescriptors[fd] = null; }
-            catch (Exception) { Fail(ErrorCode.IOFailure); return false; }
+            catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
 
             // file closed successfully
             return true;
@@ -2747,9 +2836,29 @@ namespace csx64
         /// <param name="count">the number of bytes to read</param>
         public UInt64 FS_Read(UInt64 fd, UInt64 pos, UInt64 count)
         {
+            // make sure fd is valid
+            if (fd >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return 0; }
+
             // attempt to read from the file into memory
-            try { return (UInt64)FileDescriptors[fd].Read(Memory, (int)pos, (int)count); }
-            catch (Exception) { Fail(ErrorCode.IOFailure); return 0; }
+            try
+            {
+                // read from the file
+                int n = FileDescriptors[fd].Read(Memory, (int)pos, (int)count);
+
+                // if we got nothing but it's interactive
+                if (n == 0 && !FileDescriptor_Managed[fd] && FileDescriptor_Interactive[fd])
+                {
+                    --Pos; // await further data by repeating the syscall
+                    SuspendedRead = true; // suspend execution until there's more data
+
+                    // return syscall code for read to ensure that it's still in R0 after the call finishes
+                    return (UInt64)SyscallCodes.Read;
+                }
+
+                // otherwise return num chars read from file
+                return (UInt64)n;
+            }
+            catch (Exception) { Terminate(ErrorCode.IOFailure); return 0; }
         }
         /// <summary>
         /// Attempts to write a series of bytes from memory to the file
@@ -2759,9 +2868,41 @@ namespace csx64
         /// <param name="count">the number of bytes to read</param>
         public bool FS_Write(UInt64 fd, UInt64 pos, UInt64 count)
         {
+            // make sure fd is valid
+            if (fd >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
+
             // attempt to read from memory to the file
             try { FileDescriptors[fd].Write(Memory, (int)pos, (int)count); return true; }
-            catch (Exception) { Fail(ErrorCode.IOFailure); return false; }
+            catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
+        }
+
+        /// <summary>
+        /// Flushes the stream associated with the file
+        /// </summary>
+        /// <param name="fd">the file descriptor to flush</param>
+        public bool FS_Flush(UInt64 fd)
+        {
+            // make sure fd is valid
+            if (fd >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
+
+            // attempt to read from memory to the file
+            try { FileDescriptors[fd].Flush(); return true; }
+            catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
+        }
+        /// <summary>
+        /// Seeks the specified position in the file
+        /// </summary>
+        /// <param name="fd">the file descriptor to perform seek on</param>
+        /// <param name="pos">the position to seek to</param>
+        /// <param name="mode">the offset mode</param>
+        public bool FS_Seek(UInt64 fd, UInt64 pos, UInt64 mode)
+        {
+            // make sure fd is valid
+            if (fd >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
+
+            // attempt to read from memory to the file
+            try { FileDescriptors[fd].Seek(pos.MakeSigned(), (SeekOrigin)mode); return true; }
+            catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
         }
 
         /// <summary>
@@ -2771,8 +2912,52 @@ namespace csx64
         /// <param name="to">the destination path</param>
         public bool FS_Move(string from, string to)
         {
+            // make sure we're allowed to do this
+            if (!Flags.FileSystem) { Terminate(ErrorCode.FSDisabled); return false; }
+
             // attempt the move operation
             try { File.Move(from, to); return true; }
+            catch (Exception) { return false; }
+        }
+        /// <summary>
+        /// Attempts to remove the specified file
+        /// </summary>
+        /// <param name="path">the file to remove</param>
+        /// <returns></returns>
+        public bool FS_Remove(string path)
+        {
+            // make sure we're allowed to do this
+            if (!Flags.FileSystem) { Terminate(ErrorCode.FSDisabled); return false; }
+
+            // attempt the move operation
+            try { File.Delete(path); return true; }
+            catch (Exception) { return false; }
+        }
+
+        /// <summary>
+        /// Attempts to make a new directory
+        /// </summary>
+        /// <param name="path">path to new directory</param>
+        public bool FS_Mkdir(string path)
+        {
+            // make sure we're allowed to do this
+            if (!Flags.FileSystem) { Terminate(ErrorCode.FSDisabled); return false; }
+
+            // attempt the move operation
+            try { Directory.CreateDirectory(path); return true; }
+            catch (Exception) { return false; }
+        }
+        /// <summary>
+        /// Attempts to remove a directory
+        /// </summary>
+        /// <param name="path">path to directory to remove</param>
+        public bool FS_Rmdir(string path)
+        {
+            // make sure we're allowed to do this
+            if (!Flags.FileSystem) { Terminate(ErrorCode.FSDisabled); return false; }
+
+            // attempt the move operation
+            try { Directory.Delete(path, RecursiveRmdir); return true; }
             catch (Exception) { return false; }
         }
 
@@ -4258,7 +4443,7 @@ namespace csx64
             {
                 if (args.Length == 0) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Emission expected at least one value"); return false; }
 
-                Expr hole = new Expr(); // initially empty hole (to allow for buffer shorthand e.x. "emit x32")
+                Expr hole = new Expr() { IntResult = 0 }; // initially integral zero (shorthand for empty buffer)
                 UInt64 mult;
                 bool floating;
 

@@ -84,6 +84,12 @@
     <Compile Include="ColorPicker.Designer.cs">
       <DependentUpon>ColorPicker.cs</DependentUpon>
     </Compile>
+    <Compile Include="ConsoleDisplay.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="ConsoleDisplay.Designer.cs">
+      <DependentUpon>ConsoleDisplay.cs</DependentUpon>
+    </Compile>
     <Compile Include="csx64.cs" />
     <Compile Include="ProcessorView.cs">
       <SubType>Form</SubType>
@@ -120,6 +126,9 @@
     </EmbeddedResource>
     <EmbeddedResource Include="ColorPicker.resx">
       <DependentUpon>ColorPicker.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="ConsoleDisplay.resx">
+      <DependentUpon>ConsoleDisplay.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="ProcessorView.resx">
       <DependentUpon>ProcessorView.cs</DependentUpon>

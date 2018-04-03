@@ -7,19 +7,32 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.IO;
 
 namespace csx64
 {
+    /// <summary>
+    /// Represents a debugging window for a CSX64 processor, as well as an editor and compiler for CSX64 assembly
+    /// </summary>
     public partial class ProcessorView : Form
     {
-        private CSX64 C = new GraphicalComputer(); // initialized with graphical computer to ensure its static ctor executes
+        /// <summary>
+        /// The processor to display debugging data for
+        /// </summary>
+        private CSX64 C;
+
         private ulong Ticks = 0;
         private bool Sim = false;
 
-        /// <summary>
-        /// The code editor used by this processor (contains all the assembly files)
-        /// </summary>
         private CodeEditor Editor;
+        private CSX64 RawCSX64;
+        private ConsoleDisplay Console;
+        private GraphicalDisplay Graphical;
+
+        private SolidBrush DebuggingBrush = new SolidBrush(Color.LimeGreen);
+        private Font DebuggingFont = new Font(FontFamily.GenericMonospace, 20);
+
+        // --------------------------------------
 
         private bool CInitialized
         {
@@ -47,17 +60,48 @@ namespace csx64
 
             // create the code editor
             Editor = new CodeEditor();
-            // rebind form close to instead just hide
             Editor.FormClosing += (o, e) => { e.Cancel = true; Editor.Hide(); };
-            // set fort
             Editor.Font = new Font(FontFamily.GenericMonospace, 12);
+
+            // create the raw CSX64 (only used for debugging mode i.e. no console, no graphial client)
+            C = RawCSX64 = new CSX64();
+
+            // create the console display
+            Console = new ConsoleDisplay();
+            Console.OnTickCycle += ExternRenderCycle;
+
+            // create the graphical display
+            Graphical = new GraphicalDisplay();
+            Graphical.OnTickCycle += ExternRenderCycle;
 
             // load the settings file
             LoadSettings();
         }
-        ~ProcessorView()
+
+        private bool disposed = false;
+        protected override void Dispose(bool disposing)
         {
-            Editor.Dispose();
+            if (!disposed)
+            {
+                if (disposing)
+                {
+                    components?.Dispose(); // from auto-generated code (they hinted it might be null)
+
+                    // -- free things we allocated -- //
+
+                    Editor.Dispose();
+                    RawCSX64.Dispose();
+                    Graphical.Dispose();
+                    Console.Dispose();
+
+                    DebuggingBrush.Dispose();
+                    DebuggingFont.Dispose();
+                }
+
+                // ensure base dispose is called
+                base.Dispose(disposing);
+                disposed = true;
+            }
         }
 
         /// <summary>
@@ -72,8 +116,6 @@ namespace csx64
             Invalidate();
         }
 
-        private static SolidBrush DebuggingBrush = new SolidBrush(Color.LimeGreen);
-        private static Font DebuggingFont = new Font(FontFamily.GenericMonospace, 20);
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
@@ -121,9 +163,13 @@ namespace csx64
             g.DrawString($"T  : {Ticks:x16}", DebuggingFont, DebuggingBrush, x, y += h);
         }
 
+        /// <summary>
+        /// Ticks the processor by the specified number of cycles, then updates the debugging data
+        /// </summary>
+        /// <param name="n">the number of cycles to advance by</param>
         private void Tick(ulong n)
         {
-            ulong i;
+            uint i;
             for (i = 0; i < n && C.Tick(); ++i) ;
             Ticks += i;
 
@@ -135,7 +181,11 @@ namespace csx64
         private void Tick100Button_Click(object sender, EventArgs e) => Tick(100);
         private void Tick1000Button_Click(object sender, EventArgs e) => Tick(1000);
 
-        private void CompileButton_Click(object sender, EventArgs e)
+        /// <summary>
+        /// Initializes the specified processor for execution. Run this before beginning execution of any simulators
+        /// </summary>
+        /// <param name="processor">the processor to initialize and begin debugging for</param>
+        private bool InitializeComputer(CSX64 processor)
         {
             // get the source files
             Tuple<string, string>[] source = Editor.Programs.ToArray();
@@ -145,23 +195,36 @@ namespace csx64
             for (int i = 0; i < source.Length; ++i)
             {
                 CSX64.AssembleResult res = CSX64.Assemble(source[i].Item2, out objs[i]);
-                if (res.Error != CSX64.AssembleError.None) { MessageBox.Show(res.ErrorMsg, $"Assemble Error in \"{source[i].Item1}\""); return; }
+                if (res.Error != CSX64.AssembleError.None) { MessageBox.Show(res.ErrorMsg, $"Assemble Error in \"{source[i].Item1}\""); return false; }
             }
 
             // link them
             CSX64.LinkResult link_res = CSX64.Link(out byte[] exe, objs);
-            if (link_res.Error != CSX64.LinkError.None) { MessageBox.Show(link_res.ErrorMsg, "Link Error"); return; }
+            if (link_res.Error != CSX64.LinkError.None) { MessageBox.Show(link_res.ErrorMsg, "Link Error"); return false; }
 
-            C.Dispose();
-            C = new CSX64();
-            if (!C.Initialize(exe)) { MessageBox.Show("Something went wrong initializing the program", "Initialization Error"); return; }
+            C = processor; // set debugging processor
+
+            // load the program
+            if (!C.Initialize(exe)) { MessageBox.Show("Something went wrong initializing the program", "Initialization Error"); return false; }
 
             // set private flags
             C.GetFlags().SlowMem = SlowMemCheck.Checked;
+            C.GetFlags().FileSystem = FileSystemCheck.Checked;
 
+            // successfully initialized
+            return true;
+        }
+
+        private void CompileButton_Click(object sender, EventArgs e)
+        {
+            // initialize raw computer
+            if (!InitializeComputer(RawCSX64)) return;
+
+            // set execution data
             CInitialized = true;
             Ticks = 0;
 
+            // update debugging data
             Invalidate();
         }
 
@@ -174,8 +237,6 @@ namespace csx64
             while (Sim && C.Running)
             {
                 Tick(10000);
-                Invalidate();
-
                 await Task.Delay(10);
             }
 
@@ -199,41 +260,17 @@ namespace csx64
             Sim = false;
             while (PauseButton.Enabled) await Task.Delay(1);
 
+            // reset form controls (not waiting before this can cause some button enabled states to have race conditions)
             CInitialized = false;
         }
 
         private void GraphicalButton_Click(object sender, EventArgs e)
         {
-            // get the source files
-            Tuple<string, string>[] source = Editor.Programs.ToArray();
+            // initialize graphical computer
+            if (!InitializeComputer(Graphical.C)) return;
 
-            // assemble them
-            CSX64.ObjectFile[] objs = new CSX64.ObjectFile[source.Length];
-            for (int i = 0; i < source.Length; ++i)
-            {
-                CSX64.AssembleResult res = CSX64.Assemble(source[i].Item2, out objs[i]);
-                if (res.Error != CSX64.AssembleError.None) { MessageBox.Show(res.ErrorMsg, $"Assemble Error in \"{source[i].Item1}\""); return; }
-            }
-
-            // link them
-            CSX64.LinkResult link_res = CSX64.Link(out byte[] exe, objs);
-            if (link_res.Error != CSX64.LinkError.None) { MessageBox.Show(link_res.ErrorMsg, "Link Error"); return; }
-
-            using (GraphicalDisplay g = new GraphicalDisplay())
-            {
-                if (!g.C.Initialize(exe)) { MessageBox.Show("Something went wrong initializing the program", "Initialization Error"); return; }
-                C.Dispose();
-                C = g.C; // link computers for local logging
-
-                // set private flags
-                C.GetFlags().SlowMem = SlowMemCheck.Checked;
-
-                g.OnTickCycle += ExternRenderCycle; // sync tick cycles
-                g.Run();                            // begin execution
-                g.ShowDialog();                     // display graphical client
-                
-                C.Fail(CSX64.ErrorCode.Abort); // cancellation results in an abort error
-            }
+            Graphical.ShowDialog(); // begin program execution
+            C.Terminate(CSX64.ErrorCode.Abort); // abort execution (otherwise it'll be running in the background)
         }
 
         private void EditButton_Click(object sender, EventArgs e)
@@ -264,6 +301,23 @@ namespace csx64
                     LoadSettings();
                 }
             }
+        }
+
+        private void ConsoleButton_Click(object sender, EventArgs e)
+        {
+            // initialize console computer
+            if (!InitializeComputer(Console.C)) return;
+
+            Console.BackColor = BackColor;
+            Console.TextColor = DebuggingBrush.Color;
+
+            using (Stream stdin = new MemoryStream(), stdout = new MemoryStream())
+            {
+                Console.SetupStdio(stdin, stdout, stdout, true); // set up streams for execution
+                Console.ShowDialog(); // begin program execution
+            }
+
+            C.Terminate(CSX64.ErrorCode.Abort); // abort execution (otherwise it'll be running in the background)
         }
     }
 }

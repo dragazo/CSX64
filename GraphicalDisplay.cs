@@ -11,6 +11,9 @@ using System.Windows.Forms;
 
 namespace csx64
 {
+    /// <summary>
+    /// Represents a CSX64 derivation that offers graphical controls via windows forms
+    /// </summary>
     public partial class GraphicalDisplay : Form
     {
         /// <summary>
@@ -19,7 +22,7 @@ namespace csx64
         private const int RenderDelay = 1;
 
         public GraphicalComputer C = new GraphicalComputer();
-        public UInt64 Ticks = 0;
+        private UInt64 Ticks;
 
         protected override void OnMouseMove(MouseEventArgs e)
         {
@@ -89,7 +92,10 @@ namespace csx64
             {
                 if (disposing)
                 {
-                    // dispose the managed objects we allocated
+                    components?.Dispose(); // from auto-generated code (they hinted it might be null)
+
+                    // -- dispose the managed objects we allocated -- //
+
                     C.RenderImage.Dispose();
                     C.DisplayImage.Dispose();
                     C.Graphics.Dispose();
@@ -97,6 +103,8 @@ namespace csx64
                     C.Brush.Dispose();
                     C.Pen.Dispose();
                     C.Font.Dispose();
+
+                    C.Dispose();
                 }
 
                 // ensure base dispose is called
@@ -112,11 +120,11 @@ namespace csx64
             // render the graphics object over the display surface
             e.Graphics.DrawImage(C.DisplayImage, Point.Empty);
         }
-
+        
         /// <summary>
         /// Begins execution
         /// </summary>
-        public async void Run()
+        private async void Run()
         {
             Text = "Running";
             
@@ -157,6 +165,24 @@ namespace csx64
 
             Text = $"Terminated - Error Code: {C.Error}";
         }
+
+        /// <summary>
+        /// Shows the form and begins execution of the program
+        /// </summary>
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+
+            C.MousePos = Point.Empty;
+            C.MouseDelta = 0;
+            C.MouseDown = MouseButtons.None;
+            C.KeyDown = Keys.None;
+
+            C.Invalidated = false;
+
+            Ticks = 0;
+            Run();
+        }
     }
 
     public class GraphicalComputer : CSX64
@@ -193,13 +219,12 @@ namespace csx64
 
         // --------------- //
 
-        public Point MousePos = Point.Empty;
-        public int MouseDelta = 0;
+        public Point MousePos;
+        public int MouseDelta;
+        public MouseButtons MouseDown;
+        public Keys KeyDown;
 
-        public MouseButtons MouseDown = MouseButtons.None;
-        public Keys KeyDown = Keys.None;
-
-        public bool Invalidated = false; // flag for if the processor has finished re-rendering
+        public bool Invalidated; // flag for if the processor has finished re-rendering
 
         protected override bool Syscall()
         {

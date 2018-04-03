@@ -7,19 +7,6 @@
         /// </summary>
         private System.ComponentModel.IContainer components = null;
 
-        /// <summary>
-        /// Clean up any resources being used.
-        /// </summary>
-        /// <param name="disposing">true if managed resources should be disposed; otherwise, false.</param>
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing && (components != null))
-            {
-                components.Dispose();
-            }
-            base.Dispose(disposing);
-        }
-
         #region Windows Form Designer generated code
 
         /// <summary>
@@ -40,6 +27,8 @@
             this.EditButton = new System.Windows.Forms.Button();
             this.SlowMemCheck = new System.Windows.Forms.CheckBox();
             this.SettingsButton = new System.Windows.Forms.Button();
+            this.ConsoleButton = new System.Windows.Forms.Button();
+            this.FileSystemCheck = new System.Windows.Forms.CheckBox();
             this.SuspendLayout();
             // 
             // TickButton
@@ -133,7 +122,7 @@
             // GraphicalButton
             // 
             this.GraphicalButton.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
-            this.GraphicalButton.Location = new System.Drawing.Point(641, 242);
+            this.GraphicalButton.Location = new System.Drawing.Point(732, 242);
             this.GraphicalButton.Name = "GraphicalButton";
             this.GraphicalButton.Size = new System.Drawing.Size(85, 56);
             this.GraphicalButton.TabIndex = 10;
@@ -156,7 +145,7 @@
             // 
             this.SlowMemCheck.AutoSize = true;
             this.SlowMemCheck.ForeColor = System.Drawing.Color.White;
-            this.SlowMemCheck.Location = new System.Drawing.Point(550, 273);
+            this.SlowMemCheck.Location = new System.Drawing.Point(550, 267);
             this.SlowMemCheck.Name = "SlowMemCheck";
             this.SlowMemCheck.Size = new System.Drawing.Size(89, 17);
             this.SlowMemCheck.TabIndex = 13;
@@ -174,12 +163,36 @@
             this.SettingsButton.UseVisualStyleBackColor = true;
             this.SettingsButton.Click += new System.EventHandler(this.SettingsButton_Click);
             // 
+            // ConsoleButton
+            // 
+            this.ConsoleButton.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
+            this.ConsoleButton.Location = new System.Drawing.Point(641, 242);
+            this.ConsoleButton.Name = "ConsoleButton";
+            this.ConsoleButton.Size = new System.Drawing.Size(85, 56);
+            this.ConsoleButton.TabIndex = 15;
+            this.ConsoleButton.Text = "Compile Console Client";
+            this.ConsoleButton.UseVisualStyleBackColor = true;
+            this.ConsoleButton.Click += new System.EventHandler(this.ConsoleButton_Click);
+            // 
+            // FileSystemCheck
+            // 
+            this.FileSystemCheck.AutoSize = true;
+            this.FileSystemCheck.ForeColor = System.Drawing.Color.White;
+            this.FileSystemCheck.Location = new System.Drawing.Point(550, 281);
+            this.FileSystemCheck.Name = "FileSystemCheck";
+            this.FileSystemCheck.Size = new System.Drawing.Size(79, 17);
+            this.FileSystemCheck.TabIndex = 16;
+            this.FileSystemCheck.Text = "File System";
+            this.FileSystemCheck.UseVisualStyleBackColor = false;
+            // 
             // ProcessorView
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.Color.Black;
             this.ClientSize = new System.Drawing.Size(920, 372);
+            this.Controls.Add(this.FileSystemCheck);
+            this.Controls.Add(this.ConsoleButton);
             this.Controls.Add(this.SettingsButton);
             this.Controls.Add(this.SlowMemCheck);
             this.Controls.Add(this.EditButton);
@@ -214,6 +227,8 @@
         private System.Windows.Forms.Button EditButton;
         private System.Windows.Forms.CheckBox SlowMemCheck;
         private System.Windows.Forms.Button SettingsButton;
+        private System.Windows.Forms.Button ConsoleButton;
+        private System.Windows.Forms.CheckBox FileSystemCheck;
     }
 }
 
