@@ -17,7 +17,7 @@ main:
     mov $1, msg
     syscall
     
-    stop
+    ret
 
 str: emit:16 0, 10, 0
 msg: emit:16 10, "all done", 10, ":D", 0

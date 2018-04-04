@@ -5090,8 +5090,9 @@ namespace csx64
             // if zero, there is nothing to link
             if (filesize == 0) return new LinkResult(LinkError.EmptyResult, "Resulting file is empty");
 
-            res = new byte[filesize + 10]; // give it enough memory to write the whole file plus a header
-            filesize = 10;                 // set size to after header (points to writing position)
+            UInt64 __header_size = 11;                // the size of the header to create
+            res = new byte[filesize + __header_size]; // give it enough memory to write the whole file plus a header
+            filesize = __header_size;                 // set size to after header (points to writing position)
 
             UInt64[] offsets = new UInt64[objs.Length]; // offsets for where an object file begins in the resulting exe
             var symbols = new Dictionary<string, Expr>[objs.Length]; // processed symbols for each object file
@@ -5178,9 +5179,10 @@ namespace csx64
             if (main == null) return new LinkResult(LinkError.MissingSymbol, "No entry point \"main\"");
             if (!main.Evaluate(G_symbols, out val, out floating, ref err)) return new LinkResult(LinkError.MissingSymbol, $"Failed to evaluate global symbol \"main\"\n-> {err}");
 
-            res.Write(0, 1, (UInt64)OPCode.JMP);
+            res.Write(0, 1, (UInt64)OPCode.CALL);
             res.Write(1, 1, 0x80);
             res.Write(2, 8, val);
+            res.Write(10, 1, (UInt64)OPCode.STOP);
 
             // linked successfully
             return new LinkResult(LinkError.None, string.Empty);

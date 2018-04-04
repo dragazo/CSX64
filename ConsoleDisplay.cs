@@ -22,6 +22,11 @@ namespace csx64
         /// </summary>
         private const UInt64 TicksPerCycle = 10000;
 
+        /// <summary>
+        /// The number of ticks from <see cref="DateTime.UtcNow"/> that represents a complete cursor blink cycle
+        /// </summary>
+        private const long TimeTicksPerCursorBlinkCycle = 10000000;
+
         // ------------------------------------
 
         public CSX64 C = new CSX64();
@@ -42,8 +47,20 @@ namespace csx64
             get => MainScroll.Value;
             set => MainScroll.Value = value < MainScroll.Minimum ? MainScroll.Minimum : value > MainScroll.Maximum ? MainScroll.Maximum : value;
         }
-        private float LineHeight => 1.4f * TextFont.Size;
+        private float LineHeight => 1.45f * TextFont.Size;
         private int LinesPerPage => (int)(DisplayRectangle.Height / LineHeight);
+
+        private StringBuilder InputLine = new StringBuilder();
+        private int CursorPosition = 0;
+
+        /// <summary>
+        /// the base time for the cursor blink cycle
+        /// </summary>
+        private long CursorBlinkCycleBase;
+        /// <summary>
+        /// returns if the cursor blink cycle is currently in the "on" position
+        /// </summary>
+        private bool CursorBlinkCycle => (DateTime.UtcNow.Ticks - CursorBlinkCycleBase) % TimeTicksPerCursorBlinkCycle < TimeTicksPerCursorBlinkCycle / 2;
 
         /// <summary>
         /// Gets or sets the color of the text in the console
@@ -115,6 +132,12 @@ namespace csx64
                 // redraw form
                 Invalidate();
             }
+            // otherwise if we're awaiting data
+            else if (C.SuspendedRead)
+            {
+                // redraw (for cursor blink)
+                Invalidate();
+            }
         }
 
         private void Puts(string str)
@@ -168,18 +191,65 @@ namespace csx64
             Graphics g = e.Graphics; // alias graphics handle for convenience
 
             float y = 0; // y position of line
+            SizeF disp_size = new SizeF(ClientRectangle.Width - MainScroll.Width, ClientRectangle.Height); // the size of the "real" drawing surface
 
-            // for each line
-            for (int i = DispLine; i < Lines.Count; ++i)
+            // for each line except the last
+            for (int i = DispLine; i < Lines.Count - 1; ++i)
             {
                 // render the line
-                g.DrawString(Lines[i], TextFont, TextBrush, 0, y);
+                g.DrawString(Lines[i], TextFont, TextBrush, new RectangleF(0, y, disp_size.Width, 0));
 
                 // go to next line
-                y += LineHeight;
-                if (y >= DisplayRectangle.Height) break;
+                y += g.MeasureString(Lines[i], TextFont, disp_size).Height;
+                if (y >= disp_size.Height) break;
             }
-            
+
+            // do the last line if we're still on the screen
+            if (y < disp_size.Height)
+            {
+                // get the last line
+                string last = Lines[Lines.Count - 1];
+                // if we're awaiting data, also print the line we've got so far
+                if (C.SuspendedRead) last += InputLine.ToString();
+
+                // render the last line
+                g.DrawString(last, TextFont, TextBrush, new RectangleF(0, y, disp_size.Width, 0));
+
+                // if we should indicate the cursor pos
+                if (C.SuspendedRead && CursorBlinkCycle)
+                {
+                    // get real position of cursor pos in complete line
+                    int real_pos = Lines[Lines.Count - 1].Length + CursorPosition;
+                    // add an extra space to the end of the line (this ensures it will not be empty and that 1 past end is legal)
+                    last += " ";
+
+                    // get the character ranges array (only maps cursor character or last character if beyond end of string
+                    CharacterRange[] ch_ranges = new CharacterRange[] { new CharacterRange(real_pos, 1) };
+
+                    // create the format object for measurement
+                    using (StringFormat format = new StringFormat())
+                    {
+                        format.FormatFlags = StringFormatFlags.MeasureTrailingSpaces; // ensure space characters are properly measured
+                        format.SetMeasurableCharacterRanges(ch_ranges); // add the desired range (real cursor position) to the measurement queue
+
+                        // measure the string and get the region objects
+                        Region[] regions = g.MeasureCharacterRanges(last, TextFont, new RectangleF(0, y, disp_size.Width, disp_size.Height), format);
+                        // get the bounding box for the real cursor position
+                        RectangleF bounds = regions[0].GetBounds(g);
+
+                        // if this goes outside the display surface
+                        // there are clipping issues that seem particularly annoying to solve for overhanging consecutive white space
+                        // in this case we can either not draw the cursor, or not attempt to fix it. the latter looks better
+
+                        // if not in insert mode, make it a bar cursor
+                        if (!IsKeyLocked(Keys.Insert)) bounds.Width = 1;
+
+                        // draw the cursor
+                        g.FillRectangle(TextBrush, bounds);
+                    }
+                }
+            }
+
             // update the scroll bar
             MainScroll.Maximum = Lines.Count - 1;
             MainScroll.LargeChange = LinesPerPage;
@@ -212,7 +282,7 @@ namespace csx64
                 OnTickCycle?.Invoke(Ticks);
             }
 
-            // unlink the streams
+            // unlink the streams (don't close them)
             stdin = stdout = stderr = null;
             stdio_ready = false;
 
@@ -244,6 +314,9 @@ namespace csx64
 
             last_stderr_pos = 0;
 
+            InputLine.Clear();
+            CursorPosition = 0;
+
             Ticks = 0;
             Run();
         }
@@ -259,35 +332,45 @@ namespace csx64
         {
             // don't call base, we want to handle everything ourselves
 
-            // if we're in interactive mode and awaiting data, pressing keys should append to stdin
-            if (stdin_interactive && C.SuspendedRead && stdin != null && stdin.CanWrite)
+            // if we're awaiting data, pressing keys should append to stdin
+            if (C.SuspendedRead)
             {
                 switch (e.KeyChar)
                 {
-                    // if we backspaced we need to do some special stuff
+                    // if we backspaced we need to remove a char from input line
                     case '\b':
-                        // if we can remove a character before the processor has gotten to it
-                        if (stdin.Position <= stdin.Length - 2)
+                        // if we're not at the front of the line, remove a character
+                        if (CursorPosition > 0)
                         {
-                            // remove that character from the stream
-                            stdin.SetLength(stdin.Length - 2);
-                            // remove that character from the display
-                            Lines[Lines.Count - 1] = Lines[Lines.Count - 1].Substring(0, Lines[Lines.Count - 1].Length - 1);
+                            // remove the character to the left
+                            InputLine.Remove(CursorPosition - 1, 1);
+                            --CursorPosition;
                         }
-                        // otherwise we've backed all the way to the beginning of the line
-                        else System.Media.SystemSounds.Beep.Play();
                         break;
 
                     // carriage returns should append a new line and flag as having data
                     case '\r':
-                        stdin_append(Environment.NewLine); // use environment new line (e.g. might be "\r\n" on windows)
+                        // input the line of text we generated
+                        stdin_append(InputLine.ToString() + Environment.NewLine); // use environment new line (e.g. might be "\r\n" on windows)
+                        // clear input line for reuse
+                        InputLine.Clear();
+                        CursorPosition = 0;
+                        // resume execution
                         C.SuspendedRead = false;
                         break;
 
-                    // otherwise it's a normal char to print
-                    default: stdin_append(e.KeyChar); break;
+                    default:
+                        // otherwise, if it's not a control char, print it
+                        if (!char.IsControl(e.KeyChar) || true)
+                        {
+                            InputLine.Insert(CursorPosition, e.KeyChar);
+                            ++CursorPosition;
+                        }
+                        break;
                 }
 
+                // now that we've pressed a key, mark that the cursor should now be in the on position
+                CursorBlinkCycleBase = DateTime.UtcNow.Ticks;
                 Invalidate();
             }
         }
@@ -298,6 +381,22 @@ namespace csx64
             // perform special actions for command chars
             switch (keyData)
             {
+                // rebind ctrl+C to abort
+                case Keys.Control | Keys.C: C.Terminate(CSX64.ErrorCode.Abort); return true;
+                // rebind ctrl+v to paste clipboard in current position
+                case Keys.Control | Keys.V:
+                    if (C.SuspendedRead)
+                    {
+                        // get the stuff to paste in
+                        string pasta = Clipboard.GetText();
+                        InputLine.Insert(CursorPosition, pasta);
+                        CursorPosition += pasta.Length;
+                    }
+                    return true;
+
+                // bind left and right to control cursor position during suspended read mode
+                case Keys.Left: if (C.SuspendedRead && CursorPosition > 0) --CursorPosition; return true;
+                case Keys.Right: if (C.SuspendedRead && CursorPosition < InputLine.Length) ++CursorPosition; return true;
 
                 default: return false;
             }

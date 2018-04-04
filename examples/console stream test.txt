@@ -34,7 +34,7 @@ main:
     mov $3, b_len
     syscall
     
-    stop
+    ret
 
 q: emit:16 "what's your name? "
 .e: def q_len, .e-q
