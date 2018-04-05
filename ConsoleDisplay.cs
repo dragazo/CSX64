@@ -29,28 +29,75 @@ namespace csx64
 
         // ------------------------------------
 
+        /// <summary>
+        /// The processor used for simulation
+        /// </summary>
         public CSX64 C = new CSX64();
+        /// <summary>
+        /// The number of ticks that have elapsed
+        /// </summary>
         private UInt64 Ticks;
 
-        Stream stdin, stdout, stderr;
-        long last_stderr_pos;
-        bool stdin_interactive;
-        bool stdio_ready = false;
+        /// <summary>
+        /// The standard streams used by this application
+        /// </summary>
+        private Stream stdin, stdout, stderr;
+        /// <summary>
+        /// The position of stderr since the last pull operation
+        /// </summary>
+        private long last_stderr_len;
+        /// <summary>
+        /// Indicates that stdin accepts keyboard input upon reaching eof
+        /// </summary>
+        private bool stdin_interactive;
+        /// <summary>
+        /// Indicates that the standard streams have been initialized and we're ready to begin execution
+        /// </summary>
+        private bool stdio_ready = false;
 
+        /// <summary>
+        /// The buffer used as temporary storage during a pull operation
+        /// </summary>
+        private byte[] Buffer = new byte[1024]; // size must be even (must store complete unicode characters)
+
+        /// <summary>
+        /// The lines that are displayed on the console window
+        /// </summary>
         private OverflowQueue<string> Lines = new OverflowQueue<string>(400);
 
+        /// <summary>
+        /// The brush used for rendering text
+        /// </summary>
         private SolidBrush TextBrush = new SolidBrush(Color.Black);
+        /// <summary>
+        /// The font used for rendering text
+        /// </summary>
         private Font TextFont = new Font(FontFamily.GenericMonospace, 16f);
 
+        /// <summary>
+        /// Gets or sets the line of text that is at the top of the console window
+        /// </summary>
         private int DispLine
         {
             get => MainScroll.Value;
             set => MainScroll.Value = value < MainScroll.Minimum ? MainScroll.Minimum : value > MainScroll.Maximum ? MainScroll.Maximum : value;
         }
+        /// <summary>
+        /// Returns the height of a line of text
+        /// </summary>
         private float LineHeight => 1.45f * TextFont.Size;
+        /// <summary>
+        /// Returns the number of complete lines that can fit in the console window
+        /// </summary>
         private int LinesPerPage => (int)(DisplayRectangle.Height / LineHeight);
 
+        /// <summary>
+        /// Holds the raw keyboard data used during interactive input for stdin
+        /// </summary>
         private StringBuilder InputLine = new StringBuilder();
+        /// <summary>
+        /// The cursor position in <see cref="InputLine"/>
+        /// </summary>
         private int CursorPosition = 0;
 
         /// <summary>
@@ -105,29 +152,30 @@ namespace csx64
         }
 
         /// <summary>
-        /// Updates the display with data from stderr. Returns true if there were differences
+        /// Updates the display with data from stderr
         /// </summary>
         private void Pull()
         {
-            // if stderr has advanced (checking for CanRead ensured stream is still valid)
-            if (stderr.CanRead && stderr.Position > last_stderr_pos)
+            // if stderr is ahead of us
+            if (stderr.CanSeek && stderr.CanRead && stderr.Length > last_stderr_len)
             {
-                // store new position
-                long new_pos = stderr.Position;
+                // store current position and seek to old length
+                long pos = stderr.Position;
+                stderr.Seek(last_stderr_len, SeekOrigin.Begin);
 
-                // read all the new stuff (16-bit words)
-                stderr.Seek(last_stderr_pos, SeekOrigin.Begin);
-                StringBuilder b = new StringBuilder();
-                while (stderr.Position + 1 < stderr.Length)
+                int count; // number of bytes read from stderr
+
+                // read all the stuff to display
+                do
                 {
-                    char ch = (char)(stderr.ReadByte() | (stderr.ReadByte() >> 8));
-                    b.Append(ch);
+                    count = stderr.Read(Buffer, 0, Buffer.Length);
+                    Put(Buffer.ConvertToString(0, count));
                 }
-                Put(b.ToString());
+                while (count == Buffer.Length);
 
                 // go back to the old position
-                stderr.Seek(new_pos, SeekOrigin.Begin);
-                last_stderr_pos = new_pos;
+                stderr.Seek(pos, SeekOrigin.Begin);
+                last_stderr_len = stderr.Length;
 
                 // redraw form
                 Invalidate();
@@ -176,24 +224,19 @@ namespace csx64
         /// </summary>
         private void stdin_append(string str)
         {
-            if (str.Length != 0)
-            {
-                // store previous pos
-                long pos = stdin.Position;
+            // store previous pos and seek to end of stream
+            long pos = stdin.Position;
+            stdin.Seek(0, SeekOrigin.End);
 
-                // convert to bytes
-                byte[] data = Encoding.Unicode.GetBytes(str);
+            // write the data
+            byte[] data = str.ConvertToBytes();
+            stdin.Write(data, 0, data.Length);
 
-                // append the character
-                stdin.Seek(0, SeekOrigin.End);
-                stdin.Write(data, 0, data.Length);
+            // go back to where we were
+            stdin.Seek(pos, SeekOrigin.Begin);
 
-                // go back to where we were
-                stdin.Seek(pos, SeekOrigin.Begin);
-
-                // also append to display
-                Put(str);
-            }
+            // also append to display
+            Put(str);
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -323,7 +366,7 @@ namespace csx64
             Lines.Enqueue(string.Empty);
             DispLine = 0;
 
-            last_stderr_pos = 0;
+            last_stderr_len = 0;
 
             InputLine.Clear();
             CursorPosition = 0;

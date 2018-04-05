@@ -13,11 +13,34 @@ namespace csx64
     {
         public static Int64 MakeSigned(this UInt64 val)
         {
-            return (val & 0x8000000000000000) != 0 ? -(Int64)(~val + 1) : (Int64)val;
+            //return (val & 0x8000000000000000) != 0 ? -(Int64)(~val + 1) : (Int64)val;
+            return (Int64)val;
         }
         public static UInt64 MakeUnsigned(this Int64 val)
         {
-            return val < 0 ? ~(UInt64)(-val) + 1 : (UInt64)val;
+            //return val < 0 ? ~(UInt64)(-val) + 1 : (UInt64)val;
+            return (UInt64)val;
+        }
+
+        /// <summary>
+        /// Converts a byte array representation into a unicode string, obeying current system endianness
+        /// </summary>
+        /// <param name="bytes">the byte array to decode</param>
+        /// <param name="index">the index of the first byte in the array</param>
+        /// <param name="count">the number of bytes to decode</param>
+        public static string ConvertToString(this byte[] bytes, int index, int count)
+        {
+            if (BitConverter.IsLittleEndian) return Encoding.Unicode.GetString(bytes, index, count);
+            else return Encoding.BigEndianUnicode.GetString(bytes, index, count);
+        }
+        /// <summary>
+        /// Converts a string into its byte representation, obeying current system endianness
+        /// </summary>
+        /// <param name="str">the string to convert</param>
+        public static byte[] ConvertToBytes(this string str)
+        {
+            if (BitConverter.IsLittleEndian) return Encoding.Unicode.GetBytes(str);
+            else return Encoding.BigEndianUnicode.GetBytes(str);
         }
     }
     internal static class Utility
@@ -80,44 +103,59 @@ namespace csx64
         }
 
         /// <summary>
-        /// Writes a little-endian value
+        /// Writes a value to the array
         /// </summary>
         /// <param name="arr">the data to write to</param>
         /// <param name="pos">the index to begin at</param>
         /// <param name="size">the size of the value in bytes</param>
         /// <param name="val">the value to write</param>
+        /// <exception cref="ArgumentException"></exception>
         public static bool Write<T>(this T arr, UInt64 pos, UInt64 size, UInt64 val) where T : IList<byte>
         {
             // make sure we're not exceeding memory bounds
             if (pos < 0 || pos + size > (UInt64)arr.Count) return false;
 
-            
+            byte[] bytes; // destination for raw bytes
 
-            // write the value (little-endian)
-            for (ushort i = 0; i < size; ++i)
+            switch (size)
+            {
+                case 1: arr[(int)pos] = (byte)val; return true;
+                case 2: bytes = BitConverter.GetBytes((UInt16)val); break;
+                case 4: bytes = BitConverter.GetBytes((UInt32)val); break;
+                case 8: bytes = BitConverter.GetBytes(val); break;
+
+                default: throw new ArgumentException("Specified data size is non-standard");
+            }
+
+            // write the value
+            for (int i = 0; i < bytes.Length; ++i)
                 arr[(int)pos + i] = (byte)(val >> (8 * i));
 
             return true;
         }
         /// <summary>
-        /// Reads a little-endian value
+        /// Reads a value from the array
         /// </summary>
         /// <param name="arr">the data to write to</param>
         /// <param name="pos">the index to begin at</param>
         /// <param name="size">the size of the value in bytes</param>
         /// <param name="res">the read value</param>
-        public static bool Read<T>(this T arr, UInt64 pos, UInt64 size, out UInt64 res) where T : IList<byte>
+        public static bool Read(this byte[] arr, UInt64 pos, UInt64 size, out UInt64 res)
         {
             res = 0; // initialize out param
 
             // make sure we're not exceeding memory bounds
-            if (pos < 0 || pos + size > (UInt64)arr.Count) return false;
+            if (pos < 0 || pos + size > (UInt64)arr.Length) return false;
 
-            // read the value (little-endian)
-            for (ushort i = 0; i < size; ++i)
-                res |= (UInt64)arr[(int)pos + i] << (8 * i);
+            switch (size)
+            {
+                case 1: res = arr[(int)pos]; return true;
+                case 2: res = BitConverter.ToUInt16(arr, (int)pos); return true;
+                case 4: res = BitConverter.ToUInt32(arr, (int)pos); return true;
+                case 8: res = BitConverter.ToUInt64(arr, (int)pos); return true;
 
-            return true;
+                default: throw new ArgumentException("Specified data size is non-standard");
+            }
         }
     }
 
@@ -157,7 +195,7 @@ namespace csx64
         public enum ErrorCode
         {
             None, OutOfBounds, UnhandledSyscall, UndefinedBehavior, ArithmeticError, Abort,
-            IOFailure, FSDisabled, AccessViolation
+            IOFailure, FSDisabled, AccessViolation, InsufficientFDs, FDNotInUse
         }
         public enum OPCode
         {
@@ -213,14 +251,17 @@ namespace csx64
             SLP
         }
 
-        public enum SyscallCodes
+        public enum SyscallCode
         {
             Read, Write,
             Open, Close,
-            Flush, Seek,
+            Flush,
+            Seek, Tell,
 
             Move, Remove,
-            Mkdir, Rmdir
+            Mkdir, Rmdir,
+
+            Exit
         }
         public enum SyscallResult
         {
@@ -409,8 +450,12 @@ namespace csx64
         static CSX64()
         {
             // create definitions for all the syscall codes
-            foreach (SyscallCodes item in Enum.GetValues(typeof(SyscallCodes)))
+            foreach (SyscallCode item in Enum.GetValues(typeof(SyscallCode)))
                 DefineSymbol($"sys_{item.ToString().ToLower()}", (UInt64)item);
+
+            // create definitions for all the error codes
+            foreach (ErrorCode item in Enum.GetValues(typeof(ErrorCode)))
+                DefineSymbol($"err_{item.ToString().ToLower()}", (UInt64)item);
         }
 
         // -----------------------
@@ -2140,7 +2185,7 @@ namespace csx64
         /// </summary>
         /// <param name="data">The memory to load before starting execution (extra memory is undefined)</param>
         /// <param name="stacksize">the amount of additional space to allocate for the program's stack</param>
-        public bool Initialize(Byte[] data, UInt64 stacksize = 2 * 1024 * 1024)
+        public bool Initialize(byte[] data, UInt64 stacksize = 2 * 1024 * 1024)
         {
             // make sure we're not loading null array
             if (data == null || data.Length == 0) return false;
@@ -2225,36 +2270,41 @@ namespace csx64
         /// </summary>
         protected virtual bool Syscall()
         {
-            string str, str2;
-
             // requested syscall in R0
             switch (Registers[0].x64)
             {
                 // R1 fd, R2 data, R3 count
                 // R0 <- #bytes read
-                case (UInt64)SyscallCodes.Read: Registers[0].x64 = FS_Read(Registers[1].x64, Registers[2].x64, Registers[3].x64); return true;
+                // ZF = R0 == 0
+                case (UInt64)SyscallCode.Read: return FS_Read();
                 // R1 fd, R2 data, R3 count
-                case (UInt64)SyscallCodes.Write: return FS_Write(Registers[1].x64, Registers[2].x64, Registers[3].x64);
+                case (UInt64)SyscallCode.Write: return FS_Write();
                 
                 // R1 path, R2 mode
                 // R0 <- fd
-                case (UInt64)SyscallCodes.Open:
-                    if (!GetString(Registers[1].x64, 2, out str)) return false;
-                    Registers[0].x64 = FS_Open(str, Registers[2].x64);
-                    return true;
+                case (UInt64)SyscallCode.Open: return FS_Open();
+                // R1 fd
+                case (UInt64)SyscallCode.Close: return FS_Close();
 
                 // R1 fd
-                case (UInt64)SyscallCodes.Close: return FS_Close(Registers[1].x64);
-                case (UInt64)SyscallCodes.Flush: return FS_Flush(Registers[1].x64);
+                case (UInt64)SyscallCode.Flush: return FS_Flush();
 
-                // R1 fd, R2 pos, R3 seek_mode (0 = begin, 1 = relative, 2 = end)
-                case (UInt64)SyscallCodes.Seek: return FS_Seek(Registers[1].x64, Registers[2].x64, Registers[3].x64);
+                // R1 fd, R2 pos, R3 origin
+                case (UInt64)SyscallCode.Seek: return FS_Seek();
+                // R1 fd
+                case (UInt64)SyscallCode.Tell: return FS_Tell();
 
                 // R1 from_path, R2 to_path
-                case (UInt64)SyscallCodes.Move: return GetString(Registers[1].x64, 2, out str) && !GetString(Registers[2].x64, 2, out str2) && FS_Move(str, str2);
-                case (UInt64)SyscallCodes.Remove: return GetString(Registers[1].x64, 2, out str) && FS_Remove(str);
-                case (UInt64)SyscallCodes.Mkdir: return GetString(Registers[1].x64, 2, out str) && FS_Mkdir(str);
-                case (UInt64)SyscallCodes.Rmdir: return GetString(Registers[1].x64, 2, out str) && FS_Rmdir(str);
+                case (UInt64)SyscallCode.Move: return FS_Move();
+                // R1 path
+                case (UInt64)SyscallCode.Remove: return FS_Remove();
+                // R1 path
+                case (UInt64)SyscallCode.Mkdir: return FS_Mkdir();
+                // R1 path
+                case (UInt64)SyscallCode.Rmdir: return FS_Rmdir();
+                
+                // R1 err
+                case (UInt64)SyscallCode.Exit: Terminate((ErrorCode)Registers[1].x64); return true;
 
                 // ----------------------------------
 
@@ -2525,134 +2575,6 @@ namespace csx64
         }
 
         /// <summary>
-        /// Reads a series of bytes from memory. Returns true iff successful, otherwise fails with OutOfBounds
-        /// </summary>
-        /// <param name="pos">The position in memory to begin reading</param>
-        /// <param name="count">The number of bytes to read</param>
-        /// <param name="data">The location to store the data. Should be at least as large as count</param>
-        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool GetMem(UInt64 pos, UInt64 count, byte[] data, bool _abide_slow = true)
-        {
-            for (UInt64 i = 0; i < count; ++i)
-            {
-                if (!GetMem(pos + i, 1, out UInt64 temp, _abide_slow)) return false;
-                data[i] = (byte)temp;
-            }
-
-            return true;
-        }
-        /// <summary>
-        /// Writes a series of bytes to memory. Returns true iff successful, otherwise fails with OutOfBounds
-        /// </summary>
-        /// <param name="pos">The position in memory to begin writing</param>
-        /// <param name="count">The number of bytes to write</param>
-        /// <param name="data">The data to write. Should be at least as large as count</param>
-        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool SetMem(UInt64 pos, UInt64 count, byte[] data, bool _abide_slow = true)
-        {
-            for (UInt64 i = 0; i < count; ++i)
-                if (!SetMem(pos + i, 1, data[i], _abide_slow)) return false;
-
-            return true;
-        }
-
-        /// <summary>
-        /// Reads a series of 2-byte words from memory. Returns true iff successful, otherwise fails with OutOfBounds
-        /// </summary>
-        /// <param name="pos">The position in memory to begin reading</param>
-        /// <param name="count">The number of words to read</param>
-        /// <param name="data">The location to store the data. Should be at least as large as count</param>
-        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool GetMem(UInt64 pos, UInt64 count, UInt16[] data, bool _abide_slow = true)
-        {
-            for (UInt64 i = 0; i < count; ++i)
-            {
-                if (!GetMem(pos + i, 2, out UInt64 temp, _abide_slow)) return false;
-                data[i] = (byte)temp;
-            }
-
-            return true;
-        }
-        /// <summary>
-        /// Writes a series of 2-byte words to memory. Returns true iff successful, otherwise fails with OutOfBounds
-        /// </summary>
-        /// <param name="pos">The position in memory to begin writing</param>
-        /// <param name="count">The number of words to write</param>
-        /// <param name="data">The data to write. Should be at least as large as count</param>
-        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool SetMem(UInt64 pos, UInt64 count, UInt16[] data, bool _abide_slow = true)
-        {
-            for (UInt64 i = 0; i < count; ++i)
-                if (!SetMem(pos + i, 2, data[i], _abide_slow)) return false;
-
-            return true;
-        }
-
-        /// <summary>
-        /// Reads a series of 4-byte words from memory. Returns true iff successful, otherwise fails with OutOfBounds
-        /// </summary>
-        /// <param name="pos">The position in memory to begin reading</param>
-        /// <param name="count">The number of words to read</param>
-        /// <param name="data">The location to store the data. Should be at least as large as count</param>
-        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool GetMem(UInt64 pos, UInt64 count, UInt32[] data, bool _abide_slow = true)
-        {
-            for (UInt64 i = 0; i < count; ++i)
-            {
-                if (!GetMem(pos + i, 4, out UInt64 temp, _abide_slow)) return false;
-                data[i] = (byte)temp;
-            }
-
-            return true;
-        }
-        /// <summary>
-        /// Writes a series of 4-byte words to memory. Returns true iff successful, otherwise fails with OutOfBounds
-        /// </summary>
-        /// <param name="pos">The position in memory to begin writing</param>
-        /// <param name="count">The number of words to write</param>
-        /// <param name="data">The data to write. Should be at least as large as count</param>
-        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool SetMem(UInt64 pos, UInt64 count, UInt32[] data, bool _abide_slow = true)
-        {
-            for (UInt64 i = 0; i < count; ++i)
-                if (!SetMem(pos + i, 4, data[i], _abide_slow)) return false;
-
-            return true;
-        }
-
-        /// <summary>
-        /// Reads a series of 8-byte words from memory. Returns true iff successful, otherwise fails with OutOfBounds
-        /// </summary>
-        /// <param name="pos">The position in memory to begin reading</param>
-        /// <param name="count">The number of words to read</param>
-        /// <param name="data">The location to store the data. Should be at least as large as count</param>
-        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool GetMem(UInt64 pos, UInt64 count, UInt64[] data, bool _abide_slow = true)
-        {
-            for (UInt64 i = 0; i < count; ++i)
-            {
-                if (!GetMem(pos + i, 8, out UInt64 temp, _abide_slow)) return false;
-                data[i] = (byte)temp;
-            }
-
-            return true;
-        }
-        /// <summary>
-        /// Writes a series of 8-byte words to memory. Returns true iff successful, otherwise fails with OutOfBounds
-        /// </summary>
-        /// <param name="pos">The position in memory to begin writing</param>
-        /// <param name="count">The number of words to write</param>
-        /// <param name="data">The data to write. Should be at least as large as count</param>
-        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool SetMem(UInt64 pos, UInt64 count, UInt64[] data, bool _abide_slow = true)
-        {
-            for (UInt64 i = 0; i < count; ++i)
-                if (!SetMem(pos + i, 8, data[i], _abide_slow)) return false;
-
-            return true;
-        }
-
-        /// <summary>
         /// Reads a null-terminated string from memory. Returns true if successful, otherwise fails with OutOfBounds and returns false
         /// </summary>
         /// <param name="pos">the address in memory of the first character in the string</param>
@@ -2664,7 +2586,7 @@ namespace csx64
             // use builder for efficiency
             StringBuilder b = new StringBuilder();
             UInt64 val;
-
+            
             // read the string from memory
             for (UInt64 i = 0; ; ++i)
             {
@@ -2780,56 +2702,15 @@ namespace csx64
                 if (FileDescriptors[i] != null)
                 {
                     // only close managed file descriptors
-                    if (FileDescriptor_Managed[i]) FS_Close((UInt64)i);
-                    else FileDescriptors[i] = null;
+                    if (FileDescriptor_Managed[i])
+                    {
+                        try { FileDescriptors[i].Close(); }
+                        catch (Exception) { }
+                    }
+
+                    // sever the link
+                    FileDescriptors[i] = null;
                 }
-        }
-
-        /// <summary>
-        /// Opens a file in the specified mode. Returns the file descriptor created if successful, or UInt64.MaxValue upon failure.
-        /// Streams opened with this method are "managed" and will be closed upon termination.
-        /// </summary>
-        /// <param name="path">the path of the file to open</param>
-        /// <param name="mode">the mode to open the file in (see System.IO.FileAccess)"/></param>
-        public UInt64 FS_Open(string path, UInt64 mode)
-        {
-            // make sure we're allowed to do this
-            if (!Flags.FileSystem) { Terminate(ErrorCode.FSDisabled); return UInt64.MaxValue; }
-
-            UInt64 index = FindOpenFileDescriptor();
-            if (index == UInt64.MaxValue) return UInt64.MaxValue;
-
-            FileStream f; // resulting stream
-
-            // attempt to open the file
-            try { f = new FileStream(path, FileMode.OpenOrCreate, (FileAccess)mode); }
-            catch (Exception) { return UInt64.MaxValue; }
-            
-            // store in file descriptors
-            FileDescriptors[index] = f;
-            FileDescriptor_Managed[index] = true;
-            return index;
-        }
-        /// <summary>
-        /// Closes a file. Returns true if successful, otherwise failes with IOFailure and returns false.
-        /// Cannot be used to close an unmanaged stream set by <see cref="SetUnmanagedStream(int, Stream)"/>
-        /// </summary>
-        /// <param name="fd">The file descriptor to close</param>
-        public bool FS_Close(UInt64 fd)
-        {
-            // make sure fd is valid
-            if (fd >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
-            // make sure we're allowed to do this
-            if (!Flags.FileSystem) { Terminate(ErrorCode.FSDisabled); return false; }
-            // we can't close an unmanaged stream
-            if (!FileDescriptor_Managed[fd]) { Terminate(ErrorCode.AccessViolation); return false; }
-
-            // attempt to close the file
-            try { FileDescriptors[fd].Close(); FileDescriptors[fd] = null; }
-            catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
-
-            // file closed successfully
-            return true;
         }
 
         /// <summary>
@@ -2838,31 +2719,33 @@ namespace csx64
         /// <param name="fd">the file descriptor to use</param>
         /// <param name="pos">the position in memory to store the read data</param>
         /// <param name="count">the number of bytes to read</param>
-        public UInt64 FS_Read(UInt64 fd, UInt64 pos, UInt64 count)
+        private bool FS_Read()
         {
+            // shorthand the file descriptor
+            UInt64 fd = Registers[1].x64;
+
             // make sure fd is valid
-            if (fd >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return 0; }
+            if (fd >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
+            if (FileDescriptors[fd] == null) { Terminate(ErrorCode.FDNotInUse); return false; }
 
             // attempt to read from the file into memory
             try
             {
                 // read from the file
-                int n = FileDescriptors[fd].Read(Memory, (int)pos, (int)count);
+                int n = FileDescriptors[fd].Read(Memory, (int)Registers[2].x64, (int)Registers[3].x64);
 
                 // if we got nothing but it's interactive
                 if (n == 0 && !FileDescriptor_Managed[fd] && FileDescriptor_Interactive[fd])
                 {
                     --Pos; // await further data by repeating the syscall
                     SuspendedRead = true; // suspend execution until there's more data
-
-                    // return syscall code for read to ensure that it's still in R0 after the call finishes
-                    return (UInt64)SyscallCodes.Read;
                 }
-
                 // otherwise return num chars read from file
-                return (UInt64)n;
+                else Flags.Z = (Registers[0].x64 = (UInt64)n) == 0; 
+                
+                return true;
             }
-            catch (Exception) { Terminate(ErrorCode.IOFailure); return 0; }
+            catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
         }
         /// <summary>
         /// Attempts to write a series of bytes from memory to the file
@@ -2870,42 +2753,131 @@ namespace csx64
         /// <param name="fd">the file descriptor to use</param>
         /// <param name="pos">the position in memory of the data to write</param>
         /// <param name="count">the number of bytes to read</param>
-        public bool FS_Write(UInt64 fd, UInt64 pos, UInt64 count)
+        private bool FS_Write()
         {
+            // shorthand the file descriptor
+            UInt64 fd = Registers[1].x64;
+
             // make sure fd is valid
             if (fd >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
+            if (FileDescriptors[fd] == null) { Terminate(ErrorCode.FDNotInUse); return false; }
 
-            // attempt to read from memory to the file
-            try { FileDescriptors[fd].Write(Memory, (int)pos, (int)count); return true; }
+            // attempt to write from memory to the file
+            try { FileDescriptors[fd].Write(Memory, (int)Registers[2].x64, (int)Registers[3].x64); return true; }
             catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
+        }
+
+        /// <summary>
+        /// Opens a file in the specified mode. Returns the file descriptor created if successful, otherwise 0.
+        /// Streams opened with this method are "managed" and will be closed upon termination.
+        /// </summary>
+        /// <param name="path">the path of the file to open</param>
+        /// <param name="mode">the mode to open the file in (see System.IO.FileAccess)"/></param>
+        private bool FS_Open()
+        {
+            // make sure we're allowed to do this
+            if (!Flags.FileSystem) { Terminate(ErrorCode.FSDisabled); return false; }
+
+            UInt64 index = FindOpenFileDescriptor();
+            if (index == UInt64.MaxValue) { Terminate(ErrorCode.InsufficientFDs); return false; }
+
+            // get path
+            if (!GetString(Registers[1].x64, 2, out string path)) return false;
+
+            FileStream f; // resulting stream
+            
+            // attempt to open the file
+            try { f = new FileStream(path, (FileMode)Registers[2].x64, (FileAccess)Registers[3].x64); }
+            catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
+            
+            // store in file descriptors
+            FileDescriptors[index] = f;
+            FileDescriptor_Managed[index] = true;
+
+            // return file descriptor index
+            Registers[0].x64 = index;
+            return true;
+        }
+        /// <summary>
+        /// Closes a file. Returns true if successful, otherwise failes with IOFailure and returns false.
+        /// Cannot be used to close an unmanaged stream set by <see cref="SetUnmanagedStream(int, Stream)"/>
+        /// </summary>
+        /// <param name="fd">The file descriptor to close</param>
+        private bool FS_Close()
+        {
+            // make sure we're allowed to do this
+            if (!Flags.FileSystem) { Terminate(ErrorCode.FSDisabled); return false; }
+
+            // shorthand the file descriptor
+            UInt64 fd = Registers[1].x64;
+
+            // make sure fd is valid
+            if (fd >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
+            if (FileDescriptors[fd] == null) { Terminate(ErrorCode.FDNotInUse); return false; }
+
+            // we can't close an unmanaged stream
+            if (!FileDescriptor_Managed[fd]) { Terminate(ErrorCode.AccessViolation); return false; }
+
+            // attempt to close the file
+            try { FileDescriptors[fd].Close(); return true; }
+            catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
+            // ensure we null even upon error in close
+            finally { FileDescriptors[fd] = null; }
         }
 
         /// <summary>
         /// Flushes the stream associated with the file
         /// </summary>
         /// <param name="fd">the file descriptor to flush</param>
-        public bool FS_Flush(UInt64 fd)
+        private bool FS_Flush()
         {
+            // shorthand the file descriptor
+            UInt64 fd = Registers[1].x64;
+
             // make sure fd is valid
             if (fd >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
+            if (FileDescriptors[fd] == null) { Terminate(ErrorCode.FDNotInUse); return false; }
 
-            // attempt to read from memory to the file
+            // attempt to flush buffer
             try { FileDescriptors[fd].Flush(); return true; }
             catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
         }
+
         /// <summary>
         /// Seeks the specified position in the file
         /// </summary>
         /// <param name="fd">the file descriptor to perform seek on</param>
         /// <param name="pos">the position to seek to</param>
         /// <param name="mode">the offset mode</param>
-        public bool FS_Seek(UInt64 fd, UInt64 pos, UInt64 mode)
+        private bool FS_Seek()
         {
+            // shorthand the file descriptor
+            UInt64 fd = Registers[1].x64;
+
             // make sure fd is valid
             if (fd >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
+            if (FileDescriptors[fd] == null) { Terminate(ErrorCode.FDNotInUse); return false; }
+
+            // attempt to seek in the file
+            try { FileDescriptors[fd].Seek((long)Registers[2].x64, (SeekOrigin)Registers[3].x64); return true; }
+            catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
+        }
+        /// <summary>
+        /// Attempts to get the current position in the file
+        /// </summary>
+        /// <param name="fd">the file to get current position of</param>
+        /// <param name="pos">position of stream upon success</param>
+        private bool FS_Tell()
+        {
+            // shorthand the file descriptor
+            UInt64 fd = Registers[1].x64;
+
+            // make sure fd is valid
+            if (fd >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
+            if (FileDescriptors[fd] == null) { Terminate(ErrorCode.FDNotInUse); return false; }
 
             // attempt to read from memory to the file
-            try { FileDescriptors[fd].Seek(pos.MakeSigned(), (SeekOrigin)mode); return true; }
+            try { Registers[0].x64 = (UInt64)FileDescriptors[fd].Position; return true; }
             catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
         }
 
@@ -2914,55 +2886,67 @@ namespace csx64
         /// </summary>
         /// <param name="from">the file to move</param>
         /// <param name="to">the destination path</param>
-        public bool FS_Move(string from, string to)
+        private bool FS_Move()
         {
             // make sure we're allowed to do this
             if (!Flags.FileSystem) { Terminate(ErrorCode.FSDisabled); return false; }
 
+            // get the paths
+            if (!GetString(Registers[1].x64, 2, out string from) || !GetString(Registers[2].x64, 2, out string to)) return false;
+
             // attempt the move operation
             try { File.Move(from, to); return true; }
-            catch (Exception) { return false; }
+            catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
         }
         /// <summary>
         /// Attempts to remove the specified file
         /// </summary>
         /// <param name="path">the file to remove</param>
         /// <returns></returns>
-        public bool FS_Remove(string path)
+        private bool FS_Remove()
         {
             // make sure we're allowed to do this
             if (!Flags.FileSystem) { Terminate(ErrorCode.FSDisabled); return false; }
 
+            // get the path
+            if (!GetString(Registers[1].x64, 2, out string path)) return false;
+
             // attempt the move operation
             try { File.Delete(path); return true; }
-            catch (Exception) { return false; }
+            catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
         }
 
         /// <summary>
         /// Attempts to make a new directory
         /// </summary>
         /// <param name="path">path to new directory</param>
-        public bool FS_Mkdir(string path)
+        private bool FS_Mkdir()
         {
             // make sure we're allowed to do this
             if (!Flags.FileSystem) { Terminate(ErrorCode.FSDisabled); return false; }
 
+            // get the path
+            if (!GetString(Registers[1].x64, 2, out string path)) return false;
+
             // attempt the move operation
             try { Directory.CreateDirectory(path); return true; }
-            catch (Exception) { return false; }
+            catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
         }
         /// <summary>
         /// Attempts to remove a directory
         /// </summary>
         /// <param name="path">path to directory to remove</param>
-        public bool FS_Rmdir(string path)
+        private bool FS_Rmdir()
         {
             // make sure we're allowed to do this
             if (!Flags.FileSystem) { Terminate(ErrorCode.FSDisabled); return false; }
 
+            // get the path
+            if (!GetString(Registers[1].x64, 2, out string path)) return false;
+
             // attempt the move operation
             try { Directory.Delete(path, RecursiveRmdir); return true; }
-            catch (Exception) { return false; }
+            catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
         }
 
         // --------------
@@ -3515,12 +3499,15 @@ namespace csx64
             // -- Assembly Functions --
             // ------------------------
 
+            private const char LabelDefChar = ':';
+            private const char OpSizeSeparatorChar = ':';
+
             public const UInt64 EmissionMaxMultiplier = 1000000;
             private const char EmissionMultiplierChar = ':';
 
             public bool SplitLine(string rawline)
             {
-                // (label: label: ...) (op(:size) (arg, arg, ...))
+                // (label: label: ...) (op(:size) (arg, arg, ...)) #comment
 
                 int pos = 0, end; // position in line parsing
                 int quote;        // index of openning quote in args
@@ -3537,7 +3524,7 @@ namespace csx64
                     for (end = pos; end < rawline.Length && !char.IsWhiteSpace(rawline[end]); ++end) ;
 
                     // if it's a label, add to tokens
-                    if (pos != end && rawline[end - 1] == ':') tokens.Add(rawline.Substring(pos, end - pos - 1));
+                    if (pos != end && rawline[end - 1] == LabelDefChar) tokens.Add(rawline.Substring(pos, end - pos - 1));
                     // otherwise we're done with labels
                     else break; // break ensures we also keep pos pointing to start of next section
                 }
@@ -3548,7 +3535,7 @@ namespace csx64
                 if (pos < rawline.Length)
                 {
                     // get up till size separator or white space
-                    for (end = pos; end < rawline.Length && rawline[end] != ':' && !char.IsWhiteSpace(rawline[end]); ++end) ;
+                    for (end = pos; end < rawline.Length && rawline[end] != OpSizeSeparatorChar && !char.IsWhiteSpace(rawline[end]); ++end) ;
 
                     // make sure we got a well-formed op
                     if (pos == end) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Operation size specification encountered without an operation"); return false; }
@@ -3557,7 +3544,7 @@ namespace csx64
                     op = rawline.Substring(pos, end - pos);
 
                     // if we got a size specification
-                    if (end < rawline.Length && rawline[end] == ':')
+                    if (end < rawline.Length && rawline[end] == OpSizeSeparatorChar)
                     {
                         pos = end + 1; // position to beginning of size specification
 
