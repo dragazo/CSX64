@@ -319,5 +319,12 @@ namespace csx64
 
             C.Terminate(CSX64.ErrorCode.Abort); // abort execution (otherwise it'll be running in the background)
         }
+
+        private void ProcessorView_Load(object sender, EventArgs e)
+        {
+            // provide warning message on big-endian machines
+            if (!BitConverter.IsLittleEndian)
+                MessageBox.Show("CSX64 was designed to run on little-endian architectures.\nAs this system is big-endian, many features are not guaranteed to function properly", "WARNING");
+        }
     }
 }

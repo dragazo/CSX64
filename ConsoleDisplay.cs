@@ -123,7 +123,7 @@ namespace csx64
                     char ch = (char)(stderr.ReadByte() | (stderr.ReadByte() >> 8));
                     b.Append(ch);
                 }
-                Puts(b.ToString());
+                Put(b.ToString());
 
                 // go back to the old position
                 stderr.Seek(new_pos, SeekOrigin.Begin);
@@ -140,7 +140,10 @@ namespace csx64
             }
         }
 
-        private void Puts(string str)
+        /// <summary>
+        /// Appends a string to the display
+        /// </summary>
+        private void Put(string str)
         {
             int start, stop;
 
@@ -156,7 +159,11 @@ namespace csx64
                 if (stop < str.Length) Lines.Enqueue(string.Empty);
             }
         }
-        private void Putc(char ch)
+        /// <summary>
+        /// Appends a character to the display
+        /// </summary>
+        /// <param name="ch"></param>
+        private void Put(char ch)
         {
             // non-new line appends to last line
             if (ch != '\n') Lines[Lines.Count - 1] += ch;
@@ -164,25 +171,29 @@ namespace csx64
             else Lines.Enqueue(string.Empty);
         }
 
-        private void stdin_append(char ch)
-        {
-            // store previous pos
-            long pos = stdin.Position;
-
-            // append the character
-            stdin.Seek(0, SeekOrigin.End);
-            stdin.Write(new byte[] { (byte)ch, (byte)(ch >> 8) }, 0, 2);
-
-            // go back to where we were
-            stdin.Seek(pos, SeekOrigin.Begin);
-            
-            // also append this char to the output window
-            Putc(ch);
-        }
+        /// <summary>
+        /// Appends a string to stdin and the display
+        /// </summary>
         private void stdin_append(string str)
         {
-            // append each character
-            for (int i = 0; i < str.Length; ++i) stdin_append(str[i]);
+            if (str.Length != 0)
+            {
+                // store previous pos
+                long pos = stdin.Position;
+
+                // convert to bytes
+                byte[] data = Encoding.Unicode.GetBytes(str);
+
+                // append the character
+                stdin.Seek(0, SeekOrigin.End);
+                stdin.Write(data, 0, data.Length);
+
+                // go back to where we were
+                stdin.Seek(pos, SeekOrigin.Begin);
+
+                // also append to display
+                Put(str);
+            }
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -347,6 +358,15 @@ namespace csx64
                             --CursorPosition;
                         }
                         break;
+                    // if we pressed delete, remove a char from input line
+                    case '⌂':
+                        // if we're not at the end of the line, remove a character
+                        if (CursorPosition < InputLine.Length)
+                        {
+                            // remove the character to the left
+                            InputLine.Remove(CursorPosition, 1);
+                        }
+                        break;
 
                     // carriage returns should append a new line and flag as having data
                     case '\r':
@@ -363,7 +383,12 @@ namespace csx64
                         // otherwise, if it's not a control char, print it
                         if (!char.IsControl(e.KeyChar) || true)
                         {
-                            InputLine.Insert(CursorPosition, e.KeyChar);
+                            // if in insert mode and we're on a character, replace it
+                            if (IsKeyLocked(Keys.Insert) && CursorPosition < InputLine.Length) InputLine[CursorPosition] = e.KeyChar;
+                            // otherwise insert at cursor pos
+                            else InputLine.Insert(CursorPosition, e.KeyChar);
+
+                            // in either case, advance cursor position
                             ++CursorPosition;
                         }
                         break;
@@ -378,28 +403,50 @@ namespace csx64
         {
             // don't call base, we want to handle everything ourselves
 
-            // perform special actions for command chars
+            // perform special control commands
             switch (keyData)
             {
                 // rebind ctrl+C to abort
                 case Keys.Control | Keys.C: C.Terminate(CSX64.ErrorCode.Abort); return true;
-                // rebind ctrl+v to paste clipboard in current position
-                case Keys.Control | Keys.V:
-                    if (C.SuspendedRead)
-                    {
+            }
+
+            // perform special interactive edit commands
+            if (C.SuspendedRead)
+            {
+                switch (keyData)
+                {
+                    // bind home and end to move to beginning or end of input string
+                    case Keys.Home: CursorPosition = 0; break;
+                    case Keys.End: CursorPosition = InputLine.Length; break;
+
+                    // bind ctrl+v to paste clipboard in current position
+                    case Keys.Control | Keys.V:
                         // get the stuff to paste in
                         string pasta = Clipboard.GetText();
                         InputLine.Insert(CursorPosition, pasta);
                         CursorPosition += pasta.Length;
-                    }
-                    return true;
+                        break;
 
-                // bind left and right to control cursor position during suspended read mode
-                case Keys.Left: if (C.SuspendedRead && CursorPosition > 0) --CursorPosition; return true;
-                case Keys.Right: if (C.SuspendedRead && CursorPosition < InputLine.Length) ++CursorPosition; return true;
+                    // bind left and right to control cursor position during suspended read mode
+                    case Keys.Left: if (CursorPosition > 0) --CursorPosition; break;
+                    case Keys.Right: if (CursorPosition < InputLine.Length) ++CursorPosition; break;
 
-                default: return false;
+                    // --------------------------------------------------------------------------------------------
+
+                    // reroute delete to key press event
+                    case Keys.Delete: OnKeyPress(new KeyPressEventArgs('⌂')); return true; // should return, not break (key press will invalidate form anyway)
+
+                    // return false here will forward anything else to key press event
+                    default: return false;
+                }
+                
+                // now that we've pressed a key, mark that the cursor should now be in the on position
+                CursorBlinkCycleBase = DateTime.UtcNow.Ticks;
+                Invalidate();
             }
+
+            // if we didn't handle it, we'll ignore it
+            return true;
         }
 
         private void MainScroll_ValueChanged(object sender, EventArgs e)

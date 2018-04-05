@@ -91,6 +91,8 @@ namespace csx64
             // make sure we're not exceeding memory bounds
             if (pos < 0 || pos + size > (UInt64)arr.Count) return false;
 
+            
+
             // write the value (little-endian)
             for (ushort i = 0; i < size; ++i)
                 arr[(int)pos + i] = (byte)(val >> (8 * i));
@@ -2698,6 +2700,28 @@ namespace csx64
         }
 
         /// <summary>
+        /// Pushes a value onto the stack
+        /// </summary>
+        /// <param name="size">the size of the value (in bytes)</param>
+        /// <param name="val">the value to push</param>
+        public bool Push(UInt64 size, UInt64 val)
+        {
+            Registers[15].x64 -= size;
+            return SetMem(Registers[15].x64, size, val);
+        }
+        /// <summary>
+        /// Pops a value from the stack
+        /// </summary>
+        /// <param name="size">the size of the value (in bytes)</param>
+        /// <param name="val">the resulting value</param>
+        public bool Pop(UInt64 size, out UInt64 val)
+        {
+            if (!GetMem(Registers[15].x64, size, out val)) return false;
+            Registers[15].x64 += size;
+            return true;
+        }
+
+        /// <summary>
         /// Gets a value at and advances the execution pointer (fails with OutOfBounds if invalid)
         /// </summary>
         /// <param name="size">Number of bytes to read</param>
@@ -2727,28 +2751,6 @@ namespace csx64
             res = Mult((mults >> 4) & 7) * Registers[regs >> 4].x64 + Mult(mults & 7, mults & 8) * Registers[regs & 15].x64 + imm;
 
             // got an address
-            return true;
-        }
-
-        /// <summary>
-        /// Pushes a value onto the stack
-        /// </summary>
-        /// <param name="size">the size of the value (in bytes)</param>
-        /// <param name="val">the value to push</param>
-        public bool Push(UInt64 size, UInt64 val)
-        {
-            Registers[15].x64 -= size;
-            return SetMem(Registers[15].x64, size, val);
-        }
-        /// <summary>
-        /// Pops a value from the stack
-        /// </summary>
-        /// <param name="size">the size of the value (in bytes)</param>
-        /// <param name="val">the resulting value</param>
-        public bool Pop(UInt64 size, out UInt64 val)
-        {
-            if (!GetMem(Registers[15].x64, size, out val)) return false;
-            Registers[15].x64 += size;
             return true;
         }
 
@@ -2817,6 +2819,8 @@ namespace csx64
         {
             // make sure fd is valid
             if (fd >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
+            // make sure we're allowed to do this
+            if (!Flags.FileSystem) { Terminate(ErrorCode.FSDisabled); return false; }
             // we can't close an unmanaged stream
             if (!FileDescriptor_Managed[fd]) { Terminate(ErrorCode.AccessViolation); return false; }
 

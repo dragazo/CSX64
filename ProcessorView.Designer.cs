@@ -208,6 +208,7 @@
             this.DoubleBuffered = true;
             this.Name = "ProcessorView";
             this.Text = "Processor View";
+            this.Load += new System.EventHandler(this.ProcessorView_Load);
             this.ResumeLayout(false);
             this.PerformLayout();
 
