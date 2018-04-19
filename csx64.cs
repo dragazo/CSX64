@@ -2574,6 +2574,233 @@ namespace csx64
             Terminate(ErrorCode.OutOfBounds); return false;
         }
 
+        // -- typed memory access -- //
+
+        /// <summary>
+        /// Reads a 64-bit unsigned integer from memory
+        /// </summary>
+        /// <param name="pos">the position of the value in memory</param>
+        /// <param name="res">the resulting value</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool GetMem(UInt64 pos, out UInt64 res, bool _abide_slow = true)
+        {
+            return GetMem(pos, 8, out res, _abide_slow);
+        }
+        /// <summary>
+        /// Writes a 64-bit unsigned integer to memory
+        /// </summary>
+        /// <param name="pos">the position of the value in memory</param>
+        /// <param name="res">the resulting value</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool SetMem(UInt64 pos, UInt64 val, bool _abide_slow = true)
+        {
+            return SetMem(pos, 8, val, _abide_slow);
+        }
+
+        /// <summary>
+        /// Reads a 32-bit unsigned integer from memory
+        /// </summary>
+        /// <param name="pos">the position of the value in memory</param>
+        /// <param name="res">the resulting value</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool GetMem(UInt64 pos, out UInt32 res, bool _abide_slow = true)
+        {
+            if (GetMem(pos, 4, out UInt64 temp, _abide_slow)) { res = (UInt32)temp; return true; }
+            else { res = 0; return false; }
+        }
+        /// <summary>
+        /// Writes a 32-bit unsigned integer to memory
+        /// </summary>
+        /// <param name="pos">the position of the value in memory</param>
+        /// <param name="res">the resulting value</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool SetMem(UInt64 pos, UInt32 val, bool _abide_slow = true)
+        {
+            return SetMem(pos, 4, val, _abide_slow);
+        }
+
+        /// <summary>
+        /// Reads a 16-bit unsigned integer from memory
+        /// </summary>
+        /// <param name="pos">the position of the value in memory</param>
+        /// <param name="res">the resulting value</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool GetMem(UInt64 pos, out UInt16 res, bool _abide_slow = true)
+        {
+            if (GetMem(pos, 2, out UInt64 temp, _abide_slow)) { res = (UInt16)temp; return true; }
+            else { res = 0; return false; }
+        }
+        /// <summary>
+        /// Writes a 16-bit unsigned integer to memory
+        /// </summary>
+        /// <param name="pos">the position of the value in memory</param>
+        /// <param name="res">the resulting value</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool SetMem(UInt64 pos, UInt16 val, bool _abide_slow = true)
+        {
+            return SetMem(pos, 2, val, _abide_slow);
+        }
+
+        /// <summary>
+        /// Reads an 8-bit unsigned integer from memory
+        /// </summary>
+        /// <param name="pos">the position of the value in memory</param>
+        /// <param name="res">the resulting value</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool GetMem(UInt64 pos, out byte res, bool _abide_slow = true)
+        {
+            if (GetMem(pos, 1, out UInt64 temp, _abide_slow)) { res = (byte)temp; return true; }
+            else { res = 0; return false; }
+        }
+        /// <summary>
+        /// Writes an 8-bit unsigned integer to memory
+        /// </summary>
+        /// <param name="pos">the position of the value in memory</param>
+        /// <param name="res">the resulting value</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool SetMem(UInt64 pos, byte val, bool _abide_slow = true)
+        {
+            return SetMem(pos, 1, val, _abide_slow);
+        }
+
+        // -------------------------
+
+        /// <summary>
+        /// Reads a 64-bit signed integer from memory
+        /// </summary>
+        /// <param name="pos">the position of the value in memory</param>
+        /// <param name="res">the resulting value</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool GetMem(UInt64 pos, out Int64 res, bool _abide_slow = true)
+        {
+            if (GetMem(pos, 8, out UInt64 temp, _abide_slow)) { res = (Int64)temp; return true; }
+            else { res = 0; return false; }
+        }
+        /// <summary>
+        /// Writes a 64-bit signed integer to memory
+        /// </summary>
+        /// <param name="pos">the position of the value in memory</param>
+        /// <param name="res">the resulting value</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool SetMem(UInt64 pos, Int64 val, bool _abide_slow = true)
+        {
+            return SetMem(pos, 8, (UInt64)val, _abide_slow);
+        }
+
+        /// <summary>
+        /// Reads a 32-bit signed integer from memory
+        /// </summary>
+        /// <param name="pos">the position of the value in memory</param>
+        /// <param name="res">the resulting value</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool GetMem(UInt64 pos, out Int32 res, bool _abide_slow = true)
+        {
+            if (GetMem(pos, 4, out UInt64 temp, _abide_slow)) { res = (Int32)temp; return true; }
+            else { res = 0; return false; }
+        }
+        /// <summary>
+        /// Writes a 32-bit unsigned integer to memory
+        /// </summary>
+        /// <param name="pos">the position of the value in memory</param>
+        /// <param name="res">the resulting value</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool SetMem(UInt64 pos, Int32 val, bool _abide_slow = true)
+        {
+            return SetMem(pos, 4, (UInt64)val, _abide_slow);
+        }
+
+        /// <summary>
+        /// Reads a 16-bit signed integer from memory
+        /// </summary>
+        /// <param name="pos">the position of the value in memory</param>
+        /// <param name="res">the resulting value</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool GetMem(UInt64 pos, out Int16 res, bool _abide_slow = true)
+        {
+            if (GetMem(pos, 2, out UInt64 temp, _abide_slow)) { res = (Int16)temp; return true; }
+            else { res = 0; return false; }
+        }
+        /// <summary>
+        /// Writes a 16-bit unsigned integer to memory
+        /// </summary>
+        /// <param name="pos">the position of the value in memory</param>
+        /// <param name="res">the resulting value</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool SetMem(UInt64 pos, Int16 val, bool _abide_slow = true)
+        {
+            return SetMem(pos, 2, (UInt64)val, _abide_slow);
+        }
+
+        /// <summary>
+        /// Reads an 8-bit signed integer from memory
+        /// </summary>
+        /// <param name="pos">the position of the value in memory</param>
+        /// <param name="res">the resulting value</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool GetMem(UInt64 pos, out sbyte res, bool _abide_slow = true)
+        {
+            if (GetMem(pos, 1, out UInt64 temp, _abide_slow)) { res = (sbyte)temp; return true; }
+            else { res = 0; return false; }
+        }
+        /// <summary>
+        /// Writes an 8-bit unsigned integer to memory
+        /// </summary>
+        /// <param name="pos">the position of the value in memory</param>
+        /// <param name="res">the resulting value</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool SetMem(UInt64 pos, sbyte val, bool _abide_slow = true)
+        {
+            return SetMem(pos, 1, (UInt64)val, _abide_slow);
+        }
+
+        // -------------------------
+
+        /// <summary>
+        /// Reads a 64-bit floating-point value from memory
+        /// </summary>
+        /// <param name="pos">the position of the value in memory</param>
+        /// <param name="res">the resulting value</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool GetMem(UInt64 pos, out double res, bool _abide_slow = true)
+        {
+            if (GetMem(pos, 4, out UInt64 temp, _abide_slow)) { res = AsDouble(temp); return true; }
+            else { res = 0; return false; }
+        }
+        /// <summary>
+        /// Writes a 64-bit floating-point value to memory
+        /// </summary>
+        /// <param name="pos">the position of the value in memory</param>
+        /// <param name="res">the resulting value</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool SetMem(UInt64 pos, double val, bool _abide_slow = true)
+        {
+            return SetMem(pos, 8, DoubleAsUInt64(val), _abide_slow);
+        }
+
+        /// <summary>
+        /// Reads a 32-bit floating-point value from memory
+        /// </summary>
+        /// <param name="pos">the position of the value in memory</param>
+        /// <param name="res">the resulting value</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool GetMem(UInt64 pos, out float res, bool _abide_slow = true)
+        {
+            if (GetMem(pos, 4, out UInt64 temp, _abide_slow)) { res = AsFloat(temp); return true; }
+            else { res = 0; return false; }
+        }
+        /// <summary>
+        /// Writes a 32-bit floating-point value to memory
+        /// </summary>
+        /// <param name="pos">the position of the value in memory</param>
+        /// <param name="res">the resulting value</param>
+        /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
+        public bool SetMem(UInt64 pos, float val, bool _abide_slow = true)
+        {
+            return SetMem(pos, 4, FloatAsUInt64(val), _abide_slow);
+        }
+
+        // -- additional memory utilities -- //
+
         /// <summary>
         /// Reads a null-terminated string from memory. Returns true if successful, otherwise fails with OutOfBounds and returns false
         /// </summary>
