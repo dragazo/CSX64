@@ -66,77 +66,77 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="CodeBox.cs">
+    <Compile Include="src\CodeBox.cs">
       <SubType>UserControl</SubType>
     </Compile>
-    <Compile Include="CodeBox.Designer.cs">
+    <Compile Include="src\CodeBox.Designer.cs">
       <DependentUpon>CodeBox.cs</DependentUpon>
     </Compile>
-    <Compile Include="CodeEditor.cs">
+    <Compile Include="src\CodeEditor.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="CodeEditor.Designer.cs">
+    <Compile Include="src\CodeEditor.Designer.cs">
       <DependentUpon>CodeEditor.cs</DependentUpon>
     </Compile>
-    <Compile Include="ColorPicker.cs">
+    <Compile Include="src\ColorPicker.cs">
       <SubType>UserControl</SubType>
     </Compile>
-    <Compile Include="ColorPicker.Designer.cs">
+    <Compile Include="src\ColorPicker.Designer.cs">
       <DependentUpon>ColorPicker.cs</DependentUpon>
     </Compile>
-    <Compile Include="ConsoleDisplay.cs">
+    <Compile Include="src\ConsoleDisplay.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="ConsoleDisplay.Designer.cs">
+    <Compile Include="src\ConsoleDisplay.Designer.cs">
       <DependentUpon>ConsoleDisplay.cs</DependentUpon>
     </Compile>
-    <Compile Include="csx64.cs" />
-    <Compile Include="ProcessorView.cs">
+    <Compile Include="src\csx64.cs" />
+    <Compile Include="src\ProcessorView.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="ProcessorView.Designer.cs">
+    <Compile Include="src\ProcessorView.Designer.cs">
       <DependentUpon>ProcessorView.cs</DependentUpon>
     </Compile>
-    <Compile Include="GraphicalDisplay.cs">
+    <Compile Include="src\GraphicalDisplay.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="GraphicalDisplay.Designer.cs">
+    <Compile Include="src\GraphicalDisplay.Designer.cs">
       <DependentUpon>GraphicalDisplay.cs</DependentUpon>
     </Compile>
-    <Compile Include="ProcessorViewSettingsDialog.cs">
+    <Compile Include="src\ProcessorViewSettingsDialog.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="ProcessorViewSettingsDialog.Designer.cs">
+    <Compile Include="src\ProcessorViewSettingsDialog.Designer.cs">
       <DependentUpon>ProcessorViewSettingsDialog.cs</DependentUpon>
     </Compile>
-    <Compile Include="Program.cs" />
+    <Compile Include="src\Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="RenameDialog.cs">
+    <Compile Include="src\RenameDialog.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="RenameDialog.Designer.cs">
+    <Compile Include="src\RenameDialog.Designer.cs">
       <DependentUpon>RenameDialog.cs</DependentUpon>
     </Compile>
-    <Compile Include="Settings.cs" />
-    <EmbeddedResource Include="CodeBox.resx">
+    <Compile Include="src\Settings.cs" />
+    <EmbeddedResource Include="src\CodeBox.resx">
       <DependentUpon>CodeBox.cs</DependentUpon>
     </EmbeddedResource>
-    <EmbeddedResource Include="CodeEditor.resx">
+    <EmbeddedResource Include="src\CodeEditor.resx">
       <DependentUpon>CodeEditor.cs</DependentUpon>
     </EmbeddedResource>
-    <EmbeddedResource Include="ColorPicker.resx">
+    <EmbeddedResource Include="src\ColorPicker.resx">
       <DependentUpon>ColorPicker.cs</DependentUpon>
     </EmbeddedResource>
-    <EmbeddedResource Include="ConsoleDisplay.resx">
+    <EmbeddedResource Include="src\ConsoleDisplay.resx">
       <DependentUpon>ConsoleDisplay.cs</DependentUpon>
     </EmbeddedResource>
-    <EmbeddedResource Include="ProcessorView.resx">
+    <EmbeddedResource Include="src\ProcessorView.resx">
       <DependentUpon>ProcessorView.cs</DependentUpon>
     </EmbeddedResource>
-    <EmbeddedResource Include="GraphicalDisplay.resx">
+    <EmbeddedResource Include="src\GraphicalDisplay.resx">
       <DependentUpon>GraphicalDisplay.cs</DependentUpon>
     </EmbeddedResource>
-    <EmbeddedResource Include="ProcessorViewSettingsDialog.resx">
+    <EmbeddedResource Include="src\ProcessorViewSettingsDialog.resx">
       <DependentUpon>ProcessorViewSettingsDialog.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="Properties\Resources.resx">
@@ -148,7 +148,7 @@
       <AutoGen>True</AutoGen>
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
-    <EmbeddedResource Include="RenameDialog.resx">
+    <EmbeddedResource Include="src\RenameDialog.resx">
       <DependentUpon>RenameDialog.cs</DependentUpon>
     </EmbeddedResource>
     <None Include="Properties\Settings.settings">
@@ -162,7 +162,7 @@
     </Compile>
   </ItemGroup>
   <ItemGroup>
-    <None Include="App.config" />
+    <None Include="src\App.config" />
   </ItemGroup>
   <ItemGroup>
     <BootstrapperPackage Include=".NETFramework,Version=v4.5.2">
