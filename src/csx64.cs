@@ -385,6 +385,65 @@ namespace csx64
             }
         }
 
+        /// <summary>
+        /// Represents a file descriptor used by the <see cref="CSX64"/> processor
+        /// </summary>
+        public sealed class FileDescriptor
+        {
+            /// <summary>
+            /// Marks that this stream is managed by the processor.
+            /// Managed files can be opened and closed by the processor, and are closed upon client program termination
+            /// </summary>
+            public bool Managed;
+            /// <summary>
+            /// Marks that the stream has an associated interactive input from external code (i.e. not client code).
+            /// Reading past EOF on an interactive stream sets the SuspendedRead flag of the associated <see cref="CSX64"/>
+            /// </summary>
+            public bool Interactive;
+
+            /// <summary>
+            /// Returns true iff the file descriptor is currently in use
+            /// </summary>
+            public bool InUse => __Stream != null;
+
+            /// <summary>
+            /// The underlying stream associated with this file descriptor
+            /// </summary>
+            internal Stream __Stream;
+
+            // ---------------------
+
+            /// <summary>
+            /// Assigns the given data to this stream. Throws <see cref="AccessViolationException"/> if already in use
+            /// </summary>
+            /// <param name="stream">the stream source</param>
+            /// <param name="managed">marks that this stream is considered "managed". see CSX64 manual for more information</param>
+            /// <param name="interactive">marks that this stream is considered "interactive" see CSX64 manual for more information</param>
+            /// <exception cref="AccessViolationException"></exception>
+            public void Open(Stream stream, bool managed, bool interactive)
+            {
+                if (InUse) throw new AccessViolationException("Attempt to assign to a FileDescriptor that was currently in use");
+
+                __Stream = stream;
+                Managed = managed;
+                Interactive = interactive;
+            }
+            /// <summary>
+            /// Closes the file. If already closed, does nothing
+            /// </summary>
+            public void Close()
+            {
+                if (InUse)
+                {
+                    // close the stream
+                    try { __Stream.Close(); }
+                    catch (Exception) { }
+                    // ensure stream is nulled even if close() throws
+                    finally { __Stream = null; }
+                }
+            }
+        }
+
         // --------------------
         // -- Execution Data --
         // --------------------
@@ -394,16 +453,7 @@ namespace csx64
 
         private byte[] Memory = null;
 
-        private Stream[] FileDescriptors = new Stream[NFileDescriptors];
-        /// <summary>
-        /// Marks if the file descriptor is managed (i.e. created by client code).
-        /// if file descriptor is not in use, this flag is undefined
-        /// </summary>
-        private bool[] FileDescriptor_Managed = new bool[NFileDescriptors];
-        /// <summary>
-        /// Marks if an unmanaged file descriptor is interactive. If fd is managed, this value is undefined
-        /// </summary>
-        private bool[] FileDescriptor_Interactive = new bool[NFileDescriptors];
+        private FileDescriptor[] FileDescriptors = new FileDescriptor[NFileDescriptors];
 
         /// <summary>
         /// The current execution positon (executed on next tick)
@@ -2134,8 +2184,8 @@ namespace csx64
             // allocate registers
             for (int i = 0; i < Registers.Length; ++i) Registers[i] = new Register();
 
-            // ensure file descriptors are nulled
-            for (int i = 0; i < NFileDescriptors; ++i) FileDescriptors[i] = null;
+            // allocate file descriptors
+            for (int i = 0; i < NFileDescriptors; ++i) FileDescriptors[i] = new FileDescriptor() { __Stream = null };
 
             // define initial state
             Running = false;
@@ -2244,25 +2294,10 @@ namespace csx64
         public FlagsRegister GetFlags() => Flags;
 
         /// <summary>
-        /// Gets the file descriptor at the specified index. DO NOT CLOSE/OPEN THIS OBJECT. USE CLOSE/OPEN UTILITY FUNCTIONS
+        /// Gets the file descriptor at the specified index.
         /// </summary>
         /// <param name="index">the index of the file descriptor</param>
-        public Stream GetFileDescriptor(int index) => FileDescriptors[index];
-        /// <summary>
-        /// Sets the specified file descriptor. if the file descriptor index specified is currently in use, throws argument exception.
-        /// File descriptors set by this method are "unmanaged" and will not be closed upon termination.
-        /// </summary>
-        /// <param name="index">the index of the file descriptor to set</param>
-        /// <param name="stream">the stream to set to</param>
-        /// <exception cref="ArgumentException"></exception>
-        public void SetUnmanagedStream(int index, Stream stream, bool interactive)
-        {
-            if (FileDescriptors[index] != null) throw new ArgumentException($"File descriptor {index} was already in use");
-
-            FileDescriptors[index] = stream;
-            FileDescriptor_Managed[index] = false;
-            FileDescriptor_Interactive[index] = interactive;
-        }
+        public FileDescriptor GetFileDescriptor(int index) => FileDescriptors[index];
 
         /// <summary>
         /// Handles syscall instructions from the processor. Returns true iff the syscall was handled successfully.
@@ -2908,14 +2943,22 @@ namespace csx64
         // ---------------
 
         /// <summary>
-        /// Finds the first available file descriptor. Returns the index of the available spot, or UInt64.MaxValue upon failure
+        /// Finds the first available file descriptor, or null if there are none available
         /// </summary>
-        private UInt64 FindOpenFileDescriptor()
+        /// <param name="index">the index of the result</param>
+        public FileDescriptor FindAvailableFileDescriptor(out UInt64 index)
         {
-            for (int i = 0; i < FileDescriptors.Length; ++i)
-                if (FileDescriptors[i] == null) return (UInt64)i;
+            index = UInt64.MaxValue;
 
-            return UInt64.MaxValue;
+            // get the first available file descriptor
+            for (int i = 0; i < FileDescriptors.Length; ++i)
+                if (!FileDescriptors[i].InUse)
+                {
+                    index = (UInt64)i;
+                    return FileDescriptors[i];
+                }
+
+            return null;
         }
 
         /// <summary>
@@ -2925,19 +2968,13 @@ namespace csx64
         private void CloseFiles()
         {
             // sever all files from this object
-            for (int i = 0; i < NFileDescriptors; ++i)
-                if (FileDescriptors[i] != null)
-                {
-                    // only close managed file descriptors
-                    if (FileDescriptor_Managed[i])
-                    {
-                        try { FileDescriptors[i].Close(); }
-                        catch (Exception) { }
-                    }
-
-                    // sever the link
-                    FileDescriptors[i] = null;
-                }
+            foreach (FileDescriptor fd in FileDescriptors)
+            {
+                // if it's managed, close it
+                if (fd.Managed) fd.Close();
+                // otherwise unmanaged, just disassociate it
+                else fd.__Stream = null;
+            }
         }
 
         /// <summary>
@@ -2948,23 +2985,24 @@ namespace csx64
         /// <param name="count">the number of bytes to read</param>
         private bool FS_Read()
         {
-            // shorthand the file descriptor
-            UInt64 fd = Registers[1].x64;
+            // get fd index
+            UInt64 fd_index = Registers[1].x64;
+            if (fd_index >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
 
-            // make sure fd is valid
-            if (fd >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
-            if (FileDescriptors[fd] == null) { Terminate(ErrorCode.FDNotInUse); return false; }
+            // get fd
+            FileDescriptor fd = FileDescriptors[fd_index];
+            if (!fd.InUse) { Terminate(ErrorCode.FDNotInUse); return false; }
 
             // attempt to read from the file into memory
             try
             {
                 // read from the file
-                int n = FileDescriptors[fd].Read(Memory, (int)Registers[2].x64, (int)Registers[3].x64);
+                int n = fd.__Stream.Read(Memory, (int)Registers[2].x64, (int)Registers[3].x64);
 
                 // if we got nothing but it's interactive
-                if (n == 0 && !FileDescriptor_Managed[fd] && FileDescriptor_Interactive[fd])
+                if (n == 0 && fd.Interactive)
                 {
-                    --Pos; // await further data by repeating the syscall
+                    --Pos;                // await further data by repeating the syscall
                     SuspendedRead = true; // suspend execution until there's more data
                 }
                 // otherwise return num chars read from file
@@ -2982,15 +3020,16 @@ namespace csx64
         /// <param name="count">the number of bytes to read</param>
         private bool FS_Write()
         {
-            // shorthand the file descriptor
-            UInt64 fd = Registers[1].x64;
+            // get fd index
+            UInt64 fd_index = Registers[1].x64;
+            if (fd_index >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
 
-            // make sure fd is valid
-            if (fd >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
-            if (FileDescriptors[fd] == null) { Terminate(ErrorCode.FDNotInUse); return false; }
+            // get fd
+            FileDescriptor fd = FileDescriptors[fd_index];
+            if (!fd.InUse) { Terminate(ErrorCode.FDNotInUse); return false; }
 
             // attempt to write from memory to the file
-            try { FileDescriptors[fd].Write(Memory, (int)Registers[2].x64, (int)Registers[3].x64); return true; }
+            try { fd.__Stream.Write(Memory, (int)Registers[2].x64, (int)Registers[3].x64); return true; }
             catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
         }
 
@@ -3005,8 +3044,9 @@ namespace csx64
             // make sure we're allowed to do this
             if (!Flags.FileSystem) { Terminate(ErrorCode.FSDisabled); return false; }
 
-            UInt64 index = FindOpenFileDescriptor();
-            if (index == UInt64.MaxValue) { Terminate(ErrorCode.InsufficientFDs); return false; }
+            // get an available file descriptor
+            FileDescriptor fd = FindAvailableFileDescriptor(out UInt64 fd_index);
+            if (fd == null) { Terminate(ErrorCode.InsufficientFDs); return false; }
 
             // get path
             if (!GetString(Registers[1].x64, 2, out string path)) return false;
@@ -3016,13 +3056,12 @@ namespace csx64
             // attempt to open the file
             try { f = new FileStream(path, (FileMode)Registers[2].x64, (FileAccess)Registers[3].x64); }
             catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
-            
-            // store in file descriptors
-            FileDescriptors[index] = f;
-            FileDescriptor_Managed[index] = true;
 
+            // store in the file descriptor
+            fd.Open(f, true, false);
             // return file descriptor index
-            Registers[0].x64 = index;
+            Registers[0].x64 = fd_index;
+
             return true;
         }
         /// <summary>
@@ -3032,24 +3071,22 @@ namespace csx64
         /// <param name="fd">The file descriptor to close</param>
         private bool FS_Close()
         {
-            // make sure we're allowed to do this
-            if (!Flags.FileSystem) { Terminate(ErrorCode.FSDisabled); return false; }
+            // get fd index
+            UInt64 fd_index = Registers[1].x64;
+            if (fd_index >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
 
-            // shorthand the file descriptor
-            UInt64 fd = Registers[1].x64;
-
-            // make sure fd is valid
-            if (fd >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
-            if (FileDescriptors[fd] == null) { Terminate(ErrorCode.FDNotInUse); return false; }
+            // get fd
+            FileDescriptor fd = FileDescriptors[fd_index];
+            if (!fd.InUse) { Terminate(ErrorCode.FDNotInUse); return false; }
 
             // we can't close an unmanaged stream
-            if (!FileDescriptor_Managed[fd]) { Terminate(ErrorCode.AccessViolation); return false; }
+            if (!fd.Managed) { Terminate(ErrorCode.AccessViolation); return false; }
 
             // attempt to close the file
-            try { FileDescriptors[fd].Close(); return true; }
+            try { fd.__Stream.Close(); return true; }
             catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
-            // ensure we null even upon error in close
-            finally { FileDescriptors[fd] = null; }
+            // ensure we null the stream even upon error in close
+            finally { fd.__Stream = null; }
         }
 
         /// <summary>
@@ -3058,15 +3095,16 @@ namespace csx64
         /// <param name="fd">the file descriptor to flush</param>
         private bool FS_Flush()
         {
-            // shorthand the file descriptor
-            UInt64 fd = Registers[1].x64;
+            // get fd index
+            UInt64 fd_index = Registers[1].x64;
+            if (fd_index >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
 
-            // make sure fd is valid
-            if (fd >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
-            if (FileDescriptors[fd] == null) { Terminate(ErrorCode.FDNotInUse); return false; }
+            // get fd
+            FileDescriptor fd = FileDescriptors[fd_index];
+            if (!fd.InUse) { Terminate(ErrorCode.FDNotInUse); return false; }
 
             // attempt to flush buffer
-            try { FileDescriptors[fd].Flush(); return true; }
+            try { fd.__Stream.Flush(); return true; }
             catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
         }
 
@@ -3078,15 +3116,16 @@ namespace csx64
         /// <param name="mode">the offset mode</param>
         private bool FS_Seek()
         {
-            // shorthand the file descriptor
-            UInt64 fd = Registers[1].x64;
+            // get fd index
+            UInt64 fd_index = Registers[1].x64;
+            if (fd_index >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
 
-            // make sure fd is valid
-            if (fd >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
-            if (FileDescriptors[fd] == null) { Terminate(ErrorCode.FDNotInUse); return false; }
+            // get fd
+            FileDescriptor fd = FileDescriptors[fd_index];
+            if (!fd.InUse) { Terminate(ErrorCode.FDNotInUse); return false; }
 
             // attempt to seek in the file
-            try { FileDescriptors[fd].Seek((long)Registers[2].x64, (SeekOrigin)Registers[3].x64); return true; }
+            try { fd.__Stream.Seek((long)Registers[2].x64, (SeekOrigin)Registers[3].x64); return true; }
             catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
         }
         /// <summary>
@@ -3096,15 +3135,16 @@ namespace csx64
         /// <param name="pos">position of stream upon success</param>
         private bool FS_Tell()
         {
-            // shorthand the file descriptor
-            UInt64 fd = Registers[1].x64;
+            // get fd index
+            UInt64 fd_index = Registers[1].x64;
+            if (fd_index >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
 
-            // make sure fd is valid
-            if (fd >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
-            if (FileDescriptors[fd] == null) { Terminate(ErrorCode.FDNotInUse); return false; }
+            // get fd
+            FileDescriptor fd = FileDescriptors[fd_index];
+            if (!fd.InUse) { Terminate(ErrorCode.FDNotInUse); return false; }
 
             // attempt to read from memory to the file
-            try { Registers[0].x64 = (UInt64)FileDescriptors[fd].Position; return true; }
+            try { Registers[0].x64 = (UInt64)fd.__Stream.Position; return true; }
             catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
         }
 
@@ -3726,15 +3766,20 @@ namespace csx64
             // -- Assembly Functions --
             // ------------------------
 
-            private const char LabelDefChar = ':';
-            private const char OpSizeSeparatorChar = ':';
+            public const char CommentChar = ';';
+            public const char LabelDefChar = ':';
+            public const char OpSizeSeparatorChar = ':';
 
             public const UInt64 EmissionMaxMultiplier = 1000000;
-            private const char EmissionMultiplierChar = ':';
+            public const char EmissionMultiplierChar = '#';
 
+            /// <summary>
+            /// Splits the raw line into its separate components. The raw line should not have a comment section.
+            /// </summary>
+            /// <param name="rawline">the raw line to parse</param>
             public bool SplitLine(string rawline)
             {
-                // (label: label: ...) (op(:size) (arg, arg, ...)) #comment
+                // (label: label: ...) (op(:size) (arg, arg, ...))
 
                 int pos = 0, end; // position in line parsing
                 int quote;        // index of openning quote in args
@@ -4010,6 +4055,7 @@ namespace csx64
 
                 int pos = 0, end; // position in token
                 int depth;        // parenthesis depth
+                int quote;        // the starting index of a quote (or -1 if not currently inside a quote)
 
                 bool numeric; // flags for enabling exponent notation for floating-point
                 bool exp;
@@ -4038,24 +4084,39 @@ namespace csx64
                     // consume unary ops
                     for (; pos < token.Length && UnaryOps.Contains(token[pos]); ++pos) unaryOps.Push(token[pos]);
 
-                    depth = 0; // initial depth of 0
+                    depth = 0;  // initial depth of 0
+                    quote = -1; // initially not in a quote
 
                     numeric = pos < token.Length && char.IsDigit(token[pos]); // flag if this is a numeric literal
                     exp = false; // no exponent yet
 
                     // find next binary op
-                    for (end = pos; end < token.Length && (depth > 0 || !TryGetOp(token, end, out op, out oplen) || (numeric && exp)); ++end)
+                    for (end = pos; end < token.Length && (depth > 0 || quote >= 0 || (numeric && exp) || !TryGetOp(token, end, out op, out oplen)); ++end)
                     {
-                        if (token[end] == '(') ++depth;
-                        else if (token[end] == ')') --depth;
-                        else if (numeric && token[end] == 'e' || token[end] == 'E') exp = true; // e or E begins exponent
-                        else if (numeric && token[end] == '+' || token[end] == '-' || char.IsDigit(token[end])) exp = false; // + or - or a digit ends exponent safety net
+                        // if we're not in a quote
+                        if (quote < 0)
+                        {
+                            // account for important characters
+                            if (token[end] == '(') ++depth;
+                            else if (token[end] == ')') --depth;
+                            else if (numeric && token[end] == 'e' || token[end] == 'E') exp = true; // e or E begins exponent
+                            else if (numeric && token[end] == '+' || token[end] == '-' || char.IsDigit(token[end])) exp = false; // + or - or a digit ends exponent safety net
+                            else if (token[end] == '\'') quote = end; // single quote marks start of character literal
 
-                        // can't ever have negative depth
-                        if (depth < 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched parenthesis \"{token}\""); return false; }
+                            // can't ever have negative depth
+                            if (depth < 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched parenthesis \"{token}\""); return false; }
+                        }
+                        // otherwise we're in a quote
+                        else
+                        {
+                            // if we have a matching quote, break out of quote mode
+                            if (token[end] == token[quote]) quote = -1;
+                        }
                     }
                     // if depth isn't back to 0, there was a parens mismatch
                     if (depth != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched parenthesis \"{token}\""); return false; }
+                    // if depth isn't back to 0, there was a parens mismatch
+                    if (quote >= 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched quotation in character literal \"{token}\""); return false; }
                     // if pos == end we'll have an empty token
                     if (pos == end) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Empty token encountered in expression \"{token}\""); return false; }
 
@@ -4189,42 +4250,59 @@ namespace csx64
                 return true;
             }
 
-            public bool TryParseRegister(string token, out UInt64 val)
+            /// <summary>
+            /// Attempts to parse an imm that has a prefix. If the imm is a compound expression, it must be parenthesized
+            /// </summary>
+            /// <param name="token">token to parse</param>
+            /// <param name="prefix">the prefix the imm is required to have</param>
+            /// <param name="val">resulting value</param>
+            /// <param name="floating">results in true if val is floating-point</param>
+            public bool TryParseInstantPrefixedImm(string token, string prefix, out UInt64 val, out bool floating)
             {
                 val = 0;
+                floating = false;
 
-                // registers prefaced with $
-                if (token.Length < 2 || token[0] != '$') { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Invalid register format encountered \"{token}\""); return false; }
+                // must begin with prefix
+                if (!token.StartsWith(prefix)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Token did not start with \"{prefix}\" prefix: \"{token}\""); return false; }
+                // aside from the prefix, must not be empty
+                if (token.Length == prefix.Length) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Empty token encountered after \"{prefix}\" prefix: \"{token}\""); return false; }
 
-                int end = 0; // ending of register expression token
+                int end; // ending of expression token
 
                 // if this starts parenthetical region
-                if (token[1] == '(')
+                if (token[prefix.Length] == '(')
                 {
                     int depth = 1; // depth of 1
 
                     // start searching for ending parens after first parens
-                    for (end = 2; end < token.Length && depth > 0; ++end)
+                    for (end = prefix.Length + 1; end < token.Length && depth > 0; ++end)
                     {
                         if (token[end] == '(') ++depth;
                         else if (token[end] == ')') --depth;
                     }
 
                     // make sure we reached zero depth
-                    if (depth != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched parenthesis in register expression \"{token.Substring(1, end - 1)}\""); return false; }
+                    if (depth != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched parenthesis in prefixed expression \"{token}\""); return false; }
                 }
                 // otherwise normal symbol
                 else
                 {
                     // take all legal chars
-                    for (end = 1; end < token.Length && (char.IsLetterOrDigit(token[end]) || token[end] == '_'); ++end) ;
+                    for (end = prefix.Length; end < token.Length && (char.IsLetterOrDigit(token[end]) || token[end] == '_'); ++end) ;
                 }
 
                 // make sure we consumed the entire string
-                if (end != token.Length) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expressions used as register ids must be parenthesized"); return false; }
+                if (end != token.Length) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Compound expressions used as prefixed expressions must be parenthesized \"{token}\""); return false; }
 
-                // register index must be instant imm
-                if (!TryParseInstantImm(token.Substring(1, end - 1), out val, out bool floating)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to parse register index \"{token.Substring(1, end - 1)}\"\n-> {res.ErrorMsg}"); return false; }
+                // prefix index must be instant imm
+                if (!TryParseInstantImm(token.Substring(prefix.Length), out val, out floating)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to parse instant prefixed imm \"{token}\"\n-> {res.ErrorMsg}"); return false; }
+
+                return true;
+            }
+            public bool TryParseRegister(string token, out UInt64 val)
+            {
+                // get the prefixed instant imm
+                if (!TryParseInstantPrefixedImm(token, "$", out val, out bool floating)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{token}\" as a valid register address\n-> {res.ErrorMsg}"); return false; }
                 
                 // ensure not floating and in proper range
                 if (floating) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Attempt to use floating point value to specify register \"{token}\""); return false; }
@@ -4672,21 +4750,27 @@ namespace csx64
                     // if a multiplier
                     if (args[i][0] == EmissionMultiplierChar)
                     {
-                        // get the multiplier and ensure is valid
-                        if (!TryParseInstantImm(args[i].Substring(1), out mult, out floating)) return false;
+                        // cannot be used immediately following another multiplier
+                        if (i > 0 && args[i - 1][0] == EmissionMultiplierChar) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Emission multiplier cannot immediately follow an emission multiplier"); return false; }
+                        // cannot be used immediately following a string
+                        if (i > 0 && args[i - 1][0] == '"') { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Emission multiplier cannot immediately follow a string argument"); return false; }
+
+                        // get the prefixed multiplier
+                        if (!TryParseInstantPrefixedImm(args[i], EmissionMultiplierChar.ToString(), out mult, out floating)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[i]}\" as an emission multiplier\n-> {res.ErrorMsg}"); return false; }
+
+                        // ensure the multiplier we got was valid
                         if (floating) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Emission multiplier cannot be floating point"); return false; }
                         if (mult > EmissionMaxMultiplier) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Emission multiplier cannot exceed {EmissionMaxMultiplier}. Got {mult}"); return false; }
                         if (mult == 0) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Emission multiplier cannot be zero"); return false; }
 
-                        // account for first written value
-                        if (i > 0 && args[i - 1][0] != EmissionMultiplierChar) --mult;
-
-                        for (UInt64 j = 0; j < mult; ++j)
+                        // already wrote 1 copy, now write the others
+                        for (UInt64 j = 1; j < mult; ++j)
                             if (!TryAppendExpr(Size(sizecode), hole)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
                     }
                     // if a string
-                    else if (args[i][0] == '"' || args[i][0] == '\'')
+                    else if (args[i][0] == '"')
                     {
+                        // make sure it's properly closed
                         if (args[i][0] != args[i][args[i].Length - 1]) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: String literal must be enclosed in single or double quotes"); return false; }
 
                         // dump the contents into memory
@@ -4703,7 +4787,7 @@ namespace csx64
                     {
                         // get the value
                         if (!TryParseImm(args[i], out hole)) return false;
-
+                        
                         // make one of them
                         if (!TryAppendExpr(Size(sizecode), hole)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
                     }
@@ -4873,13 +4957,13 @@ namespace csx64
             while (pos < code.Length)
             {
                 // find the next separator
-                for (end = pos; end < code.Length && code[end] != '\n' && code[end] != '#'; ++end) ;
+                for (end = pos; end < code.Length && code[end] != '\n' && code[end] != AssembleArgs.CommentChar; ++end) ;
 
                 ++args.line; // advance line counter
                 // split the line
                 if (!args.SplitLine(code.Substring(pos, end - pos))) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Failed to parse line\n-> {args.res.ErrorMsg}");
                 // if the separator was a comment character, consume the rest of the line as well as no-op
-                if (end < code.Length && code[end] == '#')
+                if (end < code.Length && code[end] == AssembleArgs.CommentChar)
                     for (; end < code.Length && code[end] != '\n'; ++end) ;
 
                 // process marked labels

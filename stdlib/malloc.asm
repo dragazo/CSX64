@@ -51,3 +51,14 @@ free:
 	mov:8 [$1-9], 0 # mark as unused
 	
 	.end: ret
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    

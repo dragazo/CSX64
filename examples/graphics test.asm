@@ -9,12 +9,12 @@ update_cursor_pos:
     mov $0, sys_getmousepos
     syscall
     
-    # center on x
+    ; center on x
     mov:32 $0, [rect_w]
     sr:32 $0, 1
     sub:32 $1, $0
     
-    # center on y
+    ; center on y
     mov:32 $0, [rect_h]
     sr:32 $0, 1
     sub:32 $2, $0
@@ -25,15 +25,15 @@ update_cursor_pos:
     ret
     
 render:
-    # clear the screen
+    ; clear the screen
     mov $0, sys_clear
     mov:32 $1, [back_color]
     syscall
     
-    # update cursor pos
+    ; update cursor pos
     call [update_cursor_pos]
     
-    # get proper brush for rendering cursor
+    ; get proper brush for rendering cursor
     mov $0, sys_getmousedown
     syscall
     movz $1, mouse_brush
@@ -41,18 +41,18 @@ render:
     mov $0, sys_setbrush
     syscall
     
-    # draw cursor
+    ; draw cursor
     mov $0, sys_fillellipse
     mov $1, rect
     syscall
     
-    # render the frame
+    ; render the frame
     mov $0, sys_render
     syscall
     
     ret
 
-# -----------------------------------
+; -----------------------------------
 
 back_color: emit:32 0xff7da3e0
 mouse_brush:

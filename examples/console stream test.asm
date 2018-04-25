@@ -16,9 +16,9 @@ main:
     mov $3, name_len
     syscall
     
-    # store length of resulting name in $10
+    ; store length of resulting name in $10
     mov $10, $0
-    sub $10, 4 # get rid of the new line char (-4 because UTF-16 \r\n)
+    sub $10, 4 ; get rid of the new line char (-4 because UTF-16 \r\n)
     
     mov $0, sys_write
     mov $1, stdout
@@ -39,7 +39,7 @@ main:
 q: emit:16 "what's your name? "
 .e: def q_len, .e-q
 
-name: emit:16 :32
+name: emit:16 #32
 .e: def name_len, .e-name
 
 a: emit:16 "so your name is "

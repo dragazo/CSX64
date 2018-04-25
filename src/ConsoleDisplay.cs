@@ -317,9 +317,9 @@ namespace csx64
             if (!stdio_ready) throw new NullReferenceException("Must call ConsoleDisplay.SetupStdio before beginning execution");
 
             // link stdio streams to the processor
-            C.SetUnmanagedStream(0, stdin, stdin_interactive);
-            C.SetUnmanagedStream(1, stdout, false);
-            C.SetUnmanagedStream(2, stderr, false);
+            C.GetFileDescriptor(0).Open(stdin, false, stdin_interactive);
+            C.GetFileDescriptor(1).Open(stdout, false, false);
+            C.GetFileDescriptor(2).Open(stderr, false, false);
 
             while (C.Running)
             {

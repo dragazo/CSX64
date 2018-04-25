@@ -53,7 +53,7 @@ strcmp:
     .ret:
         # extend result to full 64 bits
         mov:16 $0, $3
-        ux 64, $0
+        sx 16, $0
         ret
 
 
