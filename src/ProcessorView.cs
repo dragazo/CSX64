@@ -74,7 +74,7 @@ namespace csx64
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
-
+            
             // alias graphics object and flags register
             Graphics g = e.Graphics;
             CSX64.FlagsRegister f = Computer.GetFlags();

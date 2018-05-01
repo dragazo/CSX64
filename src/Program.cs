@@ -36,12 +36,14 @@ namespace csx64
         // ---------------------------------
 
         private const string HelpMessage =
+            "\n" +
             "usage: csx64 [<options>] [--] <pathspec>...\n" +
             "\n" +
-            "    -h, --help           shows this help mesage\n" +
-            "    -g, --graphical      executes a program via the graphical client\n" +
-            "    -a, --assemble       assembly files should be assembled into object files\n" +
-            "    -l, --link           object files should be linked into an executable\n" +
+            "    -h, --help             shows this help mesage\n" +
+            "    -g, --graphical        executes a program via the graphical client\n" +
+            "    -a, --assemble         assembly files should be assembled into object files\n" +
+            "    -l, --link             object files should be linked into an executable\n" +
+            "    -o, --out <pathspec>   specifies the output path. if not provided, will usually take on a default value\n" +
             "\n" +
             "if no options are provided, will execute a program via the console client\n" +
             "";
@@ -50,9 +52,9 @@ namespace csx64
         /// Prints a message to the user (console or message box)
         /// </summary>
         /// <param name="msg">message to print</param>
-        private static void Print(string msg, string title = "")
+        private static void Print(string msg)
         {
-            MessageBox.Show(msg, title);
+            Console.WriteLine(msg);
         }
 
         /// <summary>
@@ -73,7 +75,8 @@ namespace csx64
             // otherwise we're doing something special
             else
             {
-                List<string> paths = new List<string>();             // provided paths
+                List<string> paths = new List<string>();             // input paths
+                string output = null;                                // output path
                 ProgramAction action = ProgramAction.ExecuteConsole; // requested action
 
                 // process the terminal args
@@ -86,21 +89,24 @@ namespace csx64
                         case "--graphical": if (action != ProgramAction.ExecuteConsole) { Print("usage error - see -h for help"); return 0; } action = ProgramAction.ExecuteGraphical; break;
                         case "--assemble": if (action != ProgramAction.ExecuteConsole) { Print("usage error - see -h for help"); return 0; } action = ProgramAction.Assemble; break;
                         case "--link": if (action != ProgramAction.ExecuteConsole) { Print("usage error - see -h for help"); return 0; } action = ProgramAction.Link; break;
+                        case "--output": if (output != null || i + 1 >= args.Length) { Print("usage error - see -h for help"); return 0; } output = args[++i]; break;
 
                         default:
                             // do the short names
                             if (0 < args[i].Length && args[i][0] == '-')
                             {
-                                for (int j = 1; j < args[i].Length; ++j)
+                                string arg = args[i]; // record parsing arg (i may change upon -o option)
+                                for (int j = 1; j < arg.Length; ++j)
                                 {
-                                    switch (args[i][j])
+                                    switch (arg[j])
                                     {
                                         case 'h': Print(HelpMessage); return 0;
                                         case 'g': if (action != ProgramAction.ExecuteConsole) { Print("usage error - see -h for help"); return 0; } action = ProgramAction.ExecuteGraphical; break;
                                         case 'a': if (action != ProgramAction.ExecuteConsole) { Print("usage error - see -h for help"); return 0; } action = ProgramAction.Assemble; break;
                                         case 'l': if (action != ProgramAction.ExecuteConsole) { Print("usage error - see -h for help"); return 0; } action = ProgramAction.Link; break;
+                                        case 'o': if (output != null || i + 1 >= args.Length) { Print("usage error - see -h for help"); return 0; } output = args[++i]; break;
 
-                                        default: Print($"unknown option '{args[i][j]}' see -h for help"); return 0;
+                                        default: Print($"unknown option '{arg[j]}' see -h for help"); return 0;
                                     }
                                 }
                             }
@@ -117,7 +123,7 @@ namespace csx64
                     case ProgramAction.ExecuteConsole:
                         if (paths.Count != 1) { Print("Execution mode expected one argument\n"); return 0; }
 
-                        RunConsoleClient(paths[0]);
+                        RunRawConsole(paths[0]);
                         break;
                     case ProgramAction.ExecuteGraphical:
                         if (paths.Count != 1) { Print("Execution mode expected one argument\n"); return 0; }
@@ -126,21 +132,23 @@ namespace csx64
                         break;
 
                     case ProgramAction.Assemble:
-                        if (paths.Count != 2) { Print("Assemble mode expected two arguments\n"); return 0; }
-
-                        Assemble(paths[0], paths[1]);
+                        // if no output is provided, batch process
+                        if (output == null)
+                        {
+                            foreach (string path in paths) Assemble(path);
+                        }
+                        // otherwise, we're expecting only one input with a named output
+                        else
+                        {
+                            if (paths.Count != 1) { Print("Assemble mode with an explicit output expected only one input assembly file\n"); return 0; }
+                            Assemble(paths[0], output);
+                        }
                         break;
                     case ProgramAction.Link:
-                        if (paths.Count < 2) { Print("Link mode expected 1 or more object files and an output path"); return 0; }
+                        // if no output was specified, provide a default
+                        if (output == null) output = "a.exe";
                         
-                        {
-                            // last path is desination
-                            string dest = paths[paths.Count - 1];
-                            // remove from list of linking files
-                            paths.RemoveAt(paths.Count - 1);
-
-                            Link(paths, dest);
-                        }
+                        Link(paths, output);
                         break;
                 }
             }
@@ -336,7 +344,7 @@ namespace csx64
             catch (IOException) { Print($"An error occurred while reading file \"{path}\""); return false; }
 
             // things from BinaryFormatter.Serialize
-            catch (SerializationException) { Print($"An error occurred during serialization of object file \"{path}\""); return false; }
+            catch (SerializationException) { Print($"An error occurred while saving object file \"{path}\""); return false; }
             catch (SecurityException) { Print($"You do not have permission to serialize object file \"{path}\""); return false; }
 
             // everything else that might happen for some reason
@@ -379,7 +387,7 @@ namespace csx64
             catch (IOException) { Print($"An error occurred while reading file \"{path}\""); return false; }
 
             // things from BinaryFormatter.Deserialize
-            catch (SerializationException) { Print($"An error occurred during serialization of object file \"{path}\""); return false; }
+            catch (SerializationException) { Print($"file \"{path}\" was not an object file"); return false; }
             catch (SecurityException) { Print($"You do not have permission to serialize object file \"{path}\""); return false; }
 
             // things from casting after deserialization
@@ -414,8 +422,17 @@ namespace csx64
                 return SaveObjectFile(to, obj);
             }
             // otherwise show error message
-            else { Print(res.ErrorMsg, "Assemble Error"); return false; }
+            else { Print($"Assemble Error:\n{res.ErrorMsg}"); return false; }
         }
+        /// <summary>
+        /// Assembles the (from) file into an object file and saves it as the same name but with a .o extension
+        /// </summary>
+        /// <param name="from">the source assembly file</param>
+        private static bool Assemble(string from)
+        {
+            return Assemble(from, Path.ChangeExtension(from, ".o"));
+        }
+
         /// <summary>
         /// Links several object files to create an executable and saves it to the (to) file. Returns true if successful
         /// </summary>
@@ -438,7 +455,7 @@ namespace csx64
                 return SaveBinaryFile(to, exe);
             }
             // otherwise show error message
-            else { Print(res.ErrorMsg, "Link Error"); return false; }
+            else { Print($"Link Error:\n{res.ErrorMsg}"); return false; }
         }
 
         // -- execution -- //
@@ -447,13 +464,13 @@ namespace csx64
         /// Executes a program via the console client. returns true if there were no errors
         /// </summary>
         /// <param name="path">the file to execute</param>
-        private static bool RunConsoleClient(string path)
+        private static bool RunRawConsole(string path)
         {
             // read the binary data
             if (!LoadBinaryFile(path, out byte[] exe)) return false;
 
             // run as a console client and return success flag
-            return RunConsoleClient(exe);
+            return RunRawConsole(exe);
         }
         /// <summary>
         /// Executes a program via the graphical client. returns true if there were no errors
@@ -472,7 +489,7 @@ namespace csx64
         /// Executes a program via the console client. returns true if there were no errors
         /// </summary>
         /// <param name="exe">the code to execute</param>
-        private static bool RunConsoleClient(byte[] exe)
+        private static bool RunRawConsole(byte[] exe)
         {
             // create the computer
             using (CSX64 computer = new CSX64())
@@ -480,22 +497,13 @@ namespace csx64
                 // initialize program
                 if (!computer.Initialize(exe)) { Print("Failed to initialize program"); return false; }
 
-                // create the console client
-                using (ConsoleClient console = new ConsoleClient(computer))
-                {
-                    // load colors
-                    console.BackColor = BackColor;
-                    console.TextColor = ForeColor;
+                // tie standard streams
+                computer.GetFileDescriptor(0).Open(Console.OpenStandardInput(), false, true);
+                computer.GetFileDescriptor(1).Open(Console.OpenStandardOutput(), false, false);
+                computer.GetFileDescriptor(2).Open(Console.OpenStandardError(), false, false);
 
-                    // create the standard streams
-                    using (Stream stdin = new MemoryStream(), stdout = new MemoryStream())
-                    {
-                        // set up streams
-                        console.SetupStdio(stdin, stdout, stdout, true);
-                        // begin execution
-                        console.ShowDialog();
-                    }
-                }
+                // begin execution
+                while (computer.Tick()) ;
             }
 
             return true;
