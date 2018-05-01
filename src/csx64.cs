@@ -3716,6 +3716,63 @@ namespace csx64
                 _ToString(b);
                 return b.ToString();
             }
+
+            // ----------------------------
+
+            /// <summary>
+            /// Writes a binary representation of an expression to the stream
+            /// </summary>
+            /// <param name="writer">the binary writer to use</param>
+            /// <param name="expr">the expression to write (can be null)</param>
+            public static void WriteTo(BinaryWriter writer, Expr expr)
+            {
+                // if expr is null, write a null header
+                if (expr == null) { writer.Write(false); }
+                // otherwise serialize object
+                else
+                {
+                    // start with a non-null header
+                    writer.Write(true);
+
+                    writer.Write((byte)expr.OP);
+
+                    WriteTo(writer, expr.Left);
+                    WriteTo(writer, expr.Right);
+
+                    writer.Write(expr._Value != null);
+                    if (expr._Value != null) writer.Write(expr._Value);
+
+                    writer.Write(expr._Result);
+                    writer.Write(expr._Evaluated);
+                    writer.Write(expr._Floating);
+                }
+            }
+            /// <summary>
+            /// Reads a binary representation of an expresion from the stream
+            /// </summary>
+            /// <param name="reader">the binary reader to use</param>
+            /// <param name="expr">the resulting expression (can be null)</param>
+            public static void ReadFrom(BinaryReader reader, out Expr expr)
+            {
+                // if this item is null
+                if (!reader.ReadBoolean()) expr = null;
+                // otherwise deserialize
+                else
+                {
+                    expr = new Expr();
+
+                    expr.OP = (OPs)reader.ReadByte();
+
+                    ReadFrom(reader, out expr.Left);
+                    ReadFrom(reader, out expr.Right);
+
+                    expr._Value = reader.ReadBoolean() ? reader.ReadString() : null;
+
+                    expr._Result = reader.ReadUInt64();
+                    expr._Evaluated = reader.ReadBoolean();
+                    expr._Floating = reader.ReadBoolean();
+                }
+            }
         }
         /// <summary>
         /// Holds information on the location and value of missing pieces of information in an object file
@@ -3740,6 +3797,38 @@ namespace csx64
             /// The expression that represents this hole's value
             /// </summary>
             public Expr Expr;
+
+            // --------------------------
+
+            /// <summary>
+            /// Writes a binary representation of a hole to the stream
+            /// </summary>
+            /// <param name="writer">the binary writer to use</param>
+            /// <param name="hole">the hole to write</param>
+            public static void WriteTo(BinaryWriter writer, HoleData hole)
+            {
+                writer.Write(hole.Address);
+                writer.Write((byte)hole.Size); // compact size to 8 bits (no sense in wasting space)
+
+                writer.Write(hole.Line);
+                Expr.WriteTo(writer, hole.Expr);
+            }
+            /// <summary>
+            /// Reads a binary representation of a hole from the stream
+            /// </summary>
+            /// <param name="reader">the binary reader to use</param>
+            /// <param name="hole">the resulting hole</param>
+            public static void ReadFrom(BinaryReader reader, out HoleData hole)
+            {
+                // create the hole
+                hole = new HoleData();
+
+                hole.Address = reader.ReadUInt64();
+                hole.Size = reader.ReadByte(); // size was compacted to 8 bits in WriteTo
+
+                hole.Line = reader.ReadInt32();
+                Expr.ReadFrom(reader, out hole.Expr);
+            }
         }
 
         /// <summary>
@@ -3765,6 +3854,77 @@ namespace csx64
             /// The executable data
             /// </summary>
             internal List<byte> Data = new List<byte>();
+
+            // ---------------------------
+
+            /// <summary>
+            /// Writes a binary representation of an object file to the stream
+            /// </summary>
+            /// <param name="writer">the binary writer to use</param>
+            /// <param name="obj">the object file to write</param>
+            public static void WriteTo(BinaryWriter writer, ObjectFile obj)
+            {
+                // write the symbols (length-prefixed)
+                writer.Write(obj.Symbols.Count);
+                foreach (var entry in obj.Symbols)
+                {
+                    writer.Write(entry.Key);
+                    Expr.WriteTo(writer, entry.Value);
+                }
+
+                // write the holes (length-prefixed)
+                writer.Write(obj.Holes.Count);
+                foreach (HoleData hole in obj.Holes)
+                    HoleData.WriteTo(writer, hole);
+
+                // write the global symbols (length-prefixed)
+                writer.Write(obj.GlobalSymbols.Count);
+                foreach (string symbol in obj.GlobalSymbols)
+                    writer.Write(symbol);
+
+                // write the data (length-prefixed)
+                writer.Write(obj.Data.Count);
+                writer.Write(obj.Data.ToArray()); // ToArray() costs an O(n) copy, but still beats an equal number of function calls
+            }
+            /// <summary>
+            /// Reads a binary representation of an object file from the stream
+            /// </summary>
+            /// <param name="reader">the binary reader to use</param>
+            /// <param name="hole">the resulting object file</param>
+            public static void ReadFrom(BinaryReader reader, out ObjectFile obj)
+            {
+                // create the object file
+                obj = new ObjectFile();
+
+                // read the symbols (length-prefixed)
+                int count = reader.ReadInt32();
+                for (int i = 0; i < count; ++i)
+                {
+                    string key = reader.ReadString();
+                    Expr.ReadFrom(reader, out Expr value);
+
+                    obj.Symbols.Add(key, value);
+                }
+
+                // read the holes (length-prefixed)
+                count = reader.ReadInt32();
+                for (int i = 0; i < count; ++i)
+                {
+                    HoleData.ReadFrom(reader, out HoleData hole);
+                    obj.Holes.Add(hole);
+                }
+
+                // read the global symbols (length-prefixed)
+                count = reader.ReadInt32();
+                for (int i = 0; i < count; ++i)
+                    obj.GlobalSymbols.Add(reader.ReadString());
+
+                // read the data (length-prefixed)
+                count = reader.ReadInt32();
+                byte[] data = new byte[count];
+                reader.Read(data, 0, count);
+                obj.Data = data.ToList();
+            }
         }
 
         /// <summary>

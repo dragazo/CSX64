@@ -327,8 +327,11 @@ namespace csx64
                 f = File.Open(path, FileMode.Create);
 
                 // serialize the object
-                BinaryFormatter bin = new BinaryFormatter();
-                bin.Serialize(f, obj);
+                //BinaryFormatter bin = new BinaryFormatter();
+                //bin.Serialize(f, obj);
+
+                using (BinaryWriter writer = new BinaryWriter(f))
+                    CSX64.ObjectFile.WriteTo(writer, obj);
 
                 return true;
             }
@@ -368,10 +371,13 @@ namespace csx64
             {
                 // open the file
                 f = File.OpenRead(path);
-                
+
                 // deserialize the object
-                BinaryFormatter bin = new BinaryFormatter();
-                obj = (CSX64.ObjectFile)bin.Deserialize(f);
+                //BinaryFormatter bin = new BinaryFormatter();
+                //obj = (CSX64.ObjectFile)bin.Deserialize(f);
+
+                using (BinaryReader reader = new BinaryReader(f))
+                    CSX64.ObjectFile.ReadFrom(reader, out obj);
 
                 return true;
             }
