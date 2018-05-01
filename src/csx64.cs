@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Numerics;
 using System.IO;
+using System.Runtime.Serialization;
 
 namespace csx64
 {
@@ -41,6 +42,25 @@ namespace csx64
         {
             if (BitConverter.IsLittleEndian) return Encoding.Unicode.GetBytes(str);
             else return Encoding.BigEndianUnicode.GetBytes(str);
+        }
+
+        /// <summary>
+        /// Converts a string into a stream onject
+        /// </summary>
+        /// <param name="str">the string source</param>
+        public static Stream ToStream(this string str)
+        {
+            // create the stream
+            Stream stream = new MemoryStream();
+
+            // write the string contents
+            using (StreamWriter writer = new StreamWriter(stream))
+                writer.Write(str);
+
+            // reposition to beginning
+            stream.Position = 0;
+
+            return stream;
         }
     }
     internal static class Utility
@@ -3271,6 +3291,7 @@ namespace csx64
         /// <summary>
         /// Represents an expression used to compute a value, with options for using a symbol table for lookup
         /// </summary>
+        [Serializable]
         internal class Expr
         {
             public enum OPs
@@ -3304,7 +3325,9 @@ namespace csx64
             /// The operation used to compute the value (or None if leaf)
             /// </summary>
             public OPs OP = OPs.None;
-
+            /// <summary>
+            /// A subexpression of this expression
+            /// </summary>
             public Expr Left = null, Right = null;
 
             private string _Value = null;
@@ -3312,14 +3335,18 @@ namespace csx64
             private bool _Evaluated = false, _Floating = false;
 
             /// <summary>
-            /// Gets the string that was evaluated or sets it (and marks as unevaluated)
+            /// Gets/sets the string that will be evaluated to determine the value of this node
             /// </summary>
             public string Value
             {
                 get { return _Value; }
                 set
                 {
-                    _Value = value; // set the value
+                    // ensure this is now a leaf (expression) node
+                    OP = OPs.None;
+                    Left = Right = null;
+
+                    _Value = value;     // set the value
                     _Evaluated = false; // mark as unevaluated
                 }
             }
@@ -3328,24 +3355,35 @@ namespace csx64
             /// </summary>
             public UInt64 IntResult
             {
-                set
-                {
-                    _Evaluated = true;
-                    _Result = value;
-                    _Floating = false;
-                }
+                set => CacheResult(value, false);
             }
             /// <summary>
             /// Assigns this expression to be an evaluated floating-point value
             /// </summary>
             public double FloatResult
             {
-                set
-                {
-                    _Evaluated = true;
-                    _Result = DoubleAsUInt64(value);
-                    _Floating = true;
-                }
+                set => CacheResult(DoubleAsUInt64(value), true);
+            }
+
+            /// <summary>
+            /// Caches the specified result
+            /// </summary>
+            /// <param name="result">the resulting value</param>
+            /// <param name="floating">flag marking if result is floating-point</param>
+            private void CacheResult(UInt64 result, bool floating)
+            {
+                // ensure this is now a leaf (expression) node
+                OP = OPs.None;
+                Left = Right = null;
+
+                _Value = null; // discard any previous string expression (smaller serialized code)
+
+                // store data
+                _Result = result;
+                _Floating = floating;
+
+                // flag as evaluated
+                _Evaluated = true;
             }
 
             /// <summary>
@@ -3550,13 +3588,8 @@ namespace csx64
                     default: err = "Unknown operation"; return false;
                 }
 
-                // since we got a value, turn this into a leaf so future accesses are faster
-                OP = OPs.None; Left = Right = null;
-
                 // cache the result
-                _Evaluated = true;
-                _Result = res;
-                _Floating = floating;
+                CacheResult(res, floating);
 
                 return true;
             }
@@ -3615,12 +3648,14 @@ namespace csx64
             {
                 Expr temp = new Expr() { OP = OP, Left = Left?.Clone(from, to, floating), Right = Right?.Clone(from, to, floating) };
 
+                // if this is a replacement, swap for new value
                 if (Value == from)
                 {
-                    temp._Evaluated = true;
                     temp._Result = to;
                     temp._Floating = floating;
+                    temp._Evaluated = true;
                 }
+                // otherwise copy cache data
                 else
                 {
                     temp._Value = _Value;
@@ -3637,7 +3672,7 @@ namespace csx64
             /// Finds the value in the specified expression tree. Returns true on success
             /// </summary>
             /// <param name="value">the value to find</param>
-            /// <param name="path">the resulting path (with the root at the bottom of the stack and the found node at the top)</param>
+            /// <param name="path">the resulting path (with the root at the bottom of the stack and the found node at the top). should be empty before the call</param>
             public bool Find(string value, Stack<Expr> path)
             {
                 path.Push(this);
@@ -3681,23 +3716,11 @@ namespace csx64
                 _ToString(b);
                 return b.ToString();
             }
-
-            /// <summary>
-            /// Swaps the contents of the expressions
-            /// </summary>
-            public static void Swap(Expr a, Expr b)
-            {
-                Utility.Swap(ref a.OP, ref b.OP);
-
-                Utility.Swap(ref a.Left, ref b.Left);
-                Utility.Swap(ref a.Right, ref b.Right);
-
-                Utility.Swap(ref a._Value, ref b._Value);
-                Utility.Swap(ref a._Result, ref b._Result);
-                Utility.Swap(ref a._Evaluated, ref b._Evaluated);
-                Utility.Swap(ref a._Floating, ref b._Floating);
-            }
         }
+        /// <summary>
+        /// Holds information on the location and value of missing pieces of information in an object file
+        /// </summary>
+        [Serializable]
         internal class HoleData
         {
             /// <summary>
@@ -3722,6 +3745,7 @@ namespace csx64
         /// <summary>
         /// Represents an assembled object file used to create an executable
         /// </summary>
+        [Serializable]
         public class ObjectFile
         {
             /// <summary>

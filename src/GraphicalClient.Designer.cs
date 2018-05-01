@@ -1,6 +1,6 @@
 ﻿namespace csx64
 {
-    partial class GraphicalDisplay
+    partial class GraphicalClient
     {
         /// <summary>
         /// Required designer variable.
@@ -17,14 +17,14 @@
         {
             this.SuspendLayout();
             // 
-            // GraphicalDisplay
+            // GraphicalClient
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(884, 561);
             this.DoubleBuffered = true;
-            this.Name = "GraphicalDisplay";
-            this.Text = "GraphicalDisplay";
+            this.Name = "GraphicalClient";
+            this.Text = "GraphicalClient";
             this.ResumeLayout(false);
 
         }

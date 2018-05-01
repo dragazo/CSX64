@@ -1,6 +1,6 @@
 ﻿namespace csx64
 {
-    partial class ConsoleDisplay
+    partial class ConsoleClient
     {
         /// <summary>
         /// Required designer variable.
@@ -28,7 +28,7 @@
             this.MainScroll.TabIndex = 0;
             this.MainScroll.ValueChanged += new System.EventHandler(this.MainScroll_ValueChanged);
             // 
-            // ConsoleDisplay
+            // ConsoleClient
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
@@ -36,8 +36,8 @@
             this.Controls.Add(this.MainScroll);
             this.DoubleBuffered = true;
             this.KeyPreview = true;
-            this.Name = "ConsoleDisplay";
-            this.Text = "ConsoleDisplay";
+            this.Name = "ConsoleClient";
+            this.Text = "ConsoleClient";
             this.ResumeLayout(false);
 
         }

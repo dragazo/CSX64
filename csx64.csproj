@@ -84,11 +84,11 @@
     <Compile Include="src\ColorPicker.Designer.cs">
       <DependentUpon>ColorPicker.cs</DependentUpon>
     </Compile>
-    <Compile Include="src\ConsoleDisplay.cs">
+    <Compile Include="src\ConsoleClient.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="src\ConsoleDisplay.Designer.cs">
-      <DependentUpon>ConsoleDisplay.cs</DependentUpon>
+    <Compile Include="src\ConsoleClient.Designer.cs">
+      <DependentUpon>ConsoleClient.cs</DependentUpon>
     </Compile>
     <Compile Include="src\csx64.cs" />
     <Compile Include="src\ProcessorView.cs">
@@ -97,11 +97,11 @@
     <Compile Include="src\ProcessorView.Designer.cs">
       <DependentUpon>ProcessorView.cs</DependentUpon>
     </Compile>
-    <Compile Include="src\GraphicalDisplay.cs">
+    <Compile Include="src\GraphicalClient.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="src\GraphicalDisplay.Designer.cs">
-      <DependentUpon>GraphicalDisplay.cs</DependentUpon>
+    <Compile Include="src\GraphicalClient.Designer.cs">
+      <DependentUpon>GraphicalClient.cs</DependentUpon>
     </Compile>
     <Compile Include="src\ProcessorViewSettingsDialog.cs">
       <SubType>Form</SubType>
@@ -127,14 +127,14 @@
     <EmbeddedResource Include="src\ColorPicker.resx">
       <DependentUpon>ColorPicker.cs</DependentUpon>
     </EmbeddedResource>
-    <EmbeddedResource Include="src\ConsoleDisplay.resx">
-      <DependentUpon>ConsoleDisplay.cs</DependentUpon>
+    <EmbeddedResource Include="src\ConsoleClient.resx">
+      <DependentUpon>ConsoleClient.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="src\ProcessorView.resx">
       <DependentUpon>ProcessorView.cs</DependentUpon>
     </EmbeddedResource>
-    <EmbeddedResource Include="src\GraphicalDisplay.resx">
-      <DependentUpon>GraphicalDisplay.cs</DependentUpon>
+    <EmbeddedResource Include="src\GraphicalClient.resx">
+      <DependentUpon>GraphicalClient.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="src\ProcessorViewSettingsDialog.resx">
       <DependentUpon>ProcessorViewSettingsDialog.cs</DependentUpon>

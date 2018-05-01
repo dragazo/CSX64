@@ -11,7 +11,7 @@ using System.IO;
 
 namespace csx64
 {
-    public partial class ConsoleDisplay : Form
+    public partial class ConsoleClient : Form
     {
         /// <summary>
         /// Delay between tick cycles in ms
@@ -32,7 +32,7 @@ namespace csx64
         /// <summary>
         /// The processor used for simulation
         /// </summary>
-        public CSX64 C = new CSX64();
+        public CSX64 C;
         /// <summary>
         /// The number of ticks that have elapsed
         /// </summary>
@@ -123,9 +123,16 @@ namespace csx64
         /// </summary>
         public event Action<UInt64> OnTickCycle = null;
 
-        public ConsoleDisplay()
+        /// <summary>
+        /// Creates a new graphical client with the specified computer
+        /// </summary>
+        /// <param name="computer">the computer to use for execution</param>
+        public ConsoleClient(CSX64 computer)
         {
             InitializeComponent();
+
+            // assign the computer object
+            C = computer;
         }
 
         private bool disposed = false;

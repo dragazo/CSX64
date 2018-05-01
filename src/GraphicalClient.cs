@@ -14,7 +14,7 @@ namespace csx64
     /// <summary>
     /// Represents a CSX64 derivation that offers graphical controls via windows forms
     /// </summary>
-    public partial class GraphicalDisplay : Form
+    public partial class GraphicalClient : Form
     {
         /// <summary>
         /// The time (in ms) to delay between tick cycles
@@ -69,7 +69,7 @@ namespace csx64
         /// </summary>
         public event Action<UInt64> OnTickCycle = null;
 
-        public GraphicalDisplay()
+        public GraphicalClient()
         {
             InitializeComponent();
 
