@@ -12,7 +12,7 @@ namespace csx64.Properties {
     
     
     [global::System.Runtime.CompilerServices.CompilerGeneratedAttribute()]
-    [global::System.CodeDom.Compiler.GeneratedCodeAttribute("Microsoft.VisualStudio.Editors.SettingsDesigner.SettingsSingleFileGenerator", "15.5.0.0")]
+    [global::System.CodeDom.Compiler.GeneratedCodeAttribute("Microsoft.VisualStudio.Editors.SettingsDesigner.SettingsSingleFileGenerator", "15.6.0.0")]
     internal sealed partial class Settings : global::System.Configuration.ApplicationSettingsBase {
         
         private static Settings defaultInstance = ((Settings)(global::System.Configuration.ApplicationSettingsBase.Synchronized(new Settings())));
@@ -26,24 +26,48 @@ namespace csx64.Properties {
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("Black")]
-        public global::System.Drawing.Color ProcessorBackColor {
+        public global::System.Drawing.Color BackgroundColor {
             get {
-                return ((global::System.Drawing.Color)(this["ProcessorBackColor"]));
+                return ((global::System.Drawing.Color)(this["BackgroundColor"]));
             }
             set {
-                this["ProcessorBackColor"] = value;
+                this["BackgroundColor"] = value;
             }
         }
         
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("LimeGreen")]
-        public global::System.Drawing.Color ProcessorForeColor {
+        public global::System.Drawing.Color TextColor {
             get {
-                return ((global::System.Drawing.Color)(this["ProcessorForeColor"]));
+                return ((global::System.Drawing.Color)(this["TextColor"]));
             }
             set {
-                this["ProcessorForeColor"] = value;
+                this["TextColor"] = value;
+            }
+        }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool SlowMemory {
+            get {
+                return ((bool)(this["SlowMemory"]));
+            }
+            set {
+                this["SlowMemory"] = value;
+            }
+        }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool FileSystem {
+            get {
+                return ((bool)(this["FileSystem"]));
+            }
+            set {
+                this["FileSystem"] = value;
             }
         }
     }

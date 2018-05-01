@@ -94,6 +94,7 @@
       <DependentUpon>ConsoleClient.cs</DependentUpon>
     </Compile>
     <Compile Include="src\csx64.cs" />
+    <Compile Include="src\OverflowQueue.cs" />
     <Compile Include="src\ProcessorView.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -106,11 +107,11 @@
     <Compile Include="src\GraphicalClient.Designer.cs">
       <DependentUpon>GraphicalClient.cs</DependentUpon>
     </Compile>
-    <Compile Include="src\ProcessorViewSettingsDialog.cs">
+    <Compile Include="src\SettingsDialog.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="src\ProcessorViewSettingsDialog.Designer.cs">
-      <DependentUpon>ProcessorViewSettingsDialog.cs</DependentUpon>
+    <Compile Include="src\SettingsDialog.Designer.cs">
+      <DependentUpon>SettingsDialog.cs</DependentUpon>
     </Compile>
     <Compile Include="src\Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
@@ -139,8 +140,8 @@
     <EmbeddedResource Include="src\GraphicalClient.resx">
       <DependentUpon>GraphicalClient.cs</DependentUpon>
     </EmbeddedResource>
-    <EmbeddedResource Include="src\ProcessorViewSettingsDialog.resx">
-      <DependentUpon>ProcessorViewSettingsDialog.cs</DependentUpon>
+    <EmbeddedResource Include="src\SettingsDialog.resx">
+      <DependentUpon>SettingsDialog.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="Properties\Resources.resx">
       <Generator>ResXFileCodeGenerator</Generator>
@@ -154,6 +155,7 @@
     <EmbeddedResource Include="src\RenameDialog.resx">
       <DependentUpon>RenameDialog.cs</DependentUpon>
     </EmbeddedResource>
+    <None Include="app.config" />
     <None Include="Properties\Settings.settings">
       <Generator>SettingsSingleFileGenerator</Generator>
       <LastGenOutput>Settings.Designer.cs</LastGenOutput>

@@ -2,11 +2,17 @@
 <SettingsFile xmlns="http://schemas.microsoft.com/VisualStudio/2004/01/settings" CurrentProfile="(Default)" GeneratedClassNamespace="csx64.Properties" GeneratedClassName="Settings">
   <Profiles />
   <Settings>
-    <Setting Name="ProcessorBackColor" Type="System.Drawing.Color" Scope="User">
+    <Setting Name="BackgroundColor" Type="System.Drawing.Color" Scope="User">
       <Value Profile="(Default)">Black</Value>
     </Setting>
-    <Setting Name="ProcessorForeColor" Type="System.Drawing.Color" Scope="User">
+    <Setting Name="TextColor" Type="System.Drawing.Color" Scope="User">
       <Value Profile="(Default)">LimeGreen</Value>
+    </Setting>
+    <Setting Name="SlowMemory" Type="System.Boolean" Scope="User">
+      <Value Profile="(Default)">False</Value>
+    </Setting>
+    <Setting Name="FileSystem" Type="System.Boolean" Scope="User">
+      <Value Profile="(Default)">True</Value>
     </Setting>
   </Settings>
 </SettingsFile>

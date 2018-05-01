@@ -1,6 +1,6 @@
 ﻿namespace csx64
 {
-    partial class ProcessorViewSettingsDialog
+    partial class SettingsDialog
     {
         /// <summary>
         /// Required designer variable.
@@ -37,11 +37,13 @@
             this.OldSchoolButton = new System.Windows.Forms.Button();
             this.PaperButton = new System.Windows.Forms.Button();
             this.HollywoodHackerButton = new System.Windows.Forms.Button();
-            this.ForegroundColorPicker = new csx64.ColorPicker();
+            this.TextColorPicker = new csx64.ColorPicker();
             this.BackgroundColorPicker = new csx64.ColorPicker();
             this.ColorSwapButton = new System.Windows.Forms.Button();
             this.CoolButton = new System.Windows.Forms.Button();
             this.HalloweenButton = new System.Windows.Forms.Button();
+            this.SlowMemoryCheck = new System.Windows.Forms.CheckBox();
+            this.FileSystemCheck = new System.Windows.Forms.CheckBox();
             this.SuspendLayout();
             // 
             // label1
@@ -58,15 +60,15 @@
             this.label2.AutoSize = true;
             this.label2.Location = new System.Drawing.Point(12, 44);
             this.label2.Name = "label2";
-            this.label2.Size = new System.Drawing.Size(91, 13);
+            this.label2.Size = new System.Drawing.Size(55, 13);
             this.label2.TabIndex = 3;
-            this.label2.Text = "Foreground Color:";
+            this.label2.Text = "Tex Color:";
             // 
             // _OKButton
             // 
             this._OKButton.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
             this._OKButton.DialogResult = System.Windows.Forms.DialogResult.OK;
-            this._OKButton.Location = new System.Drawing.Point(361, 348);
+            this._OKButton.Location = new System.Drawing.Point(361, 272);
             this._OKButton.Margin = new System.Windows.Forms.Padding(2);
             this._OKButton.Name = "_OKButton";
             this._OKButton.Size = new System.Drawing.Size(75, 25);
@@ -78,7 +80,7 @@
             // 
             this._CancelButton.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
             this._CancelButton.DialogResult = System.Windows.Forms.DialogResult.Cancel;
-            this._CancelButton.Location = new System.Drawing.Point(440, 348);
+            this._CancelButton.Location = new System.Drawing.Point(440, 272);
             this._CancelButton.Margin = new System.Windows.Forms.Padding(2);
             this._CancelButton.Name = "_CancelButton";
             this._CancelButton.Size = new System.Drawing.Size(75, 25);
@@ -97,6 +99,7 @@
             this.RetroButton.TabIndex = 6;
             this.RetroButton.Text = "Retro";
             this.RetroButton.UseVisualStyleBackColor = false;
+            this.RetroButton.Click += new System.EventHandler(this.HandlePreset);
             // 
             // label3
             // 
@@ -118,6 +121,7 @@
             this.OldSchoolButton.TabIndex = 8;
             this.OldSchoolButton.Text = "Old School";
             this.OldSchoolButton.UseVisualStyleBackColor = false;
+            this.OldSchoolButton.Click += new System.EventHandler(this.HandlePreset);
             // 
             // PaperButton
             // 
@@ -130,6 +134,7 @@
             this.PaperButton.TabIndex = 9;
             this.PaperButton.Text = "Paper";
             this.PaperButton.UseVisualStyleBackColor = false;
+            this.PaperButton.Click += new System.EventHandler(this.HandlePreset);
             // 
             // HollywoodHackerButton
             // 
@@ -142,17 +147,18 @@
             this.HollywoodHackerButton.TabIndex = 10;
             this.HollywoodHackerButton.Text = "Hollywood Hacker";
             this.HollywoodHackerButton.UseVisualStyleBackColor = false;
+            this.HollywoodHackerButton.Click += new System.EventHandler(this.HandlePreset);
             // 
-            // ForegroundColorPicker
+            // TextColorPicker
             // 
-            this.ForegroundColorPicker.BackColor = System.Drawing.Color.Black;
-            this.ForegroundColorPicker.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
-            this.ForegroundColorPicker.Color = System.Drawing.Color.Black;
-            this.ForegroundColorPicker.Location = new System.Drawing.Point(111, 44);
-            this.ForegroundColorPicker.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
-            this.ForegroundColorPicker.Name = "ForegroundColorPicker";
-            this.ForegroundColorPicker.Size = new System.Drawing.Size(25, 25);
-            this.ForegroundColorPicker.TabIndex = 1;
+            this.TextColorPicker.BackColor = System.Drawing.Color.Black;
+            this.TextColorPicker.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
+            this.TextColorPicker.Color = System.Drawing.Color.Black;
+            this.TextColorPicker.Location = new System.Drawing.Point(111, 44);
+            this.TextColorPicker.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
+            this.TextColorPicker.Name = "TextColorPicker";
+            this.TextColorPicker.Size = new System.Drawing.Size(25, 25);
+            this.TextColorPicker.TabIndex = 1;
             // 
             // BackgroundColorPicker
             // 
@@ -186,6 +192,7 @@
             this.CoolButton.TabIndex = 12;
             this.CoolButton.Text = "Cool";
             this.CoolButton.UseVisualStyleBackColor = false;
+            this.CoolButton.Click += new System.EventHandler(this.HandlePreset);
             // 
             // HalloweenButton
             // 
@@ -198,14 +205,37 @@
             this.HalloweenButton.TabIndex = 13;
             this.HalloweenButton.Text = "Halloween";
             this.HalloweenButton.UseVisualStyleBackColor = false;
+            this.HalloweenButton.Click += new System.EventHandler(this.HandlePreset);
             // 
-            // ProcessorViewSettingsDialog
+            // SlowMemoryCheck
+            // 
+            this.SlowMemoryCheck.AutoSize = true;
+            this.SlowMemoryCheck.Location = new System.Drawing.Point(233, 12);
+            this.SlowMemoryCheck.Name = "SlowMemoryCheck";
+            this.SlowMemoryCheck.Size = new System.Drawing.Size(89, 17);
+            this.SlowMemoryCheck.TabIndex = 14;
+            this.SlowMemoryCheck.Text = "Slow Memory";
+            this.SlowMemoryCheck.UseVisualStyleBackColor = true;
+            // 
+            // FileSystemCheck
+            // 
+            this.FileSystemCheck.AutoSize = true;
+            this.FileSystemCheck.Location = new System.Drawing.Point(233, 35);
+            this.FileSystemCheck.Name = "FileSystemCheck";
+            this.FileSystemCheck.Size = new System.Drawing.Size(79, 17);
+            this.FileSystemCheck.TabIndex = 15;
+            this.FileSystemCheck.Text = "File System";
+            this.FileSystemCheck.UseVisualStyleBackColor = true;
+            // 
+            // SettingsDialog
             // 
             this.AcceptButton = this._OKButton;
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.CancelButton = this._CancelButton;
-            this.ClientSize = new System.Drawing.Size(526, 384);
+            this.ClientSize = new System.Drawing.Size(526, 308);
+            this.Controls.Add(this.FileSystemCheck);
+            this.Controls.Add(this.SlowMemoryCheck);
             this.Controls.Add(this.HalloweenButton);
             this.Controls.Add(this.CoolButton);
             this.Controls.Add(this.ColorSwapButton);
@@ -218,10 +248,10 @@
             this.Controls.Add(this._OKButton);
             this.Controls.Add(this.label2);
             this.Controls.Add(this.label1);
-            this.Controls.Add(this.ForegroundColorPicker);
+            this.Controls.Add(this.TextColorPicker);
             this.Controls.Add(this.BackgroundColorPicker);
-            this.Name = "ProcessorViewSettingsDialog";
-            this.Text = "ProcessorViewSettingsDialog";
+            this.Name = "SettingsDialog";
+            this.Text = "Settings Dialog";
             this.ResumeLayout(false);
             this.PerformLayout();
 
@@ -230,7 +260,7 @@
         #endregion
 
         private ColorPicker BackgroundColorPicker;
-        private ColorPicker ForegroundColorPicker;
+        private ColorPicker TextColorPicker;
         private System.Windows.Forms.Label label1;
         private System.Windows.Forms.Label label2;
         private System.Windows.Forms.Button _OKButton;
@@ -243,5 +273,7 @@
         private System.Windows.Forms.Button ColorSwapButton;
         private System.Windows.Forms.Button CoolButton;
         private System.Windows.Forms.Button HalloweenButton;
+        private System.Windows.Forms.CheckBox SlowMemoryCheck;
+        private System.Windows.Forms.CheckBox FileSystemCheck;
     }
 }

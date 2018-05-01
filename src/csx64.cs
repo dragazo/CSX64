@@ -133,7 +133,7 @@ namespace csx64
         public static bool Write<T>(this T arr, UInt64 pos, UInt64 size, UInt64 val) where T : IList<byte>
         {
             // make sure we're not exceeding memory bounds
-            if (pos < 0 || pos + size > (UInt64)arr.Count) return false;
+            if (pos >= (UInt64)arr.Count || pos + size > (UInt64)arr.Count) return false;
 
             byte[] bytes; // destination for raw bytes
 
@@ -165,7 +165,7 @@ namespace csx64
             res = 0; // initialize out param
 
             // make sure we're not exceeding memory bounds
-            if (pos < 0 || pos + size > (UInt64)arr.Length) return false;
+            if (pos >= (UInt64)arr.Length || pos + size > (UInt64)arr.Length) return false;
 
             switch (size)
             {
@@ -390,7 +390,7 @@ namespace csx64
             /// <summary>
             /// The flag that indicates that memory access should be artificially slowed
             /// </summary>
-            public bool SlowMem
+            public bool SlowMemory
             {
                 get => (Flags & 0x20ul) != 0;
                 set => Flags = (Flags & ~0x20ul) | (value ? 0x20ul : 0);
@@ -2605,7 +2605,7 @@ namespace csx64
         {
             if (Memory.Read(pos, size, out res))
             {
-                if (_abide_slow && Flags.SlowMem) Sleep += size;
+                if (_abide_slow && Flags.SlowMemory) Sleep += size;
                 return true;
             }
 
@@ -2622,7 +2622,7 @@ namespace csx64
         {
             if (Memory.Write(pos, size, val))
             {
-                if (_abide_slow && Flags.SlowMem) Sleep += size;
+                if (_abide_slow && Flags.SlowMemory) Sleep += size;
                 return true;
             }
 

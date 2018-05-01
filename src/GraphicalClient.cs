@@ -21,74 +21,80 @@ namespace csx64
         /// </summary>
         private const int RenderDelay = 1;
 
-        public GraphicalComputer C = new GraphicalComputer();
+        // ----------------------------------
+
+        private GraphicalComputer Computer;
         private UInt64 Ticks;
+
+        // ----------------------------------
 
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
 
-            C.MousePos = e.Location;
+            Computer.MousePos = e.Location;
         }
         protected override void OnMouseWheel(MouseEventArgs e)
         {
             // don't call base. we want everything to be handled by client code
 
-            C.MouseDelta += e.Delta;
+            Computer.MouseDelta += e.Delta;
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
             // don't call base. we want everything to be handled by client code
 
-            C.MouseDown = e.Button;
+            Computer.MouseDown = e.Button;
         }
         protected override void OnMouseUp(MouseEventArgs e)
         {
             // don't call base. we want everything to be handled by client code
 
-            C.MouseDown = MouseButtons.None;
+            Computer.MouseDown = MouseButtons.None;
         }
         protected override void OnKeyDown(KeyEventArgs e)
         {
             // don't call base. we want everything to be handled by client code
 
-            C.KeyDown = e.Modifiers | e.KeyCode;
+            Computer.KeyDown = e.Modifiers | e.KeyCode;
         }
         protected override void OnKeyUp(KeyEventArgs e)
         {
             // don't call base. we want everything to be handled by client code
 
-            C.KeyDown = Keys.None;
+            Computer.KeyDown = Keys.None;
         }
 
-        // ---------------------------------- //
+        // ----------------------------------
 
         /// <summary>
         /// Called after every tick cycle with the number of ticks that have elapsed
         /// </summary>
         public event Action<UInt64> OnTickCycle = null;
 
-        public GraphicalClient()
+        public GraphicalClient(GraphicalComputer computer)
         {
             InitializeComponent();
 
+            Computer = computer;
+
             // create the images
-            C.RenderImage = new Bitmap(DisplayRectangle.Width, DisplayRectangle.Height);
-            C.DisplayImage = new Bitmap(DisplayRectangle.Width, DisplayRectangle.Height);
+            computer.RenderImage = new Bitmap(DisplayRectangle.Width, DisplayRectangle.Height);
+            computer.DisplayImage = new Bitmap(DisplayRectangle.Width, DisplayRectangle.Height);
             // and the graphics handle
-            C.Graphics = Graphics.FromImage(C.RenderImage);
+            computer.Graphics = Graphics.FromImage(computer.RenderImage);
 
             // and the rendering tools
-            C.Brush = new SolidBrush(Color.Black);
-            C.Pen = new Pen(Color.Black);
-            C.Font = new Font(FontFamily.GenericSansSerif, 16);
+            computer.Brush = new SolidBrush(Color.Black);
+            computer.Pen = new Pen(Color.Black);
+            computer.Font = new Font(FontFamily.GenericSansSerif, 16);
         }
 
-        private bool disposed = false;
+        private bool __Disposed = false;
         protected override void Dispose(bool disposing)
         {
-            if (!disposed)
+            if (!__Disposed)
             {
                 if (disposing)
                 {
@@ -96,20 +102,18 @@ namespace csx64
 
                     // -- dispose the managed objects we allocated -- //
 
-                    C.RenderImage.Dispose();
-                    C.DisplayImage.Dispose();
-                    C.Graphics.Dispose();
+                    Computer.RenderImage.Dispose();
+                    Computer.DisplayImage.Dispose();
+                    Computer.Graphics.Dispose();
 
-                    C.Brush.Dispose();
-                    C.Pen.Dispose();
-                    C.Font.Dispose();
-
-                    C.Dispose();
+                    Computer.Brush.Dispose();
+                    Computer.Pen.Dispose();
+                    Computer.Font.Dispose();
                 }
 
                 // ensure base dispose is called
                 base.Dispose(disposing);
-                disposed = true;
+                __Disposed = true;
             }
         }
 
@@ -118,7 +122,7 @@ namespace csx64
             base.OnPaint(e);
 
             // render the graphics object over the display surface
-            e.Graphics.DrawImage(C.DisplayImage, Point.Empty);
+            e.Graphics.DrawImage(Computer.DisplayImage, Point.Empty);
         }
         
         /// <summary>
@@ -128,34 +132,34 @@ namespace csx64
         {
             Text = "Running";
             
-            while (C.Running)
+            while (Computer.Running)
             {
                 await Task.Delay(RenderDelay);
 
                 // tick processor
                 UInt32 i;
-                for (i = 0; i < 10000 && C.Tick(); ++i) ;
+                for (i = 0; i < 10000 && Computer.Tick(); ++i) ;
                 Ticks += i;
 
                 // acount for re-rendering
-                if (C.Invalidated)
+                if (Computer.Invalidated)
                 {
                     // swap render and display images
-                    Utility.Swap(ref C.RenderImage, ref C.DisplayImage);
+                    Utility.Swap(ref Computer.RenderImage, ref Computer.DisplayImage);
 
                     // if going to a different size
-                    if (C.RenderImage.Size != ClientRectangle.Size)
+                    if (Computer.RenderImage.Size != ClientRectangle.Size)
                     {
                         // create the new image
-                        C.RenderImage.Dispose();
-                        C.RenderImage = new Bitmap(ClientRectangle.Width, ClientRectangle.Height);
+                        Computer.RenderImage.Dispose();
+                        Computer.RenderImage = new Bitmap(ClientRectangle.Width, ClientRectangle.Height);
                     }
 
                     // create the new graphics handle
-                    C.Graphics.Dispose();
-                    C.Graphics = Graphics.FromImage(C.RenderImage);
+                    Computer.Graphics.Dispose();
+                    Computer.Graphics = Graphics.FromImage(Computer.RenderImage);
 
-                    C.Invalidated = false; // mark invalidation as filled
+                    Computer.Invalidated = false; // mark invalidation as filled
                     Invalidate(); // redraw the form
                 }
 
@@ -163,7 +167,7 @@ namespace csx64
                 OnTickCycle?.Invoke(Ticks);
             }
 
-            Text = $"Terminated - Error Code: {C.Error}";
+            Text = $"Terminated - Error Code: {Computer.Error}";
         }
 
         /// <summary>
@@ -173,12 +177,12 @@ namespace csx64
         {
             base.OnShown(e);
 
-            C.MousePos = Point.Empty;
-            C.MouseDelta = 0;
-            C.MouseDown = MouseButtons.None;
-            C.KeyDown = Keys.None;
+            Computer.MousePos = Point.Empty;
+            Computer.MouseDelta = 0;
+            Computer.MouseDown = MouseButtons.None;
+            Computer.KeyDown = Keys.None;
 
-            C.Invalidated = false;
+            Computer.Invalidated = false;
 
             Ticks = 0;
             Run();
@@ -203,6 +207,7 @@ namespace csx64
             DrawString, DrawStringBounded
         }
 
+        internal static void InitStatics() { }
         static GraphicalComputer()
         {
             // create definitions for all the syscall codes
