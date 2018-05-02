@@ -149,8 +149,8 @@ namespace csx64
 
             // write the value
             for (int i = 0; i < bytes.Length; ++i)
-                arr[(int)pos + i] = (byte)(val >> (8 * i));
-
+                arr[(int)pos + i] = bytes[i];
+            
             return true;
         }
         /// <summary>
@@ -176,6 +176,31 @@ namespace csx64
 
                 default: throw new ArgumentException("Specified data size is non-standard");
             }
+        }
+
+        /// <summary>
+        /// Appends a value to an array of bytes in a list
+        /// </summary>
+        /// <param name="data">the byte array</param>
+        /// <param name="size">the size in bytes of the value to write</param>
+        /// <param name="val">the value to write</param>
+        public static void Append(this List<byte> arr, UInt64 size, UInt64 val)
+        {
+            byte[] bytes; // destination for raw bytes
+            
+            switch (size)
+            {
+                case 1: arr.Add((byte)val); return;
+                case 2: bytes = BitConverter.GetBytes((UInt16)val); break;
+                case 4: bytes = BitConverter.GetBytes((UInt32)val); break;
+                case 8: bytes = BitConverter.GetBytes(val); break;
+
+                default: throw new ArgumentException("Specified data size is non-standard");
+            }
+
+            // write the value
+            for (int i = 0; i < bytes.Length; ++i)
+                arr.Add(bytes[i]);
         }
     }
 
@@ -3601,6 +3626,7 @@ namespace csx64
                 return new Expr()
                 {
                     OP = OP,
+
                     Left = Left?.Clone(),
                     Right = Right?.Clone(),
 
@@ -3611,68 +3637,12 @@ namespace csx64
                     _Floating = _Floating
                 };
             }
-            /// <summary>
-            /// Creates a replica of this expression tree, replacing a string with another string
-            /// </summary>
-            /// <param name="from">the string to find</param>
-            /// <param name="to">the string to replace with</param>
-            public Expr Clone(string from, string to)
-            {
-                Expr temp = new Expr() { OP = OP, Left = Left?.Clone(from, to), Right = Right?.Clone(from, to) };
-
-                // if this is a replacement, swap for new value
-                if (Value == from)
-                {
-                    temp._Value = to;
-                    temp._Evaluated = false;
-                }
-                // otherwise copy cache data
-                else
-                {
-                    temp._Value = _Value;
-
-                    temp._Evaluated = _Evaluated;
-                    temp._Result = _Result;
-                    temp._Floating = _Floating;
-                }
-
-                return temp;
-            }
-            /// <summary>
-            /// Creates a replica of this expression tree, replacing a string with a value
-            /// </summary>
-            /// <param name="from">the string to find</param>
-            /// <param name="to">the value to replace with</param>
-            /// <param name="floating">flag if the specified value is floating-point</param>
-            public Expr Clone(string from, UInt64 to, bool floating)
-            {
-                Expr temp = new Expr() { OP = OP, Left = Left?.Clone(from, to, floating), Right = Right?.Clone(from, to, floating) };
-
-                // if this is a replacement, swap for new value
-                if (Value == from)
-                {
-                    temp._Result = to;
-                    temp._Floating = floating;
-                    temp._Evaluated = true;
-                }
-                // otherwise copy cache data
-                else
-                {
-                    temp._Value = _Value;
-
-                    temp._Evaluated = _Evaluated;
-                    temp._Result = _Result;
-                    temp._Floating = _Floating;
-                }
-
-                return temp;
-            }
 
             /// <summary>
-            /// Finds the value in the specified expression tree. Returns true on success
+            /// Finds the value in the specified expression tree. Returns true on success.
             /// </summary>
             /// <param name="value">the value to find</param>
-            /// <param name="path">the resulting path (with the root at the bottom of the stack and the found node at the top). should be empty before the call</param>
+            /// <param name="path">the resulting path (with the root at the bottom of the stack and the found node at the top). SHOULD BE EMPTY BEFORE THE CALL</param>
             public bool Find(string value, Stack<Expr> path)
             {
                 path.Push(this);
@@ -3697,6 +3667,56 @@ namespace csx64
             {
                 if (OP == OPs.None) return Value == value ? this : null;
                 else return Left.Find(value) ?? Right?.Find(value);
+            }
+
+            /// <summary>
+            /// Resolves all occurrences of (expr) with the specified value
+            /// </summary>
+            /// <param name="expr">the expression to be replaced</param>
+            /// <param name="result">the value to resolve to</param>
+            /// <param name="floating">marks if the value if floating point</param>
+            public void Resolve(string expr, UInt64 result, bool floating)
+            {
+                // if we're a leaf
+                if (OP == OPs.None)
+                {
+                    // if we have this value, replace with result
+                    if (Value == expr) CacheResult(result, floating);
+                }
+                // otherwise call on children
+                else
+                {
+                    Left.Resolve(expr, result, floating);
+                    Right?.Resolve(expr, result, floating);
+                }
+            }
+
+            private void _GetStringValues(List<string> vals)
+            {
+                // if we're a leaf
+                if (OP == OPs.None)
+                {
+                    // if we have a string value, add it
+                    if (Value != null) vals.Add(Value);
+                }
+                // otherwise call on children
+                else
+                {
+                    Left._GetStringValues(vals);
+                    Right?._GetStringValues(vals);
+                }
+            }
+            /// <summary>
+            /// Gets a list of all the unevaluated string values in this expression
+            /// </summary>
+            public List<string> GetStringValues()
+            {
+                // call helper with an empty list
+                List<string> vals = new List<string>();
+                _GetStringValues(vals);
+
+                // return result
+                return vals;
             }
 
             private void _ToString(StringBuilder b)
@@ -3838,6 +3858,11 @@ namespace csx64
         public class ObjectFile
         {
             /// <summary>
+            /// The list of exported symbol names
+            /// </summary>
+            internal List<string> GlobalSymbols = new List<string>();
+
+            /// <summary>
             /// The symbols defined in the file
             /// </summary>
             internal Dictionary<string, Expr> Symbols = new Dictionary<string, Expr>();
@@ -3846,10 +3871,6 @@ namespace csx64
             /// </summary>
             internal List<HoleData> Holes = new List<HoleData>();
 
-            /// <summary>
-            /// The list of exported symbol names
-            /// </summary>
-            internal List<string> GlobalSymbols = new List<string>();
             /// <summary>
             /// The executable data
             /// </summary>
@@ -3864,6 +3885,11 @@ namespace csx64
             /// <param name="obj">the object file to write</param>
             public static void WriteTo(BinaryWriter writer, ObjectFile obj)
             {
+                // write the global symbols (length-prefixed)
+                writer.Write(obj.GlobalSymbols.Count);
+                foreach (string symbol in obj.GlobalSymbols)
+                    writer.Write(symbol);
+
                 // write the symbols (length-prefixed)
                 writer.Write(obj.Symbols.Count);
                 foreach (var entry in obj.Symbols)
@@ -3876,11 +3902,6 @@ namespace csx64
                 writer.Write(obj.Holes.Count);
                 foreach (HoleData hole in obj.Holes)
                     HoleData.WriteTo(writer, hole);
-
-                // write the global symbols (length-prefixed)
-                writer.Write(obj.GlobalSymbols.Count);
-                foreach (string symbol in obj.GlobalSymbols)
-                    writer.Write(symbol);
 
                 // write the data (length-prefixed)
                 writer.Write(obj.Data.Count);
@@ -3896,8 +3917,13 @@ namespace csx64
                 // create the object file
                 obj = new ObjectFile();
 
-                // read the symbols (length-prefixed)
+                // read the global symbols (length-prefixed)
                 int count = reader.ReadInt32();
+                for (int i = 0; i < count; ++i)
+                    obj.GlobalSymbols.Add(reader.ReadString());
+
+                // read the symbols (length-prefixed)
+                count = reader.ReadInt32();
                 for (int i = 0; i < count; ++i)
                 {
                     string key = reader.ReadString();
@@ -3914,16 +3940,27 @@ namespace csx64
                     obj.Holes.Add(hole);
                 }
 
-                // read the global symbols (length-prefixed)
-                count = reader.ReadInt32();
-                for (int i = 0; i < count; ++i)
-                    obj.GlobalSymbols.Add(reader.ReadString());
-
                 // read the data (length-prefixed)
                 count = reader.ReadInt32();
                 byte[] data = new byte[count];
                 reader.Read(data, 0, count);
                 obj.Data = data.ToList();
+            }
+
+            /// <summary>
+            /// Reads only the global symbols from the object file
+            /// </summary>
+            /// <param name="reader">the binary reader to use</param>
+            /// <param name="globals">the resulting list of global symbols</param>
+            public static void ReadGlobalsFrom(BinaryReader reader, out List<string> globals)
+            {
+                // allocate list
+                globals = new List<string>();
+
+                // read the global symbols (length-prefixed)
+                int count = reader.ReadInt32();
+                for (int i = 0; i < count; ++i)
+                    globals.Add(reader.ReadString());
             }
         }
 
@@ -4111,8 +4148,7 @@ namespace csx64
             public void AppendVal(UInt64 size, UInt64 val)
             {
                 // write the value (little-endian)
-                for (ushort i = 0; i < size; ++i)
-                    file.Data.Add((byte)(val >> (8 * i)));
+                file.Data.Append(size, val);
             }
             public bool TryAppendExpr(UInt64 size, Expr expr, int type = 3)
             {
@@ -5119,23 +5155,6 @@ namespace csx64
 
             string err = null; // error location for evaluation
 
-
-
-            /* testing for expressions
-            {
-                string test = "1.2ee2";
-                //string test = "a?b?c:d:e?f:g";
-
-                if (!args.TryParseImm(test, out Expr _test)) MessageBox.Show(args.err.ToString());
-                MessageBox.Show(_test.ToString());
-
-                if (!_test.Evaluate(file.Symbols, out a, out floating, ref err)) MessageBox.Show(err);
-                MessageBox.Show(_test.ToString());
-            }
-            */
-
-
-
             if (code.Length == 0) return new AssembleResult(AssembleError.EmptyFile, "The file was empty");
 
             while (pos < code.Length)
@@ -5562,113 +5581,138 @@ namespace csx64
             return new AssembleResult(AssembleError.None, string.Empty);
         }
         /// <summary>
-        /// Links the object files together and creates an executable
+        /// Links object files together into an executable. The provided object files are modified by this function, and are thus non-reusable
         /// </summary>
-        /// <param name="res">the resulting executable data if no errors occur</param>
+        /// <param name="exe">the resulting executable</param>
         /// <param name="objs">the object files to link</param>
-        public static LinkResult Link(out byte[] res, params ObjectFile[] objs)
+        public static LinkResult Link(out byte[] exe, params ObjectFile[] objs)
         {
-            res = null; // initially null result
+            exe = null; // initially null result
 
-            // get total size of objet files
-            UInt64 filesize = 0;
-            foreach (ObjectFile obj in objs) filesize += (UInt64)obj.Data.LongCount();
-            // if zero, there is nothing to link
-            if (filesize == 0) return new LinkResult(LinkError.EmptyResult, "Resulting file is empty");
+            // -- define things -- //
 
-            UInt64 __header_size = 11;                // the size of the header to create
-            res = new byte[filesize + __header_size]; // give it enough memory to write the whole file plus a header
-            filesize = __header_size;                 // set size to after header (points to writing position)
+            // resulting binary (we don't know how large the resulting file will be, so it needs to be expandable) (sets aside space for header)
+            List<byte> data = new List<byte>() { (byte)OPCode.CALL, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, (byte)OPCode.STOP };
 
-            UInt64[] offsets = new UInt64[objs.Length]; // offsets for where an object file begins in the resulting exe
-            var symbols = new Dictionary<string, Expr>[objs.Length]; // processed symbols for each object file
+            // a table for relating global symbols to their object file
+            var global_to_obj = new Dictionary<string, ObjectFile>();
+            // a table for holding all the global symbols
+            var global_symbols = new Dictionary<string, Expr>();
 
-            // create a combined symbols table with predefined values
-            var G_symbols = new Dictionary<string, Expr>()
+            // the queue of object files that need to be added to the executable
+            var obj_queue = new Queue<ObjectFile>();
+            // a table for relating included object files to their beginning position in the resulting binary
+            var obj_to_offset = new Dictionary<ObjectFile, UInt64>();
+            
+            // a list of all the holes that need to be patched (does not include holes from unused files)
+            var holes = new List<HoleData>();
+
+            // parsing locations for evaluation
+            UInt64 _res;
+            bool _floating;
+            string _err = string.Empty;
+
+            // -- populate things -- //
+
+            // populate global to obj
+            foreach (ObjectFile obj in objs)
             {
-                ["__prog_end__"] = new Expr() { IntResult = res.LongLength.MakeUnsigned() }
-            };
+                foreach (string g_symbol in obj.GlobalSymbols)
+                {
+                    // make sure source actually defined this symbol (just in case of corrupted object file)
+                    if (!obj.Symbols.TryGetValue(g_symbol, out Expr value)) return new LinkResult(LinkError.MissingSymbol, $"Global symbol \"{g_symbol}\" was not defined");
+                    // make sure it wasn't already defined
+                    if (global_to_obj.ContainsKey(g_symbol)) return new LinkResult(LinkError.SymbolRedefinition, $"Global symbol \"{g_symbol}\" was defined by multiple files");
 
-            UInt64 val; // parsing locations
-            bool floating;
-
-            string err = null; // error location for evaluation
-
-            Expr main = null; // entry point expression
-
-            // -------------------------------------------
-
-            // merge the files into res
-            for (int i = 0; i < objs.Length; ++i)
-            {
-                offsets[i] = filesize; // record its starting offset
-
-                objs[i].Data.CopyTo(res, (int)filesize); // copy its data (POTENTIAL SIZE LIMITATION)
-                filesize += (UInt64)objs[i].Data.LongCount(); // advance write cursor
+                    // add to the tables
+                    global_to_obj.Add(g_symbol, obj);
+                    global_symbols.Add(g_symbol, value);
+                }
             }
 
-            // for each file
-            for (int i = 0; i < objs.Length; ++i)
+            // -- verify things -- //
+
+            // ensure we got a "main" global symbol
+            if (!global_to_obj.TryGetValue("main", out ObjectFile main)) return new LinkResult(LinkError.MissingSymbol, "No entry point");
+
+            // make sure we start the merge process with the main object file
+            obj_queue.Enqueue(main);
+
+            // add a hole for the call location of the header
+            main.Holes.Add(new HoleData() { Address = 2 - (UInt64)data.Count, Size = 8, Expr = new Expr() { Value = "main" }, Line = 0 });
+
+            // -- merge things -- //
+
+            // while there are still things in queue
+            while (obj_queue.Count > 0)
             {
-                // create temporary symbols dictionary
-                symbols[i] = new Dictionary<string, Expr>(objs[i].Symbols.Count);
+                // get the object file we need to incorporate
+                ObjectFile obj = obj_queue.Dequeue();
 
-                // populate local symbols (define #base)
-                foreach (var symbol in objs[i].Symbols) symbols[i].Add(symbol.Key, symbol.Value.Clone("#base", offsets[i], false));
+                // get this file's #base offset
+                UInt64 offset = (UInt64)data.Count;
 
-                // merge global symbols
-                foreach (string symbol in objs[i].GlobalSymbols)
+                // define its offset
+                obj_to_offset.Add(obj, offset);
+
+                // append all its data
+                for (int i = 0; i < obj.Data.Count; ++i)
+                    data.Add(obj.Data[i]);
+
+                // resolve #base references
+                foreach (var entry in obj.Symbols) entry.Value.Resolve("#base", offset, false);
+                // then link to its internal symbols
+                foreach (var entry in obj.Symbols) entry.Value.Evaluate(obj.Symbols, out _res, out _floating, ref _err);
+
+                // for each hole
+                foreach (HoleData hole in obj.Holes)
                 {
-                    // don't redefine the same symbol
-                    if (G_symbols.ContainsKey(symbol)) return new LinkResult(LinkError.SymbolRedefinition, $"Global symbol \"{symbol}\" was already defined");
-                    // make sure the symbol exists in locals dictionary (if using built-in assembler above, this should never happen with valid object files)
-                    if (!symbols[i].TryGetValue(symbol, out Expr hole)) return new LinkResult(LinkError.MissingSymbol, $"Global symbol \"{symbol}\" undefined");
+                    // link to its internal symbols
+                    hole.Expr.Evaluate(obj.Symbols, out _res, out _floating, ref _err);
 
-                    // add to global symbols
-                    G_symbols.Add(symbol, hole);
+                    // offset hole address
+                    hole.Address += offset;
+                    // add this to the list of holes we need to patch
+                    holes.Add(hole);
 
-                    // if this is main
-                    if (symbol == "main")
+                    // for each unevaluated string token in the expression
+                    List<string> uneval_tokens = hole.Expr.GetStringValues();
+                    foreach (string uneval_token in uneval_tokens)
                     {
-                        // mark as main
-                        main = hole;
-                        // link to local symbols (won't be done later cause it's not a hole) (can't be a hole cause file order is undefined)
-                        main.Evaluate(symbols[i], out val, out floating, ref err);
+                        // if this is a global symbol
+                        if (global_to_obj.TryGetValue(uneval_token, out ObjectFile global_source))
+                        {
+                            // if the source isn't already included and it isn't already in queue to be included
+                            if (!obj_to_offset.ContainsKey(global_source) && !obj_queue.Contains(global_source))
+                            {
+                                // add it to the queue
+                                obj_queue.Enqueue(global_source);
+                            }
+                        }
                     }
                 }
             }
 
-            // for each object file
-            for (int i = 0; i < objs.Length; ++i)
+            // -- patch things -- //
+
+            // patch all the holes
+            foreach (HoleData hole in holes)
             {
-                // patch all the holes
-                foreach (HoleData _data in objs[i].Holes)
+                switch (TryPatchHole(data, global_symbols, hole, ref _err))
                 {
-                    // create a copy of hole and data (so as not to corrupt object file)
-                    HoleData data = new HoleData { Address = _data.Address + offsets[i], Size = _data.Size, Line = _data.Line, Expr = _data.Expr.Clone() };
+                    case PatchError.None: break;
+                    case PatchError.Unevaluated: return new LinkResult(LinkError.MissingSymbol, _err);
+                    case PatchError.Error: return new LinkResult(LinkError.FormatError, _err);
 
-                    // try to patch it
-                    PatchError _err = TryPatchHole(res, symbols[i], data, ref err);
-                    if (_err == PatchError.Unevaluated) _err = TryPatchHole(res, G_symbols, data, ref err);
-                    switch (_err)
-                    {
-                        case PatchError.None: break;
-                        case PatchError.Unevaluated: return new LinkResult(LinkError.MissingSymbol, err);
-                        case PatchError.Error: return new LinkResult(LinkError.FormatError, err);
-
-                        default: throw new ArgumentException("Unknown patch error encountered");
-                    }
+                    default: throw new ArgumentException("Unknown patch error encountered");
                 }
             }
 
-            // write the header
-            if (main == null) return new LinkResult(LinkError.MissingSymbol, "No entry point \"main\"");
-            if (!main.Evaluate(G_symbols, out val, out floating, ref err)) return new LinkResult(LinkError.MissingSymbol, $"Failed to evaluate global symbol \"main\"\n-> {err}");
+            // -- finalize things -- //
 
-            res.Write(0, 1, (UInt64)OPCode.CALL);
-            res.Write(1, 1, 0x80);
-            res.Write(2, 8, val);
-            res.Write(10, 1, (UInt64)OPCode.STOP);
+            // copy data into out parameter
+            exe = new byte[data.Count];
+            data.CopyTo(exe);
 
             // linked successfully
             return new LinkResult(LinkError.None, string.Empty);
