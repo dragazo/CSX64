@@ -3355,26 +3355,52 @@ namespace csx64
             /// </summary>
             public Expr Left = null, Right = null;
 
-            private string _Value = null;
-            private UInt64 _Result = 0;
-            private bool _Evaluated = false, _Floating = false;
-
+            private string _Token = null;
             /// <summary>
             /// Gets/sets the string that will be evaluated to determine the value of this node
             /// </summary>
-            public string Value
+            public string Token
             {
-                get { return _Value; }
+                get { return _Token; }
                 set
                 {
+                    // set the value
+                    _Token = value ?? throw new ArgumentNullException("Token cannot be set to null");
+                    
                     // ensure this is now a leaf (expression) node
                     OP = OPs.None;
                     Left = Right = null;
-
-                    _Value = value;     // set the value
-                    _Evaluated = false; // mark as unevaluated
                 }
             }
+
+            /// <summary>
+            /// The cached result of this node if there is no token
+            /// </summary>
+            private UInt64 _Result = 0;
+            /// <summary>
+            /// Marks that the <see cref="_Result"/> of this node is floating-point
+            /// </summary>
+            private bool _Floating = false;
+
+            /// <summary>
+            /// Caches the specified result
+            /// </summary>
+            /// <param name="result">the resulting value</param>
+            /// <param name="floating">flag marking if result is floating-point</param>
+            private void CacheResult(UInt64 result, bool floating)
+            {
+                // ensure this is now a leaf (expression) node
+                OP = OPs.None;
+                Left = Right = null;
+
+                // discard token
+                _Token = null;
+
+                // store data
+                _Result = result;
+                _Floating = floating;
+            }
+
             /// <summary>
             /// Assigns this expression to be an evaluated integer
             /// </summary>
@@ -3388,27 +3414,6 @@ namespace csx64
             public double FloatResult
             {
                 set => CacheResult(DoubleAsUInt64(value), true);
-            }
-
-            /// <summary>
-            /// Caches the specified result
-            /// </summary>
-            /// <param name="result">the resulting value</param>
-            /// <param name="floating">flag marking if result is floating-point</param>
-            private void CacheResult(UInt64 result, bool floating)
-            {
-                // ensure this is now a leaf (expression) node
-                OP = OPs.None;
-                Left = Right = null;
-
-                _Value = null; // discard any previous string expression (smaller serialized code)
-
-                // store data
-                _Result = result;
-                _Floating = floating;
-
-                // flag as evaluated
-                _Evaluated = true;
             }
 
             /// <summary>
@@ -3433,53 +3438,53 @@ namespace csx64
                     // value
                     case OPs.None:
                         // if this has already been evaluated, return the cached result
-                        if (_Evaluated) { res = _Result; floating = _Floating; return true; }
+                        if (Token == null) { res = _Result; floating = _Floating; return true; }
 
                         // try several integral radicies
                         try
                         {
                             // prefixes only allowed for unsigned values (raw from parsing)
-                            if (Value.StartsWith("0x")) res = Convert.ToUInt64(Value.Substring(2), 16);
-                            else if (Value.StartsWith("0b")) res = Convert.ToUInt64(Value.Substring(2), 2);
-                            else if (Value[0] == '0' && Value.Length > 1) res = Convert.ToUInt64(Value.Substring(1), 8);
-                            else res = Convert.ToUInt64(Value, 10);
+                            if (Token.StartsWith("0x")) res = Convert.ToUInt64(Token.Substring(2), 16);
+                            else if (Token.StartsWith("0b")) res = Convert.ToUInt64(Token.Substring(2), 2);
+                            else if (Token[0] == '0' && Token.Length > 1) res = Convert.ToUInt64(Token.Substring(1), 8);
+                            else res = Convert.ToUInt64(Token, 10);
 
                             break;
                         }
                         catch (Exception) { }
 
                         // if those fail, try floating-point
-                        if (double.TryParse(Value, out double f)) { res = DoubleAsUInt64(f); floating = true; break; }
+                        if (double.TryParse(Token, out double f)) { res = DoubleAsUInt64(f); floating = true; break; }
 
                         // if it's a character
-                        if (Value[0] == '\'')
+                        if (Token[0] == '\'')
                         {
-                            if (Value.Length != 3 || Value[2] != '\'') { err = $"Ill-formed character literal encountered \"{Value}\""; return false; }
+                            if (Token.Length != 3 || Token[2] != '\'') { err = $"Ill-formed character literal encountered \"{Token}\""; return false; }
 
-                            res = Value[1];
+                            res = Token[1];
                             break;
                         }
 
                         // otherwise if it's a defined symbol
-                        if (symbols.TryGetValue(Value, out Expr hole))
+                        if (symbols.TryGetValue(Token, out Expr hole))
                         {
                             // create the visited stack if it wasn't already
                             if (visited == null) visited = new Stack<string>();
 
                             // fail if looking up a symbol we've already looked up (infinite recursion)
-                            if (visited.Contains(Value)) { err = $"Cyclic dependence on \"{Value}\" encountered"; return false; }
+                            if (visited.Contains(Token)) { err = $"Cyclic dependence on \"{Token}\" encountered"; return false; }
 
-                            visited.Push(Value); // mark value as visited
+                            visited.Push(Token); // mark value as visited
 
                             // if we can't evaluate it, fail
-                            if (!hole.Evaluate(symbols, out res, out floating, ref err)) { err = $"Failed to evaluate referenced symbol \"{Value}\"\n-> {err}"; return false; }
+                            if (!hole.Evaluate(symbols, out res, out floating, ref err)) { err = $"Failed to evaluate referenced symbol \"{Token}\"\n-> {err}"; return false; }
 
                             visited.Pop(); // unmark value (must be done for diamond expressions i.e. a=b+c, b=d, c=d, d=0)
 
                             break; // break so we can resolve the reference
                         }
 
-                        err = $"Failed to parse \"{Value}\" as a number or defined symbol";
+                        err = $"Failed to parse \"{Token}\" as a number or defined symbol";
                         return false;
 
                     // -- operators -- //
@@ -3630,9 +3635,8 @@ namespace csx64
                     Left = Left?.Clone(),
                     Right = Right?.Clone(),
 
-                    _Value = _Value,
+                    _Token = _Token,
 
-                    _Evaluated = _Evaluated,
                     _Result = _Result,
                     _Floating = _Floating
                 };
@@ -3649,7 +3653,7 @@ namespace csx64
 
                 if (OP == OPs.None)
                 {
-                    if (value == Value) return true;
+                    if (value == Token) return true;
                 }
                 else
                 {
@@ -3665,7 +3669,7 @@ namespace csx64
             /// <param name="value">the found node or null</param>
             public Expr Find(string value)
             {
-                if (OP == OPs.None) return Value == value ? this : null;
+                if (OP == OPs.None) return Token == value ? this : null;
                 else return Left.Find(value) ?? Right?.Find(value);
             }
 
@@ -3681,7 +3685,7 @@ namespace csx64
                 if (OP == OPs.None)
                 {
                     // if we have this value, replace with result
-                    if (Value == expr) CacheResult(result, floating);
+                    if (Token == expr) CacheResult(result, floating);
                 }
                 // otherwise call on children
                 else
@@ -3697,7 +3701,7 @@ namespace csx64
                 if (OP == OPs.None)
                 {
                     // if we have a string value, add it
-                    if (Value != null) vals.Add(Value);
+                    if (Token != null) vals.Add(Token);
                 }
                 // otherwise call on children
                 else
@@ -3721,7 +3725,7 @@ namespace csx64
 
             private void _ToString(StringBuilder b)
             {
-                if (OP == 0) b.Append($"({(_Evaluated ? (_Floating ? AsDouble(_Result).ToString("e17") : _Result.MakeSigned().ToString()) : Value)})");
+                if (OP == 0) b.Append($"({(Token == null ? (_Floating ? AsDouble(_Result).ToString("e17") : _Result.MakeSigned().ToString()) : Token)})");
                 else
                 {
                     Left._ToString(b);
@@ -3746,25 +3750,24 @@ namespace csx64
             /// <param name="expr">the expression to write (can be null)</param>
             public static void WriteTo(BinaryWriter writer, Expr expr)
             {
-                // if expr is null, write a null header
-                if (expr == null) { writer.Write(false); }
-                // otherwise serialize object
+                // write type header
+                writer.Write((byte)((expr._Token != null ? 128 : 0) | (expr._Floating ? 64 : 0) | (expr.Right != null ? 32 : 0) | (int)expr.OP));
+
+                // if it's a leaf
+                if (expr.OP == OPs.None)
+                {
+                    // if it's a token, write that
+                    if (expr._Token != null) writer.Write(expr._Token);
+                    // otherwise write the cached data
+                    else writer.Write(expr._Result);
+                }
+                // otherwise it's an expression
                 else
                 {
-                    // start with a non-null header
-                    writer.Write(true);
-
-                    writer.Write((byte)expr.OP);
-
+                    // do left branch
                     WriteTo(writer, expr.Left);
-                    WriteTo(writer, expr.Right);
-
-                    writer.Write(expr._Value != null);
-                    if (expr._Value != null) writer.Write(expr._Value);
-
-                    writer.Write(expr._Result);
-                    writer.Write(expr._Evaluated);
-                    writer.Write(expr._Floating);
+                    // do right branch if non-null
+                    if (expr.Right != null) WriteTo(writer, expr.Right);
                 }
             }
             /// <summary>
@@ -3774,23 +3777,35 @@ namespace csx64
             /// <param name="expr">the resulting expression (can be null)</param>
             public static void ReadFrom(BinaryReader reader, out Expr expr)
             {
-                // if this item is null
-                if (!reader.ReadBoolean()) expr = null;
-                // otherwise deserialize
+                // allocate the expression
+                expr = new Expr();
+
+                // read the type header
+                int type = reader.ReadByte();
+
+                // extract op
+                expr.OP = (OPs)(type & 0x1f);
+
+                // if it's a leaf
+                if (expr.OP == OPs.None)
+                {
+                    // if it's a token, read that
+                    if ((type & 128) != 0) expr._Token = reader.ReadString();
+                    // otherwise read the cached data
+                    else
+                    {
+                        expr._Result = reader.ReadUInt64();
+                        expr._Floating = (type & 64) != 0;
+                    }
+                }
+                // otherwise it's an expression
                 else
                 {
-                    expr = new Expr();
-
-                    expr.OP = (OPs)reader.ReadByte();
-
+                    // do left branch
                     ReadFrom(reader, out expr.Left);
-                    ReadFrom(reader, out expr.Right);
-
-                    expr._Value = reader.ReadBoolean() ? reader.ReadString() : null;
-
-                    expr._Result = reader.ReadUInt64();
-                    expr._Evaluated = reader.ReadBoolean();
-                    expr._Floating = reader.ReadBoolean();
+                    // do right branch if non-null
+                    if ((type & 32) != 0) ReadFrom(reader, out expr.Right);
+                    else expr.Right = null;
                 }
             }
         }
@@ -4360,7 +4375,7 @@ namespace csx64
                             if (!MutateLabel(ref val)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse imm \"{token}\"\n-> {res.ErrorMsg}"); return false; }
 
                             // create the hole for it
-                            temp = new Expr() { Value = val };
+                            temp = new Expr() { Token = val };
 
                             // it either needs to be evaluatable or a valid label name
                             if (!temp.Evaluate(file.Symbols, out UInt64 _res, out bool floating, ref err) && !IsValidLabel(val))
@@ -4593,8 +4608,8 @@ namespace csx64
                     {
                         // add in a multiplier of 1
                         list[0].OP = Expr.OPs.Mul;
-                        list[0].Left = new Expr() { Value = "1" };
-                        list[0].Right = new Expr() { Value = list[0].Value };
+                        list[0].Left = new Expr() { Token = "1" };
+                        list[0].Right = new Expr() { Token = list[0].Token };
 
                         // insert new register location as beginning of path
                         list.Insert(0, list[0].Right);
@@ -4706,7 +4721,7 @@ namespace csx64
                     // remove the register section from the expression (replace with integral 0)
                     list[1].OP = Expr.OPs.None;
                     list[1].Left = list[1].Right = null;
-                    list[1].Value = "0";
+                    list[1].Token = "0";
 
                     m += val; // add extracted mult to total mult
                     list.Clear(); // clear list for next pass
@@ -5095,7 +5110,7 @@ namespace csx64
         /// </summary>
         /// <param name="key">the symol name</param>
         /// <param name="value">the symbol value</param>
-        public static void DefineSymbol(string key, string value) { PredefinedSymbols.Add(key, new Expr() { Value = value }); }
+        public static void DefineSymbol(string key, string value) { PredefinedSymbols.Add(key, new Expr() { Token = value }); }
         /// <summary>
         /// Creates a new predefined symbol for the assembler
         /// </summary>
@@ -5182,7 +5197,7 @@ namespace csx64
                     if (file.Symbols.ContainsKey(label)) return new AssembleResult(AssembleError.SymbolRedefinition, $"line {args.line}: Symbol \"{label}\" was already defined");
 
                     // add the symbol as an address (uses illegal symbol #base, which will be defined at link time)
-                    file.Symbols.Add(label, new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Value = "#base" }, Right = new Expr() { Value = file.Data.LongCount().MakeUnsigned().ToString() } });
+                    file.Symbols.Add(label, new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Token = "#base" }, Right = new Expr() { Token = file.Data.LongCount().MakeUnsigned().ToString() } });
                 }
 
                 // empty lines are ignored
@@ -5639,7 +5654,7 @@ namespace csx64
             obj_queue.Enqueue(main);
 
             // add a hole for the call location of the header
-            main.Holes.Add(new HoleData() { Address = 2 - (UInt64)data.Count, Size = 8, Expr = new Expr() { Value = "main" }, Line = 0 });
+            main.Holes.Add(new HoleData() { Address = 2 - (UInt64)data.Count, Size = 8, Expr = new Expr() { Token = "main" }, Line = 0 });
 
             // -- merge things -- //
 
