@@ -4169,7 +4169,8 @@ namespace csx64
             public const UInt64 EmissionMaxMultiplier = 1000000;
             public const char EmissionMultiplierChar = '#';
 
-            public static readonly List<string> VerifyLegalExpressionIgnores = new List<string>() { "#base" };
+            public static readonly List<string> VerifyLegalExpressionIgnores = new List<string>()
+            { "#base", "__prog_end__" };
 
             /// <summary>
             /// Splits the raw line into its separate components. The raw line should not have a comment section.
@@ -5860,17 +5861,10 @@ namespace csx64
             bool _floating;
             string _err = string.Empty;
 
-            // a dummy object file to hold the pre-defined symbols
-            ObjectFile pre_defined_obj = new ObjectFile()
-            {
-                GlobalSymbols = { "__prog_end__" },
-                Symbols = { ["__prog_end__"] = new Expr() }
-            };
+            // expressions for pre-defined symbols
+            Expr __prog_end__ = new Expr();
 
             // -- populate things -- //
-
-            // populate global_to_obj first with dummy object (trivial since it's first and we have total control over what's in it)
-            foreach (string global in pre_defined_obj.GlobalSymbols) global_to_obj.Add(global, pre_defined_obj);
 
             // populate global_to_obj with ALL global symbols
             foreach (ObjectFile obj in objs)
@@ -5897,6 +5891,12 @@ namespace csx64
 
             // add a hole for the call location of the header
             main_obj.Holes.Add(new HoleData() { Address = 2 - (UInt64)data.Count, Size = 8, Expr = new Expr() { Token = "main" }, Line = -1 });
+
+            // make sure no one defined over reserved symbol names
+            foreach (ObjectFile obj in objs)
+            {
+                if (obj.Symbols.ContainsKey("__prog_end__")) return new LinkResult(LinkError.SymbolRedefinition, "Object file defined symbol with name \"__prog_end__\" (reserved)");
+            }
 
             // -- merge things -- //
 
@@ -5951,10 +5951,13 @@ namespace csx64
                     // otherwise it wasn't defined
                     else return new LinkResult(LinkError.MissingSymbol, $"No global symbol found to match external symbol \"{external}\"");
                 }
+
+                // inject pre-defined linker symbols
+                obj.Symbols.Add("__prog_end__", __prog_end__);
             }
 
-            // now we can give a value to __prog_end__
-            pre_defined_obj.Symbols["__prog_end__"].IntResult = (UInt64)data.Count;
+            // now we can define __prog_end__
+            __prog_end__.IntResult = (UInt64)data.Count;
 
             // -- patch things -- //
 
