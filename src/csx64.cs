@@ -162,10 +162,8 @@ namespace csx64
         /// <param name="res">the read value</param>
         public static bool Read(this byte[] arr, UInt64 pos, UInt64 size, out UInt64 res)
         {
-            res = 0; // initialize out param
-
             // make sure we're not exceeding memory bounds
-            if (pos >= (UInt64)arr.Length || pos + size > (UInt64)arr.Length) return false;
+            if (pos >= (UInt64)arr.Length || pos + size > (UInt64)arr.Length) { res = 0; return false; }
 
             switch (size)
             {
@@ -202,6 +200,44 @@ namespace csx64
             for (int i = 0; i < bytes.Length; ++i)
                 arr.Add(bytes[i]);
         }
+
+        /// <summary>
+        /// Attempts to parse the string into an unsigned integer. Returns true on success.
+        /// </summary>
+        /// <param name="str">the string to parse</param>
+        /// <param name="val">the resulting value</param>
+        /// <param name="radix">the radix to use (must be 2-36)</param>
+        public static bool TryParseUInt64(this string str, out UInt64 val, uint radix = 10)
+        {
+            // ensure radix is in range
+            if (radix < 2 || radix > 36) throw new ArgumentException("radix must be in range 0-36");
+
+            val = 0;  // initialize to zero
+            uint add; // amount to add
+
+            // fail on null or empty
+            if (str == null || str.Length == 0) return false;
+
+            // for each character
+            for (int i = 0; i < str.Length; ++i)
+            {
+                val *= radix; // shift val
+
+                // if it's a digit, add directly
+                if (str[i] >= '0' && str[i] <= '9') add = (uint)(str[i] - '0');
+                else if (str[i] >= 'a' && str[i] <= 'z') add = (uint)(str[i] - 'a' + 10);
+                else if (str[i] >= 'A' && str[i] <= 'Z') add = (uint)(str[i] - 'A' + 10);
+                // if it wasn't a known character, fail
+                else return false;
+
+                // if add value was out of range, fail
+                if (add >= radix) return false;
+
+                val += add; // add to val
+            }
+
+            return true;
+        }
     }
 
     /// <summary>
@@ -221,12 +257,12 @@ namespace csx64
         /// <summary>
         /// The flags that can be modified by executing code
         /// </summary>
-        private const UInt64 PublicFlags = 0x1f;
+        public const UInt64 PublicFlags = 0x1f;
 
         /// <summary>
         /// Indicates if rmdir will remove non-empty directories recursively
         /// </summary>
-        private const bool RecursiveRmdir = false;
+        public const bool RecursiveRmdir = false;
 
         /// <summary>
         /// The number of file descriptors available to the processor
@@ -295,7 +331,6 @@ namespace csx64
 
             SLP
         }
-
         public enum SyscallCode
         {
             Read, Write,
@@ -308,15 +343,11 @@ namespace csx64
 
             Exit
         }
-        public enum SyscallResult
-        {
-            Failure, Success, Repeat
-        }
-
+        
         /// <summary>
         /// Represents a 64 bit register
         /// </summary>
-        public sealed class Register
+        public class Register
         {
             /// <summary>
             /// gets/sets the full 64 bits of the register
@@ -354,7 +385,7 @@ namespace csx64
         /// <summary>
         /// Represents a collection of 1-bit flags used by the processor
         /// </summary>
-        public sealed class FlagsRegister
+        public class FlagsRegister
         {
             /// <summary>
             /// Contains the actual flag data
@@ -433,18 +464,18 @@ namespace csx64
         /// <summary>
         /// Represents a file descriptor used by the <see cref="CSX64"/> processor
         /// </summary>
-        public sealed class FileDescriptor
+        public class FileDescriptor
         {
             /// <summary>
             /// Marks that this stream is managed by the processor.
             /// Managed files can be opened and closed by the processor, and are closed upon client program termination
             /// </summary>
-            public bool Managed;
+            public bool Managed = false;
             /// <summary>
             /// Marks that the stream has an associated interactive input from external code (i.e. not client code).
             /// Reading past EOF on an interactive stream sets the SuspendedRead flag of the associated <see cref="CSX64"/>
             /// </summary>
-            public bool Interactive;
+            public bool Interactive = false;
 
             /// <summary>
             /// Returns true iff the file descriptor is currently in use
@@ -454,7 +485,7 @@ namespace csx64
             /// <summary>
             /// The underlying stream associated with this file descriptor
             /// </summary>
-            internal Stream __Stream;
+            internal Stream __Stream = null;
 
             // ---------------------
 
@@ -493,12 +524,12 @@ namespace csx64
         // -- Execution Data --
         // --------------------
 
-        private Register[] Registers = new Register[16];
-        private FlagsRegister Flags = new FlagsRegister();
+        protected Register[] Registers = new Register[16];
+        protected FlagsRegister Flags = new FlagsRegister();
 
-        private byte[] Memory = null;
+        protected byte[] Memory = null;
 
-        private FileDescriptor[] FileDescriptors = new FileDescriptor[NFileDescriptors];
+        protected FileDescriptor[] FileDescriptors = new FileDescriptor[NFileDescriptors];
 
         /// <summary>
         /// The current execution positon (executed on next tick)
@@ -512,7 +543,6 @@ namespace csx64
         /// Returns if we're currently suspended pending data from an interactive unmanaged input stream. Execution will resume when this is false
         /// </summary>
         public bool SuspendedRead { get; set; }
-
         /// <summary>
         /// The number of ticks the processor is currently sleeping for
         /// </summary>
@@ -556,6 +586,8 @@ namespace csx64
         // -----------------------
         // -- Utility Functions --
         // -----------------------
+
+        #region
 
         /// <summary>
         /// Returns if the value with specified size code is positive
@@ -682,6 +714,8 @@ namespace csx64
             UInt32 bits = (UInt32)val; // getting the low bits allows this code to work even on big-endian platforms
             return *(float*)&bits;
         }
+
+        #endregion
 
         // ---------------
         // -- Operators --
@@ -2221,6 +2255,8 @@ namespace csx64
         // -- Public Interface --
         // ----------------------
 
+        #region
+
         /// <summary>
         /// Validates the machine for operation, but does not prepare it for execute (see Initialize)
         /// </summary>
@@ -2230,7 +2266,7 @@ namespace csx64
             for (int i = 0; i < Registers.Length; ++i) Registers[i] = new Register();
 
             // allocate file descriptors
-            for (int i = 0; i < NFileDescriptors; ++i) FileDescriptors[i] = new FileDescriptor() { __Stream = null };
+            for (int i = 0; i < NFileDescriptors; ++i) FileDescriptors[i] = new FileDescriptor();
 
             // define initial state
             Running = false;
@@ -2257,21 +2293,21 @@ namespace csx64
         /// <summary>
         /// Marks if this object has already been disposed. DO NOT MODIFY
         /// </summary>
-        private bool disposed = false;
+        private bool _Disposed = false;
         /// <summary>
         /// Relaeses all the resources used by this object
         /// </summary>
         /// <param name="disposing">if managed resources should be released</param>
         protected virtual void Dispose(bool disposing)
         {
-            if (!disposed)
+            if (!_Disposed)
             {
                 if (disposing)
                 {
                     CloseFiles(); // close all the file descriptors
                 }
 
-                disposed = true;
+                _Disposed = true;
             }
         }
 
@@ -2339,7 +2375,7 @@ namespace csx64
         public FlagsRegister GetFlags() => Flags;
 
         /// <summary>
-        /// Gets the file descriptor at the specified index.
+        /// Gets the file descriptor at the specified index. (no bounds checking)
         /// </summary>
         /// <param name="index">the index of the file descriptor</param>
         public FileDescriptor GetFileDescriptor(int index) => FileDescriptors[index];
@@ -2615,9 +2651,13 @@ namespace csx64
             }
         }
 
+        #endregion
+
         // -------------------
         // -- Memory Access --
         // -------------------
+
+        #region
 
         /// <summary>
         /// Reads a value from memory (fails with OutOfBounds if invalid). if SMF is set, delays 
@@ -2983,9 +3023,13 @@ namespace csx64
             return true;
         }
 
+        #endregion
+
         // ---------------
         // -- Stream IO --
         // ---------------
+
+        #region
 
         /// <summary>
         /// Finds the first available file descriptor, or null if there are none available
@@ -3261,9 +3305,13 @@ namespace csx64
             catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
         }
 
+        #endregion
+
         // --------------
         // -- Assembly --
         // -------------- 
+
+        #region
 
         public enum AssembleError
         {
@@ -3350,6 +3398,7 @@ namespace csx64
             /// The operation used to compute the value (or None if leaf)
             /// </summary>
             public OPs OP = OPs.None;
+
             /// <summary>
             /// A subexpression of this expression
             /// </summary>
@@ -3372,7 +3421,6 @@ namespace csx64
                     Left = Right = null;
                 }
             }
-
             /// <summary>
             /// The cached result of this node if there is no token
             /// </summary>
@@ -3383,13 +3431,22 @@ namespace csx64
             private bool _Floating = false;
 
             /// <summary>
+            /// Gets if this node is a leaf
+            /// </summary>
+            public bool IsLeaf => OP == OPs.None;
+            /// <summary>
+            /// Gets if this node has been evaluated
+            /// </summary>
+            public bool Evaluated => OP == OPs.None && _Token == null;
+
+            /// <summary>
             /// Caches the specified result
             /// </summary>
             /// <param name="result">the resulting value</param>
             /// <param name="floating">flag marking if result is floating-point</param>
             private void CacheResult(UInt64 result, bool floating)
             {
-                // ensure this is now a leaf (expression) node
+                // ensure this is now a leaf node
                 OP = OPs.None;
                 Left = Right = null;
 
@@ -3416,22 +3473,14 @@ namespace csx64
                 set => CacheResult(DoubleAsUInt64(value), true);
             }
 
-            /// <summary>
-            /// Attempts to evaluate the hole, returning true on success
-            /// </summary>
-            /// <param name="symbols">the symbols table to use for lookup</param>
-            /// <param name="res">the resulting value upon success</param>
-            /// <param name="floating">flag denoting result is floating-point</param>
-            /// <param name="err">error emitted upon failure</param>
-            /// <param name="visited">DO NOT PROVIDE THIS</param>
-            public bool Evaluate(Dictionary<string, Expr> symbols, out UInt64 res, out bool floating, ref string err, Stack<string> visited = null)
+            private bool __Evaluate__(Dictionary<string, Expr> symbols, out UInt64 res, out bool floating, ref string err, Stack<string> visited)
             {
                 res = 0; // initialize out params
                 floating = false;
 
                 UInt64 L, R; // parsing locations for left and right subtrees
                 bool LF, RF;
-                
+
                 // switch through op
                 switch (OP)
                 {
@@ -3441,17 +3490,10 @@ namespace csx64
                         if (Token == null) { res = _Result; floating = _Floating; return true; }
 
                         // try several integral radicies
-                        try
-                        {
-                            // prefixes only allowed for unsigned values (raw from parsing)
-                            if (Token.StartsWith("0x")) res = Convert.ToUInt64(Token.Substring(2), 16);
-                            else if (Token.StartsWith("0b")) res = Convert.ToUInt64(Token.Substring(2), 2);
-                            else if (Token[0] == '0' && Token.Length > 1) res = Convert.ToUInt64(Token.Substring(1), 8);
-                            else res = Convert.ToUInt64(Token, 10);
-
-                            break;
-                        }
-                        catch (Exception) { }
+                        if (Token.StartsWith("0x")) { if (Token.Substring(2).TryParseUInt64(out res, 16)) break; }
+                        else if (Token.StartsWith("0b")) { if (Token.Substring(2).TryParseUInt64(out res, 2)) break; }
+                        else if (Token[0] == '0' && Token.Length > 1) { if (Token.Substring(1).TryParseUInt64(out res, 8)) break; }
+                        else { if (Token.TryParseUInt64(out res, 10)) break; }
 
                         // if those fail, try floating-point
                         if (double.TryParse(Token, out double f)) { res = DoubleAsUInt64(f); floating = true; break; }
@@ -3468,7 +3510,7 @@ namespace csx64
                         // otherwise if it's a defined symbol
                         if (symbols.TryGetValue(Token, out Expr hole))
                         {
-                            // create the visited stack if it wasn't already
+                            // if visited is null, create it
                             if (visited == null) visited = new Stack<string>();
 
                             // fail if looking up a symbol we've already looked up (infinite recursion)
@@ -3477,7 +3519,7 @@ namespace csx64
                             visited.Push(Token); // mark value as visited
 
                             // if we can't evaluate it, fail
-                            if (!hole.Evaluate(symbols, out res, out floating, ref err)) { err = $"Failed to evaluate referenced symbol \"{Token}\"\n-> {err}"; return false; }
+                            if (!hole.__Evaluate__(symbols, out res, out floating, ref err, visited)) { err = $"Failed to evaluate referenced symbol \"{Token}\"\n-> {err}"; return false; }
 
                             visited.Pop(); // unmark value (must be done for diamond expressions i.e. a=b+c, b=d, c=d, d=0)
 
@@ -3492,114 +3534,114 @@ namespace csx64
                     // binary ops
 
                     case OPs.Mul:
-                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
                         if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : L.MakeSigned()) * (RF ? AsDouble(R) : R.MakeSigned())); floating = true; }
                         else res = L * R;
                         break;
                     case OPs.Div:
-                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
                         if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : L.MakeSigned()) / (RF ? AsDouble(R) : R.MakeSigned())); floating = true; }
                         else res = (L.MakeSigned() / R.MakeSigned()).MakeUnsigned();
                         break;
                     case OPs.Mod:
-                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
                         if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : L.MakeSigned()) % (RF ? AsDouble(R) : R.MakeSigned())); floating = true; }
                         else res = (L.MakeSigned() % R.MakeSigned()).MakeUnsigned();
                         break;
                     case OPs.Add:
-                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
                         if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : L.MakeSigned()) + (RF ? AsDouble(R) : R.MakeSigned())); floating = true; }
                         else res = L + R;
                         break;
                     case OPs.Sub:
-                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
                         if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : L.MakeSigned()) - (RF ? AsDouble(R) : R.MakeSigned())); floating = true; }
                         else res = L - R;
                         break;
 
                     case OPs.SL:
-                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
                         res = L << (ushort)R; floating = LF || RF;
                         break;
                     case OPs.SR:
-                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
                         res = L >> (ushort)R; floating = LF || RF;
                         break;
 
                     case OPs.Less:
-                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
                         if (LF || RF) res = (LF ? AsDouble(L) : L.MakeSigned()) < (RF ? AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
                         else res = L.MakeSigned() < R.MakeSigned() ? 1 : 0ul;
                         break;
                     case OPs.LessE:
-                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
                         if (LF || RF) res = (LF ? AsDouble(L) : L.MakeSigned()) <= (RF ? AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
                         else res = L.MakeSigned() <= R.MakeSigned() ? 1 : 0ul;
                         break;
                     case OPs.Great:
-                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
                         if (LF || RF) res = (LF ? AsDouble(L) : L.MakeSigned()) > (RF ? AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
                         else res = L.MakeSigned() > R.MakeSigned() ? 1 : 0ul;
                         break;
                     case OPs.GreatE:
-                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
                         if (LF || RF) res = (LF ? AsDouble(L) : L.MakeSigned()) >= (RF ? AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
                         else res = L.MakeSigned() >= R.MakeSigned() ? 1 : 0ul;
                         break;
 
                     case OPs.Eq:
-                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
                         if (LF || RF) res = (LF ? AsDouble(L) : L.MakeSigned()) == (RF ? AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
                         else res = L == R ? 1 : 0ul;
                         break;
                     case OPs.Neq:
-                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
                         if (LF || RF) res = (LF ? AsDouble(L) : L.MakeSigned()) != (RF ? AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
                         else res = L != R ? 1 : 0ul;
                         break;
 
                     case OPs.BitAnd:
-                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
                         res = L & R; floating = LF || RF;
                         break;
                     case OPs.BitXor:
-                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
                         res = L ^ R; floating = LF || RF;
                         break;
                     case OPs.BitOr:
-                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || !Right.Evaluate(symbols, out R, out RF, ref err)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
                         res = L | R; floating = LF || RF;
                         break;
 
                     case OPs.LogAnd:
-                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || L != 0 && !Right.Evaluate(symbols, out L, out LF, ref err)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || L != 0 && !Right.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
                         res = L != 0 ? 1 : 0ul;
                         break;
                     case OPs.LogOr:
-                        if (!Left.Evaluate(symbols, out L, out LF, ref err) || L == 0 && !Right.Evaluate(symbols, out L, out LF, ref err)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || L == 0 && !Right.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
                         res = L != 0 ? 1 : 0ul;
                         break;
 
                     // unary ops
 
                     case OPs.Neg:
-                        if (!Left.Evaluate(symbols, out L, out LF, ref err)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
                         res = LF ? DoubleAsUInt64(-AsDouble(L)) : ~L + 1; floating = LF;
                         break;
                     case OPs.BitNot:
-                        if (!Left.Evaluate(symbols, out L, out LF, ref err)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
                         res = ~L; floating = LF;
                         break;
                     case OPs.LogNot:
-                        if (!Left.Evaluate(symbols, out L, out LF, ref err)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
                         res = L == 0 ? 1 : 0ul;
                         break;
                     case OPs.Int:
-                        if (!Left.Evaluate(symbols, out L, out LF, ref err)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
                         res = LF ? ((Int64)AsDouble(L)).MakeUnsigned() : L;
                         break;
                     case OPs.Float:
-                        if (!Left.Evaluate(symbols, out L, out LF, ref err)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
                         res = LF ? L : DoubleAsUInt64((double)L.MakeSigned());
                         floating = true;
                         break;
@@ -3607,12 +3649,12 @@ namespace csx64
                     // misc
 
                     case OPs.NullCoalesce:
-                        if (!Left.Evaluate(symbols, out res, out floating, ref err) || res == 0 && !Right.Evaluate(symbols, out res, out floating, ref err)) return false;
+                        if (!Left.__Evaluate__(symbols, out res, out floating, ref err, visited) || res == 0 && !Right.__Evaluate__(symbols, out res, out floating, ref err, visited)) return false;
                         break;
                     case OPs.Condition:
-                        if (!Left.Evaluate(symbols, out L, out LF, ref err)) return false;
-                        if (L != 0) { if (!Right.Left.Evaluate(symbols, out res, out floating, ref err)) return false; }
-                        else { if (!Right.Right.Evaluate(symbols, out res, out floating, ref err)) return false; }
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
+                        if (L != 0) { if (!Right.Left.__Evaluate__(symbols, out res, out floating, ref err, visited)) return false; }
+                        else { if (!Right.Right.__Evaluate__(symbols, out res, out floating, ref err, visited)) return false; }
                         break;
 
                     default: err = "Unknown operation"; return false;
@@ -3622,6 +3664,18 @@ namespace csx64
                 CacheResult(res, floating);
 
                 return true;
+            }
+            /// <summary>
+            /// Attempts to evaluate the hole, returning true on success
+            /// </summary>
+            /// <param name="symbols">the symbols table to use for lookup</param>
+            /// <param name="res">the resulting value upon success</param>
+            /// <param name="floating">flag denoting result is floating-point</param>
+            /// <param name="err">error emitted upon failure</param>
+            public bool Evaluate(Dictionary<string, Expr> symbols, out UInt64 res, out bool floating, ref string err)
+            {
+                // refer to helper function
+                return __Evaluate__(symbols, out res, out floating, ref err, new Stack<string>());
             }
 
             /// <summary>
@@ -3636,7 +3690,6 @@ namespace csx64
                     Right = Right?.Clone(),
 
                     _Token = _Token,
-
                     _Result = _Result,
                     _Floating = _Floating
                 };
@@ -3718,20 +3771,39 @@ namespace csx64
                 // call helper with an empty list
                 List<string> vals = new List<string>();
                 _GetStringValues(vals);
-
-                // return result
                 return vals;
             }
 
             private void _ToString(StringBuilder b)
             {
-                if (OP == 0) b.Append($"({(Token == null ? (_Floating ? AsDouble(_Result).ToString("e17") : _Result.MakeSigned().ToString()) : Token)})");
+                if (OP == OPs.None)
+                {
+                    b.Append(Token == null ? _Floating ? AsDouble(_Result).ToString("e17") : _Result.MakeSigned().ToString() : Token);
+                }
                 else
                 {
-                    Left._ToString(b);
-                    if (Right != null) Right._ToString(b);
-                    
-                    b.Append(OP);
+                    // if we're a unary op
+                    if (Right == null)
+                    {
+                        b.Append(OP.ToString());
+
+                        b.Append('(');
+                        Left._ToString(b);
+                        b.Append(')');
+                    }
+                    // otherwise we're a binary op
+                    else
+                    {
+                        b.Append('(');
+                        Left._ToString(b);
+                        b.Append(')');
+
+                        b.Append(OP.ToString());
+
+                        b.Append('(');
+                        Right._ToString(b);
+                        b.Append(')');
+                    }
                 }
             }
             public override string ToString()
@@ -5576,10 +5648,14 @@ namespace csx64
             // make sure all global symbols were actually defined prior to link-time
             foreach (string str in file.GlobalSymbols) if (!file.Symbols.ContainsKey(str)) return new AssembleResult(AssembleError.UnknownSymbol, $"Global symbol \"{str}\" was never defined");
 
-            // evaluate each symbol to link all internal symbols and minimize object file complexity
-            foreach (var entry in file.Symbols) entry.Value.Evaluate(file.Symbols, out a, out floating, ref err);
+            // for each symbol
+            foreach (var entry in file.Symbols)
+            {
+                // link to internal symbols
+                entry.Value.Evaluate(file.Symbols, out a, out floating, ref err);
+            }
 
-            // try to eliminate as many holes as possible (we want as clean an object file as possible)
+            // eliminate as many holes as possible
             for (int i = file.Holes.Count - 1; i >= 0; --i)
             {
                 switch (TryPatchHole(file.Data, file.Symbols, file.Holes[i], ref err))
@@ -5591,6 +5667,25 @@ namespace csx64
                     default: throw new ArgumentException("Unknown patch error encountered");
                 }
             }
+            /*
+            List<string> elim_symbols = new List<string>(); // symbol names to be eliminated
+
+            // for each symbol
+            foreach (var entry in file.Symbols)
+            {
+                // if this symbol has already been evaluated and isn't global
+                if (entry.Value.Evaluated && !file.GlobalSymbols.Contains(entry.Key))
+                {
+                    // we can eliminate it (because it's already been linked internally and won't be needed externally)
+                    elim_symbols.Add(entry.Key);
+                }
+            }
+
+            // for each symbol we can eliminate
+            foreach (string elim in elim_symbols)
+            {
+                file.Symbols.Remove(elim);
+            }*/
 
             // return no error
             return new AssembleResult(AssembleError.None, string.Empty);
@@ -5618,9 +5713,6 @@ namespace csx64
             var obj_queue = new Queue<ObjectFile>();
             // a table for relating included object files to their beginning position in the resulting binary
             var obj_to_offset = new Dictionary<ObjectFile, UInt64>();
-            
-            // a list of all the holes that need to be patched (does not include holes from unused files)
-            var holes = new List<HoleData>();
 
             // parsing locations for evaluation
             UInt64 _res;
@@ -5656,6 +5748,9 @@ namespace csx64
             // add a hole for the call location of the header
             main.Holes.Add(new HoleData() { Address = 2 - (UInt64)data.Count, Size = 8, Expr = new Expr() { Token = "main" }, Line = 0 });
 
+            // ensure no one defined pre-defined symbols
+            if (global_symbols.ContainsKey("__prog_end__")) return new LinkResult(LinkError.SymbolRedefinition, "An object file defined a global symbol named __prog_end__ (reserved)");
+            
             // -- merge things -- //
 
             // while there are still things in queue
@@ -5666,7 +5761,6 @@ namespace csx64
 
                 // get this file's #base offset
                 UInt64 offset = (UInt64)data.Count;
-
                 // define its offset
                 obj_to_offset.Add(obj, offset);
 
@@ -5674,21 +5768,11 @@ namespace csx64
                 for (int i = 0; i < obj.Data.Count; ++i)
                     data.Add(obj.Data[i]);
 
-                // resolve #base references
-                foreach (var entry in obj.Symbols) entry.Value.Resolve("#base", offset, false);
-                // then link to its internal symbols
-                foreach (var entry in obj.Symbols) entry.Value.Evaluate(obj.Symbols, out _res, out _floating, ref _err);
-
                 // for each hole
                 foreach (HoleData hole in obj.Holes)
                 {
-                    // link to its internal symbols
-                    hole.Expr.Evaluate(obj.Symbols, out _res, out _floating, ref _err);
-
                     // offset hole address
                     hole.Address += offset;
-                    // add this to the list of holes we need to patch
-                    holes.Add(hole);
 
                     // for each unevaluated string token in the expression
                     List<string> uneval_tokens = hole.Expr.GetStringValues();
@@ -5708,18 +5792,59 @@ namespace csx64
                 }
             }
 
+            // we can now define __prog_end__
+            global_symbols.Add("__prog_end__", new Expr() { IntResult = (UInt64)data.Count });
+
             // -- patch things -- //
 
-            // patch all the holes
-            foreach (HoleData hole in holes)
+            for (int i = 0; i < 2; ++i)
             {
-                switch (TryPatchHole(data, global_symbols, hole, ref _err))
+                // for each object file
+                foreach (var entry in obj_to_offset)
                 {
-                    case PatchError.None: break;
-                    case PatchError.Unevaluated: return new LinkResult(LinkError.MissingSymbol, _err);
-                    case PatchError.Error: return new LinkResult(LinkError.FormatError, _err);
+                    // for each symbol
+                    foreach (var pair in entry.Key.Symbols)
+                    {
+                        Console.Write($"linking symbol {pair.Key} -> {pair.Value}");
 
-                    default: throw new ArgumentException("Unknown patch error encountered");
+                        // define #base offset
+                        pair.Value.Resolve("#base", entry.Value, false);
+
+                        // link to internals and globals
+                        pair.Value.Evaluate(entry.Key.Symbols, out _res, out _floating, ref _err);
+                        pair.Value.Evaluate(global_symbols, out _res, out _floating, ref _err);
+
+                        // do it again to ensure correct any cross dependency convolutions taken care of
+                        // i.e. a local requiring an external that requires a local that requires an external
+                        pair.Value.Evaluate(entry.Key.Symbols, out _res, out _floating, ref _err);
+                        pair.Value.Evaluate(global_symbols, out _res, out _floating, ref _err);
+
+                        Console.Write($" -> {pair.Value}\n");
+                    }
+                }
+            }
+            
+            // for each object file
+            foreach (var entry in obj_to_offset)
+            {
+                // for each hole
+                foreach (HoleData hole in entry.Key.Holes)
+                {
+                    Console.Write($"patching {hole.Expr}");
+
+                    //hole.Expr.Evaluate(global_symbols, out _res, out _floating, ref _err);
+                    hole.Expr.Evaluate(entry.Key.Symbols, out _res, out _floating, ref _err);
+
+                    Console.Write($" -> {hole.Expr}\n");
+
+                    switch (TryPatchHole(data, global_symbols, hole, ref _err))
+                    {
+                        case PatchError.None: break;
+                        case PatchError.Unevaluated: return new LinkResult(LinkError.MissingSymbol, _err);
+                        case PatchError.Error: return new LinkResult(LinkError.FormatError, _err);
+
+                        default: throw new ArgumentException("Unknown patch error encountered");
+                    }
                 }
             }
 
@@ -5732,5 +5857,7 @@ namespace csx64
             // linked successfully
             return new LinkResult(LinkError.None, string.Empty);
         }
+
+#endregion
     }
 }
