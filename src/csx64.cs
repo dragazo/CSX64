@@ -3437,7 +3437,7 @@ namespace csx64
             /// <summary>
             /// Gets if this node has been evaluated
             /// </summary>
-            public bool Evaluated => OP == OPs.None && _Token == null;
+            public bool IsEvaluated => OP == OPs.None && _Token == null;
 
             /// <summary>
             /// Caches the specified result
@@ -3478,8 +3478,10 @@ namespace csx64
                 res = 0; // initialize out params
                 floating = false;
 
-                UInt64 L, R; // parsing locations for left and right subtrees
-                bool LF, RF;
+                UInt64 L, R, Aux; // parsing locations for left and right subtrees
+                bool LF, RF, AuxF;
+
+                bool ret = true; // return value
 
                 // switch through op
                 switch (OP)
@@ -3489,136 +3491,194 @@ namespace csx64
                         // if this has already been evaluated, return the cached result
                         if (Token == null) { res = _Result; floating = _Floating; return true; }
 
-                        // try several integral radicies
-                        if (Token.StartsWith("0x")) { if (Token.Substring(2).TryParseUInt64(out res, 16)) break; }
-                        else if (Token.StartsWith("0b")) { if (Token.Substring(2).TryParseUInt64(out res, 2)) break; }
-                        else if (Token[0] == '0' && Token.Length > 1) { if (Token.Substring(1).TryParseUInt64(out res, 8)) break; }
-                        else { if (Token.TryParseUInt64(out res, 10)) break; }
-
-                        // if those fail, try floating-point
-                        if (double.TryParse(Token, out double f)) { res = DoubleAsUInt64(f); floating = true; break; }
-
-                        // if it's a character
-                        if (Token[0] == '\'')
+                        // if it's a number
+                        if (char.IsDigit(Token[0]))
                         {
-                            if (Token.Length != 3 || Token[2] != '\'') { err = $"Ill-formed character literal encountered \"{Token}\""; return false; }
+                            // try several integral radicies
+                            if (Token.StartsWith("0x")) { if (Token.Substring(2).TryParseUInt64(out res, 16)) break; }
+                            else if (Token.StartsWith("0b")) { if (Token.Substring(2).TryParseUInt64(out res, 2)) break; }
+                            else if (Token[0] == '0' && Token.Length > 1) { if (Token.Substring(1).TryParseUInt64(out res, 8)) break; }
+                            else { if (Token.TryParseUInt64(out res, 10)) break; }
 
+                            // try floating-point
+                            if (double.TryParse(Token, out double f)) { res = DoubleAsUInt64(f); floating = true; break; }
+
+                            // if nothing worked, it's an ill-formed numeric literal
+                            err = $"Ill-formed numeric literal encountered: \"{Token}\"";
+                            return false;
+                        }
+                        // if it's a character
+                        else if (Token[0] == '\'')
+                        {
+                            // make sure it's terminated
+                            if (Token.Length != 3 || Token[2] != '\'') { err = $"Ill-formed character literal encountered: \"{Token}\""; return false; }
+
+                            // extract the character
                             res = Token[1];
                             break;
                         }
-
-                        // otherwise if it's a defined symbol
-                        if (symbols.TryGetValue(Token, out Expr hole))
+                        // if it's a defined symbol
+                        else if (symbols.TryGetValue(Token, out Expr expr))
                         {
-                            // if visited is null, create it
-                            if (visited == null) visited = new Stack<string>();
-
                             // fail if looking up a symbol we've already looked up (infinite recursion)
                             if (visited.Contains(Token)) { err = $"Cyclic dependence on \"{Token}\" encountered"; return false; }
 
-                            visited.Push(Token); // mark value as visited
+                            visited.Push(Token); // mark token as visited
 
                             // if we can't evaluate it, fail
-                            if (!hole.__Evaluate__(symbols, out res, out floating, ref err, visited)) { err = $"Failed to evaluate referenced symbol \"{Token}\"\n-> {err}"; return false; }
+                            if (!expr.__Evaluate__(symbols, out res, out floating, ref err, visited)) { err = $"Failed to evaluate referenced symbol \"{Token}\"\n-> {err}"; return false; }
 
-                            visited.Pop(); // unmark value (must be done for diamond expressions i.e. a=b+c, b=d, c=d, d=0)
+                            visited.Pop(); // unmark token (must be done for diamond expressions i.e. a=b+c, b=d, c=d, d=0)
 
                             break; // break so we can resolve the reference
                         }
-
-                        err = $"Failed to parse \"{Token}\" as a number or defined symbol";
-                        return false;
+                        // otherwise we can't evaluate it
+                        else { err = $"Failed to parse \"{Token}\" as a number or defined symbol"; return false; }
 
                     // -- operators -- //
 
                     // binary ops
 
                     case OPs.Mul:
-                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
+                        if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
+                        if (ret == false) return false;
+
                         if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : L.MakeSigned()) * (RF ? AsDouble(R) : R.MakeSigned())); floating = true; }
                         else res = L * R;
                         break;
                     case OPs.Div:
-                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
+                        if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
+                        if (ret == false) return false;
+
                         if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : L.MakeSigned()) / (RF ? AsDouble(R) : R.MakeSigned())); floating = true; }
                         else res = (L.MakeSigned() / R.MakeSigned()).MakeUnsigned();
                         break;
                     case OPs.Mod:
-                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
+                        if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
+                        if (ret == false) return false;
+
                         if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : L.MakeSigned()) % (RF ? AsDouble(R) : R.MakeSigned())); floating = true; }
                         else res = (L.MakeSigned() % R.MakeSigned()).MakeUnsigned();
                         break;
                     case OPs.Add:
-                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
+                        if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
+                        if (ret == false) return false;
+
                         if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : L.MakeSigned()) + (RF ? AsDouble(R) : R.MakeSigned())); floating = true; }
                         else res = L + R;
                         break;
                     case OPs.Sub:
-                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
+                        if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
+                        if (ret == false) return false;
+
                         if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : L.MakeSigned()) - (RF ? AsDouble(R) : R.MakeSigned())); floating = true; }
                         else res = L - R;
                         break;
 
                     case OPs.SL:
-                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
+                        if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
+                        if (ret == false) return false;
+
                         res = L << (ushort)R; floating = LF || RF;
                         break;
                     case OPs.SR:
-                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
+                        if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
+                        if (ret == false) return false;
+
                         res = L >> (ushort)R; floating = LF || RF;
                         break;
 
                     case OPs.Less:
-                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
+                        if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
+                        if (ret == false) return false;
+
                         if (LF || RF) res = (LF ? AsDouble(L) : L.MakeSigned()) < (RF ? AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
                         else res = L.MakeSigned() < R.MakeSigned() ? 1 : 0ul;
                         break;
                     case OPs.LessE:
-                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
+                        if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
+                        if (ret == false) return false;
+
                         if (LF || RF) res = (LF ? AsDouble(L) : L.MakeSigned()) <= (RF ? AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
                         else res = L.MakeSigned() <= R.MakeSigned() ? 1 : 0ul;
                         break;
                     case OPs.Great:
-                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
+                        if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
+                        if (ret == false) return false;
+
                         if (LF || RF) res = (LF ? AsDouble(L) : L.MakeSigned()) > (RF ? AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
                         else res = L.MakeSigned() > R.MakeSigned() ? 1 : 0ul;
                         break;
                     case OPs.GreatE:
-                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
+                        if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
+                        if (ret == false) return false;
+
                         if (LF || RF) res = (LF ? AsDouble(L) : L.MakeSigned()) >= (RF ? AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
                         else res = L.MakeSigned() >= R.MakeSigned() ? 1 : 0ul;
                         break;
 
                     case OPs.Eq:
-                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
+                        if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
+                        if (ret == false) return false;
+
                         if (LF || RF) res = (LF ? AsDouble(L) : L.MakeSigned()) == (RF ? AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
                         else res = L == R ? 1 : 0ul;
                         break;
                     case OPs.Neq:
-                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
+                        if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
+                        if (ret == false) return false;
+
                         if (LF || RF) res = (LF ? AsDouble(L) : L.MakeSigned()) != (RF ? AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
                         else res = L != R ? 1 : 0ul;
                         break;
 
                     case OPs.BitAnd:
-                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
+                        if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
+                        if (ret == false) return false;
+
                         res = L & R; floating = LF || RF;
                         break;
                     case OPs.BitXor:
-                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
+                        if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
+                        if (ret == false) return false;
+
                         res = L ^ R; floating = LF || RF;
                         break;
                     case OPs.BitOr:
-                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || !Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
+                        if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
+                        if (ret == false) return false;
+
                         res = L | R; floating = LF || RF;
                         break;
 
                     case OPs.LogAnd:
-                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || L != 0 && !Right.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
+                        if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
+                        if (ret == false) return false;
+
                         res = L != 0 ? 1 : 0ul;
                         break;
                     case OPs.LogOr:
-                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited) || L == 0 && !Right.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
+                        if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
+                        if (ret == false) return false;
+
                         res = L != 0 ? 1 : 0ul;
                         break;
 
@@ -3626,22 +3686,27 @@ namespace csx64
 
                     case OPs.Neg:
                         if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
+
                         res = LF ? DoubleAsUInt64(-AsDouble(L)) : ~L + 1; floating = LF;
                         break;
                     case OPs.BitNot:
                         if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
+
                         res = ~L; floating = LF;
                         break;
                     case OPs.LogNot:
                         if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
+
                         res = L == 0 ? 1 : 0ul;
                         break;
                     case OPs.Int:
                         if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
+
                         res = LF ? ((Int64)AsDouble(L)).MakeUnsigned() : L;
                         break;
                     case OPs.Float:
                         if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
+
                         res = LF ? L : DoubleAsUInt64((double)L.MakeSigned());
                         floating = true;
                         break;
@@ -3649,12 +3714,21 @@ namespace csx64
                     // misc
 
                     case OPs.NullCoalesce:
-                        if (!Left.__Evaluate__(symbols, out res, out floating, ref err, visited) || res == 0 && !Right.__Evaluate__(symbols, out res, out floating, ref err, visited)) return false;
+                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
+                        if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
+                        if (ret == false) return false;
+
+                        res = L != 0 ? L : R;
+                        floating = L != 0 ? LF : RF;
                         break;
                     case OPs.Condition:
-                        if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
-                        if (L != 0) { if (!Right.Left.__Evaluate__(symbols, out res, out floating, ref err, visited)) return false; }
-                        else { if (!Right.Right.__Evaluate__(symbols, out res, out floating, ref err, visited)) return false; }
+                        if (!Left.__Evaluate__(symbols, out Aux, out AuxF, ref err, visited)) ret = false;
+                        if (!Right.Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
+                        if (!Right.Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
+                        if (ret == false) return false;
+
+                        res = Aux != 0 ? L : R;
+                        floating = Aux != 0 ? LF : RF;
                         break;
 
                     default: err = "Unknown operation"; return false;
@@ -3948,6 +4022,10 @@ namespace csx64
             /// The list of exported symbol names
             /// </summary>
             internal List<string> GlobalSymbols = new List<string>();
+            /// <summary>
+            /// The list of imported symbol names
+            /// </summary>
+            internal List<string> ExternalSymbols = new List<string>();
 
             /// <summary>
             /// The symbols defined in the file
@@ -3975,6 +4053,11 @@ namespace csx64
                 // write the global symbols (length-prefixed)
                 writer.Write(obj.GlobalSymbols.Count);
                 foreach (string symbol in obj.GlobalSymbols)
+                    writer.Write(symbol);
+
+                // write the external symbols (length-prefixed)
+                writer.Write(obj.ExternalSymbols.Count);
+                foreach (string symbol in obj.ExternalSymbols)
                     writer.Write(symbol);
 
                 // write the symbols (length-prefixed)
@@ -4009,6 +4092,11 @@ namespace csx64
                 for (int i = 0; i < count; ++i)
                     obj.GlobalSymbols.Add(reader.ReadString());
 
+                // read the external symbols (length-prefixed)
+                count = reader.ReadInt32();
+                for (int i = 0; i < count; ++i)
+                    obj.ExternalSymbols.Add(reader.ReadString());
+                
                 // read the symbols (length-prefixed)
                 count = reader.ReadInt32();
                 for (int i = 0; i < count; ++i)
@@ -4080,6 +4168,8 @@ namespace csx64
 
             public const UInt64 EmissionMaxMultiplier = 1000000;
             public const char EmissionMultiplierChar = '#';
+
+            public static readonly List<string> VerifyLegalExpressionIgnores = new List<string>() { "#base" };
 
             /// <summary>
             /// Splits the raw line into its separate components. The raw line should not have a comment section.
@@ -4927,6 +5017,44 @@ namespace csx64
                 return true;
             }
 
+            public bool VerifyLegalExpression(Expr expr)
+            {
+                // if it's a leaf, it must be something that is defined
+                if (expr.IsLeaf)
+                {
+                    // if it's already been evaluated or we know about it somehow, we're good
+                    if (expr.IsEvaluated || file.Symbols.ContainsKey(expr.Token) || VerifyLegalExpressionIgnores.Contains(expr.Token) || file.ExternalSymbols.Contains(expr.Token)) return true;
+                    // otherwise we don't know what it is
+                    else { res = new AssembleResult(AssembleError.UnknownSymbol, $"Unknown symbol: \"{expr.Token}\""); return false; }
+                }
+                // otherwise children must be legal
+                else return VerifyLegalExpression(expr.Left) && (expr.Right == null || VerifyLegalExpression(expr.Right));
+            }
+            /// <summary>
+            /// Ensures that all is good in the hood. Returns true if the hood is good
+            /// </summary>
+            public bool VerifyIntegrity()
+            {
+                // make sure all global symbols were actually defined prior to link-time
+                foreach (string global in file.GlobalSymbols)
+                    if (!file.Symbols.ContainsKey(global)) { res = new AssembleResult(AssembleError.UnknownSymbol, $"Global symbol \"{global}\" was never defined"); return false; }
+                
+                // make sure we didn't define an external symbol
+                foreach (string external in file.ExternalSymbols)
+                    if (file.Symbols.ContainsKey(external)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"External symbol \"{external}\" was defined within the file"); return false; }
+
+                // make sure all symbols expressions were valid
+                foreach (var entry in file.Symbols)
+                    if (!VerifyLegalExpression(entry.Value)) return false;
+
+                // make sure all hole expressions were valid
+                foreach (HoleData hole in file.Holes)
+                    if (!VerifyLegalExpression(hole.Expr)) return false;
+
+                // the hood is good
+                return true;
+            }
+
             // -- op formats -- //
 
             public bool TryProcessBinaryOp(OPCode op, int _b_sizecode = -1, UInt64 sizemask = 15)
@@ -5288,11 +5416,30 @@ namespace csx64
                                 // test name for legality
                                 if (!AssembleArgs.IsValidLabel(symbol)) return new AssembleResult(AssembleError.InvalidLabel, $"line {args.line}: Invalid symbol name \"{symbol}\"");
 
-                                // don't add to global table twice
+                                // don't add to global list twice
                                 if (file.GlobalSymbols.Contains(symbol)) return new AssembleResult(AssembleError.SymbolRedefinition, $"line {args.line}: Attempt to export symbol \"{symbol}\" multiple times");
 
                                 // add it to the globals list
                                 file.GlobalSymbols.Add(symbol);
+                            }
+
+                            break;
+                        case "EXTERN":
+                            if (args.args.Length == 0) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: EXTERN expected at least one symbol to import");
+
+                            foreach (string symbol in args.args)
+                            {
+                                // special error message for using extern on local labels
+                                if (symbol[0] == '.') return new AssembleResult(AssembleError.ArgError, $"line {args.line}: Cannot import local symbols");
+
+                                // test name for legality
+                                if (!AssembleArgs.IsValidLabel(symbol)) return new AssembleResult(AssembleError.InvalidLabel, $"line {args.line}: Invalid symbol name \"{symbol}\"");
+
+                                // don't add to external list twice
+                                if (file.ExternalSymbols.Contains(symbol)) return new AssembleResult(AssembleError.SymbolRedefinition, $"line {args.line}: Attempt to import symbol \"{symbol}\" multiple times");
+
+                                // add it to the external list
+                                file.ExternalSymbols.Add(symbol);
                             }
 
                             break;
@@ -5304,7 +5451,7 @@ namespace csx64
                             if (!AssembleArgs.IsValidLabel(args.args[0])) return new AssembleResult(AssembleError.InvalidLabel, $"line {args.line}: Invalid label name \"{args.args[0]}\"");
 
                             // get the expression
-                            if (!args.TryParseImm(args.args[1], out hole)) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: DEF expected an expression as third arg\n-> {args.res.ErrorMsg}");
+                            if (!args.TryParseImm(args.args[1], out hole)) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: DEF expected an expression as second arg\n-> {args.res.ErrorMsg}");
 
                             // don't redefine a symbol
                             if (file.Symbols.ContainsKey(args.args[0])) return new AssembleResult(AssembleError.SymbolRedefinition, $"line {args.line}: Symbol \"{args.args[0]}\" was already defined");
@@ -5645,16 +5792,8 @@ namespace csx64
                 pos = end + 1;
             }
 
-            // make sure all global symbols were actually defined prior to link-time
-            foreach (string str in file.GlobalSymbols) if (!file.Symbols.ContainsKey(str)) return new AssembleResult(AssembleError.UnknownSymbol, $"Global symbol \"{str}\" was never defined");
-
-            // for each symbol
-            foreach (var entry in file.Symbols)
-            {
-                // link to internal symbols
-                entry.Value.Evaluate(file.Symbols, out a, out floating, ref err);
-            }
-
+            // link each symbol to internal symbols (minimizes file size)
+            foreach (var entry in file.Symbols) entry.Value.Evaluate(file.Symbols, out a, out floating, ref err);
             // eliminate as many holes as possible
             for (int i = file.Holes.Count - 1; i >= 0; --i)
             {
@@ -5667,25 +5806,29 @@ namespace csx64
                     default: throw new ArgumentException("Unknown patch error encountered");
                 }
             }
-            /*
+            
+            // uliminate as many unnecessary symbols as we can
+            
             List<string> elim_symbols = new List<string>(); // symbol names to be eliminated
 
             // for each symbol
             foreach (var entry in file.Symbols)
             {
                 // if this symbol has already been evaluated and isn't global
-                if (entry.Value.Evaluated && !file.GlobalSymbols.Contains(entry.Key))
+                if (entry.Value.IsEvaluated && !file.GlobalSymbols.Contains(entry.Key))
                 {
                     // we can eliminate it (because it's already been linked internally and won't be needed externally)
                     elim_symbols.Add(entry.Key);
                 }
             }
-
             // for each symbol we can eliminate
             foreach (string elim in elim_symbols)
             {
                 file.Symbols.Remove(elim);
-            }*/
+            }
+
+            // verify integrity of file
+            if (!args.VerifyIntegrity()) return args.res;
 
             // return no error
             return new AssembleResult(AssembleError.None, string.Empty);
@@ -5706,138 +5849,122 @@ namespace csx64
 
             // a table for relating global symbols to their object file
             var global_to_obj = new Dictionary<string, ObjectFile>();
-            // a table for holding all the global symbols
-            var global_symbols = new Dictionary<string, Expr>();
 
             // the queue of object files that need to be added to the executable
-            var obj_queue = new Queue<ObjectFile>();
+            var include_queue = new Queue<ObjectFile>();
             // a table for relating included object files to their beginning position in the resulting binary
-            var obj_to_offset = new Dictionary<ObjectFile, UInt64>();
+            var included = new HashSet<ObjectFile>();
 
             // parsing locations for evaluation
             UInt64 _res;
             bool _floating;
             string _err = string.Empty;
 
+            // a dummy object file to hold the pre-defined symbols
+            ObjectFile pre_defined_obj = new ObjectFile()
+            {
+                GlobalSymbols = { "__prog_end__" },
+                Symbols = { ["__prog_end__"] = new Expr() }
+            };
+
             // -- populate things -- //
 
-            // populate global to obj
+            // populate global_to_obj first with dummy object (trivial since it's first and we have total control over what's in it)
+            foreach (string global in pre_defined_obj.GlobalSymbols) global_to_obj.Add(global, pre_defined_obj);
+
+            // populate global_to_obj with ALL global symbols
             foreach (ObjectFile obj in objs)
             {
-                foreach (string g_symbol in obj.GlobalSymbols)
+                foreach (string global in obj.GlobalSymbols)
                 {
                     // make sure source actually defined this symbol (just in case of corrupted object file)
-                    if (!obj.Symbols.TryGetValue(g_symbol, out Expr value)) return new LinkResult(LinkError.MissingSymbol, $"Global symbol \"{g_symbol}\" was not defined");
+                    if (!obj.Symbols.TryGetValue(global, out Expr value)) return new LinkResult(LinkError.MissingSymbol, $"Global symbol \"{global}\" was not defined");
                     // make sure it wasn't already defined
-                    if (global_to_obj.ContainsKey(g_symbol)) return new LinkResult(LinkError.SymbolRedefinition, $"Global symbol \"{g_symbol}\" was defined by multiple files");
+                    if (global_to_obj.ContainsKey(global)) return new LinkResult(LinkError.SymbolRedefinition, $"Global symbol \"{global}\" was defined by multiple sources");
 
-                    // add to the tables
-                    global_to_obj.Add(g_symbol, obj);
-                    global_symbols.Add(g_symbol, value);
+                    // add to the table
+                    global_to_obj.Add(global, obj);
                 }
             }
 
             // -- verify things -- //
 
             // ensure we got a "main" global symbol
-            if (!global_to_obj.TryGetValue("main", out ObjectFile main)) return new LinkResult(LinkError.MissingSymbol, "No entry point");
+            if (!global_to_obj.TryGetValue("main", out ObjectFile main_obj)) return new LinkResult(LinkError.MissingSymbol, "No entry point");
 
             // make sure we start the merge process with the main object file
-            obj_queue.Enqueue(main);
+            include_queue.Enqueue(main_obj);
 
             // add a hole for the call location of the header
-            main.Holes.Add(new HoleData() { Address = 2 - (UInt64)data.Count, Size = 8, Expr = new Expr() { Token = "main" }, Line = 0 });
+            main_obj.Holes.Add(new HoleData() { Address = 2 - (UInt64)data.Count, Size = 8, Expr = new Expr() { Token = "main" }, Line = -1 });
 
-            // ensure no one defined pre-defined symbols
-            if (global_symbols.ContainsKey("__prog_end__")) return new LinkResult(LinkError.SymbolRedefinition, "An object file defined a global symbol named __prog_end__ (reserved)");
-            
             // -- merge things -- //
 
             // while there are still things in queue
-            while (obj_queue.Count > 0)
+            while (include_queue.Count > 0)
             {
                 // get the object file we need to incorporate
-                ObjectFile obj = obj_queue.Dequeue();
+                ObjectFile obj = include_queue.Dequeue();
+                // add it to the set of included files
+                included.Add(obj);
 
                 // get this file's #base offset
                 UInt64 offset = (UInt64)data.Count;
-                // define its offset
-                obj_to_offset.Add(obj, offset);
+
+                // offset each hole by #base offset
+                foreach (HoleData hole in obj.Holes) hole.Address += offset;
+                // define a local symbol for #base
+                obj.Symbols.Add("#base", new Expr() { IntResult = offset });
 
                 // append all its data
                 for (int i = 0; i < obj.Data.Count; ++i)
                     data.Add(obj.Data[i]);
 
-                // for each hole
-                foreach (HoleData hole in obj.Holes)
+                // for each global symbol
+                foreach (string global in obj.GlobalSymbols)
                 {
-                    // offset hole address
-                    hole.Address += offset;
+                    // if it can't be evaluated internally, it's an error (i.e. cannot define a global in terms of another file's globals)
+                    if (!obj.Symbols[global].Evaluate(obj.Symbols, out _res, out _floating, ref _err))
+                        return new LinkResult(LinkError.MissingSymbol, $"Global symbol \"{global}\" could not be evaluated internally");
+                }
 
-                    // for each unevaluated string token in the expression
-                    List<string> uneval_tokens = hole.Expr.GetStringValues();
-                    foreach (string uneval_token in uneval_tokens)
+                // for each external symbol
+                foreach (string external in obj.ExternalSymbols)
+                {
+                    // if this is a global symbol somewhere
+                    if (global_to_obj.TryGetValue(external, out ObjectFile global_source))
                     {
-                        // if this is a global symbol
-                        if (global_to_obj.TryGetValue(uneval_token, out ObjectFile global_source))
+                        // if the source isn't already included and it isn't already in queue to be included
+                        if (!included.Contains(global_source) && !include_queue.Contains(global_source))
                         {
-                            // if the source isn't already included and it isn't already in queue to be included
-                            if (!obj_to_offset.ContainsKey(global_source) && !obj_queue.Contains(global_source))
-                            {
-                                // add it to the queue
-                                obj_queue.Enqueue(global_source);
-                            }
+                            // add it to the queue
+                            include_queue.Enqueue(global_source);
                         }
+
+                        // add externals to local scope //
+
+                        // if obj already has a symbol of the same name
+                        if (obj.Symbols.ContainsKey(external)) return new LinkResult(LinkError.SymbolRedefinition, $"Object file defined external symbol \"{external}\"");
+                        // otherwise define it as a local in obj
+                        else obj.Symbols.Add(external, global_source.Symbols[external]);
                     }
+                    // otherwise it wasn't defined
+                    else return new LinkResult(LinkError.MissingSymbol, $"No global symbol found to match external symbol \"{external}\"");
                 }
             }
 
-            // we can now define __prog_end__
-            global_symbols.Add("__prog_end__", new Expr() { IntResult = (UInt64)data.Count });
+            // now we can give a value to __prog_end__
+            pre_defined_obj.Symbols["__prog_end__"].IntResult = (UInt64)data.Count;
 
             // -- patch things -- //
 
-            for (int i = 0; i < 2; ++i)
-            {
-                // for each object file
-                foreach (var entry in obj_to_offset)
-                {
-                    // for each symbol
-                    foreach (var pair in entry.Key.Symbols)
-                    {
-                        Console.Write($"linking symbol {pair.Key} -> {pair.Value}");
-
-                        // define #base offset
-                        pair.Value.Resolve("#base", entry.Value, false);
-
-                        // link to internals and globals
-                        pair.Value.Evaluate(entry.Key.Symbols, out _res, out _floating, ref _err);
-                        pair.Value.Evaluate(global_symbols, out _res, out _floating, ref _err);
-
-                        // do it again to ensure correct any cross dependency convolutions taken care of
-                        // i.e. a local requiring an external that requires a local that requires an external
-                        pair.Value.Evaluate(entry.Key.Symbols, out _res, out _floating, ref _err);
-                        pair.Value.Evaluate(global_symbols, out _res, out _floating, ref _err);
-
-                        Console.Write($" -> {pair.Value}\n");
-                    }
-                }
-            }
-            
             // for each object file
-            foreach (var entry in obj_to_offset)
+            foreach (ObjectFile obj in included)
             {
-                // for each hole
-                foreach (HoleData hole in entry.Key.Holes)
+                // patch all the holes
+                foreach (HoleData hole in obj.Holes)
                 {
-                    Console.Write($"patching {hole.Expr}");
-
-                    //hole.Expr.Evaluate(global_symbols, out _res, out _floating, ref _err);
-                    hole.Expr.Evaluate(entry.Key.Symbols, out _res, out _floating, ref _err);
-
-                    Console.Write($" -> {hole.Expr}\n");
-
-                    switch (TryPatchHole(data, global_symbols, hole, ref _err))
+                    switch (TryPatchHole(data, obj.Symbols, hole, ref _err))
                     {
                         case PatchError.None: break;
                         case PatchError.Unevaluated: return new LinkResult(LinkError.MissingSymbol, _err);
