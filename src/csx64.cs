@@ -3964,20 +3964,20 @@ namespace csx64
             /// <summary>
             /// The local address of the hole in the file
             /// </summary>
-            public UInt64 Address;
+            internal UInt64 Address;
             /// <summary>
             /// The size of the hole
             /// </summary>
-            public UInt64 Size;
-            
+            internal UInt64 Size;
+
             /// <summary>
             /// The line where this hole was created
             /// </summary>
-            public int Line;
+            internal int Line;
             /// <summary>
             /// The expression that represents this hole's value
             /// </summary>
-            public Expr Expr;
+            internal Expr Expr;
 
             // --------------------------
 
@@ -4041,15 +4041,26 @@ namespace csx64
             /// </summary>
             internal List<byte> Data = new List<byte>();
 
+            /// <summary>
+            /// Marks that this object file is in a valid, usable state
+            /// </summary>
+            public bool Clean { get; internal set; } = false;
+
+            internal ObjectFile() { }
+
             // ---------------------------
 
             /// <summary>
-            /// Writes a binary representation of an object file to the stream
+            /// Writes a binary representation of an object file to the stream. Throws <see cref="ArgumentException"/> if file is dirty
             /// </summary>
-            /// <param name="writer">the binary writer to use</param>
+            /// <param name="writer">the binary writer to use. must be clean</param>
             /// <param name="obj">the object file to write</param>
+            /// <exception cref="ArgumentException"></exception>
             public static void WriteTo(BinaryWriter writer, ObjectFile obj)
             {
+                // ensure the object is clean
+                if (!obj.Clean) throw new ArgumentException("Attempt to use dirty object file");
+
                 // write the global symbols (length-prefixed)
                 writer.Write(obj.GlobalSymbols.Count);
                 foreach (string symbol in obj.GlobalSymbols)
@@ -4120,6 +4131,9 @@ namespace csx64
                 byte[] data = new byte[count];
                 reader.Read(data, 0, count);
                 obj.Data = data.ToList();
+
+                // validate the object
+                obj.Clean = true;
             }
 
             /// <summary>
@@ -4142,7 +4156,7 @@ namespace csx64
         /// <summary>
         /// Holds all the variables used during assembly
         /// </summary>
-        internal class AssembleArgs
+        private class AssembleArgs
         {
             public ObjectFile file;
             public int line;
@@ -5793,6 +5807,8 @@ namespace csx64
                 pos = end + 1;
             }
 
+            // -- minimize symbols and holes -- //
+
             // link each symbol to internal symbols (minimizes file size)
             foreach (var entry in file.Symbols) entry.Value.Evaluate(file.Symbols, out a, out floating, ref err);
             // eliminate as many holes as possible
@@ -5808,7 +5824,7 @@ namespace csx64
                 }
             }
             
-            // uliminate as many unnecessary symbols as we can
+            // -- eliminate as many unnecessary symbols as we can -- //
             
             List<string> elim_symbols = new List<string>(); // symbol names to be eliminated
 
@@ -5828,20 +5844,34 @@ namespace csx64
                 file.Symbols.Remove(elim);
             }
 
+            // -- finalize -- //
+
             // verify integrity of file
             if (!args.VerifyIntegrity()) return args.res;
+
+            // validate result
+            file.Clean = true;
 
             // return no error
             return new AssembleResult(AssembleError.None, string.Empty);
         }
         /// <summary>
-        /// Links object files together into an executable. The provided object files are modified by this function, and are thus non-reusable
+        /// Links object files together into an executable. Throws <see cref="ArgumentException"/> if any of the object files are dirty.
+        /// Object files may be rendered dirty after this process (regardless of success). Any files that are still clean may be reused.
         /// </summary>
         /// <param name="exe">the resulting executable</param>
-        /// <param name="objs">the object files to link</param>
+        /// <param name="objs">the object files to link. should all be clean</param>
+        /// <exception cref="ArgumentException"></exception>
         public static LinkResult Link(out byte[] exe, params ObjectFile[] objs)
         {
             exe = null; // initially null result
+
+            // for each object file to be linked
+            foreach (ObjectFile obj in objs)
+            {
+                // make sure it's starting out clean
+                if (!obj.Clean) throw new ArgumentException("Attempt to use dirty object file");
+            }
 
             // -- define things -- //
 
@@ -5883,6 +5913,12 @@ namespace csx64
 
             // -- verify things -- //
 
+            // make sure no one defined over reserved symbol names
+            foreach (ObjectFile obj in objs)
+            {
+                if (obj.Symbols.ContainsKey("__prog_end__")) return new LinkResult(LinkError.SymbolRedefinition, "Object file defined symbol with name \"__prog_end__\" (reserved)");
+            }
+
             // ensure we got a "main" global symbol
             if (!global_to_obj.TryGetValue("main", out ObjectFile main_obj)) return new LinkResult(LinkError.MissingSymbol, "No entry point");
 
@@ -5891,12 +5927,8 @@ namespace csx64
 
             // add a hole for the call location of the header
             main_obj.Holes.Add(new HoleData() { Address = 2 - (UInt64)data.Count, Size = 8, Expr = new Expr() { Token = "main" }, Line = -1 });
-
-            // make sure no one defined over reserved symbol names
-            foreach (ObjectFile obj in objs)
-            {
-                if (obj.Symbols.ContainsKey("__prog_end__")) return new LinkResult(LinkError.SymbolRedefinition, "Object file defined symbol with name \"__prog_end__\" (reserved)");
-            }
+            // this makes main_obj dirty
+            main_obj.Clean = false;
 
             // -- merge things -- //
 
@@ -5915,6 +5947,8 @@ namespace csx64
                 foreach (HoleData hole in obj.Holes) hole.Address += offset;
                 // define a local symbol for #base
                 obj.Symbols.Add("#base", new Expr() { IntResult = offset });
+                // this makes obj dirty
+                obj.Clean = false;
 
                 // append all its data
                 for (int i = 0; i < obj.Data.Count; ++i)
