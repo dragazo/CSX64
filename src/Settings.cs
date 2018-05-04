@@ -1,4 +1,4 @@
-﻿namespace csx64.Properties {
+﻿namespace CSX64.Properties {
     
     
     // This class allows you to handle specific events on the settings class:

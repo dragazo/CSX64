@@ -1,15 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Drawing;
 using System.IO;
 using System.Runtime.Serialization;
-using System.Runtime.Serialization.Formatters.Binary;
 using System.Security;
 
-namespace csx64
+namespace CSX64
 {
     static class Program
     {
@@ -339,7 +337,7 @@ namespace csx64
         /// </summary>
         /// <param name="path">the destination file to save to</param>
         /// <param name="obj">the object file to serialize</param>
-        private static bool SaveObjectFile(string path, CSX64.ObjectFile obj)
+        private static bool SaveObjectFile(string path, ObjectFile obj)
         {
             FileStream f = null; // file handle
 
@@ -350,7 +348,7 @@ namespace csx64
 
                 // serialize the object
                 using (BinaryWriter writer = new BinaryWriter(f))
-                    CSX64.ObjectFile.WriteTo(writer, obj);
+                    ObjectFile.WriteTo(writer, obj);
 
                 return true;
             }
@@ -380,7 +378,7 @@ namespace csx64
         /// </summary>
         /// <param name="path">the source file to read from</param>
         /// <param name="obj">the resulting object file</param>
-        private static bool LoadObjectFile(string path, out CSX64.ObjectFile obj)
+        private static bool LoadObjectFile(string path, out ObjectFile obj)
         {
             obj = null;
 
@@ -393,7 +391,7 @@ namespace csx64
 
                 // deserialize the object
                 using (BinaryReader reader = new BinaryReader(f))
-                    CSX64.ObjectFile.ReadFrom(reader, out obj);
+                    ObjectFile.ReadFrom(reader, out obj);
 
                 return true;
             }
@@ -435,10 +433,10 @@ namespace csx64
             if (!LoadTextFile(from, out string code)) return false;
 
             // assemble the program
-            CSX64.AssembleResult res = CSX64.Assemble(code, out CSX64.ObjectFile obj);
+            AssembleResult res = Assembly.Assemble(code, out ObjectFile obj);
 
             // if there was no error
-            if (res.Error == CSX64.AssembleError.None)
+            if (res.Error == AssembleError.None)
             {
                 // save result
                 return SaveObjectFile(to, obj);
@@ -463,15 +461,15 @@ namespace csx64
         private static bool Link(List<string> paths, string to)
         {
             // get all the object files
-            CSX64.ObjectFile[] objs = new CSX64.ObjectFile[paths.Count];
+            ObjectFile[] objs = new ObjectFile[paths.Count];
             for (int i = 0; i < paths.Count; ++i)
                 if (!LoadObjectFile(paths[i], out objs[i])) return false;
-            
+
             // link the object files
-            CSX64.LinkResult res = CSX64.Link(out byte[] exe, objs);
+            LinkResult res = Assembly.Link(out byte[] exe, objs);
 
             // if there was no error
-            if (res.Error == CSX64.LinkError.None)
+            if (res.Error == LinkError.None)
             {
                 // save result
                 return SaveBinaryFile(to, exe);
@@ -511,7 +509,7 @@ namespace csx64
         /// Initializes the private flags for execution
         /// </summary>
         /// <param name="flags">the flags object to modify</param>
-        private static void SetupPrivateFlags(CSX64.FlagsRegister flags)
+        private static void SetupPrivateFlags(FlagsRegister flags)
         {
             flags.SlowMemory = SlowMemory;
             flags.FileSystem = FileSystem;
@@ -524,7 +522,7 @@ namespace csx64
         private static bool RunRawConsole(byte[] exe)
         {
             // create the computer
-            using (CSX64 computer = new CSX64())
+            using (Computer computer = new Computer())
             {
                 // initialize program
                 if (!computer.Initialize(exe)) { Print("Failed to initialize program"); return false; }
@@ -540,7 +538,7 @@ namespace csx64
                 while (computer.Tick()) ;
                 
                 // print error code if there was one
-                if (computer.Error != CSX64.ErrorCode.None)
+                if (computer.Error != ErrorCode.None)
                 {
                     Print($"\n\nError Encountered: {computer.Error}");
                 }

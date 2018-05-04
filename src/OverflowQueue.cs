@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace csx64
+namespace CSX64
 {
     /// <summary>
     /// Represents a queue of fixed size where adding new items beyond the size of the queue removes the oldest items

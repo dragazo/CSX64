@@ -9,7 +9,7 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-namespace csx64
+namespace CSX64
 {
     /// <summary>
     /// Represents a CSX64 derivation that offers graphical controls via windows forms
@@ -189,7 +189,7 @@ namespace csx64
         }
     }
 
-    public class GraphicalComputer : CSX64
+    public class GraphicalComputer : Computer
     {
         public enum GraphicalSyscallCodes
         {
@@ -212,7 +212,7 @@ namespace csx64
         {
             // create definitions for all the syscall codes
             foreach (GraphicalSyscallCodes item in Enum.GetValues(typeof(GraphicalSyscallCodes)))
-                DefineSymbol($"sys_{item.ToString().ToLower()}", (UInt64)item);
+                Assembly.DefineSymbol($"sys_{item.ToString().ToLower()}", (UInt64)item);
         }
 
         public Bitmap RenderImage, DisplayImage;

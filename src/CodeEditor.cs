@@ -8,7 +8,7 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-namespace csx64
+namespace CSX64
 {
     public partial class CodeEditor : Form
     {

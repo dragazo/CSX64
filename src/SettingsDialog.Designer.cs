@@ -1,4 +1,4 @@
-﻿namespace csx64
+﻿namespace CSX64
 {
     partial class SettingsDialog
     {
@@ -37,8 +37,8 @@
             this.OldSchoolButton = new System.Windows.Forms.Button();
             this.PaperButton = new System.Windows.Forms.Button();
             this.HollywoodHackerButton = new System.Windows.Forms.Button();
-            this.TextColorPicker = new csx64.ColorPicker();
-            this.BackgroundColorPicker = new csx64.ColorPicker();
+            this.TextColorPicker = new CSX64.ColorPicker();
+            this.BackgroundColorPicker = new CSX64.ColorPicker();
             this.ColorSwapButton = new System.Windows.Forms.Button();
             this.CoolButton = new System.Windows.Forms.Button();
             this.HalloweenButton = new System.Windows.Forms.Button();

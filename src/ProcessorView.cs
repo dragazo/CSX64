@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.IO;
 
-namespace csx64
+namespace CSX64
 {
     /// <summary>
     /// Represents a debugging window for a CSX64 processor, as well as an editor and compiler for CSX64 assembly
@@ -19,7 +19,7 @@ namespace csx64
         /// <summary>
         /// The processor to display debugging data for
         /// </summary>
-        private CSX64 Computer;
+        private Computer Computer;
         /// <summary>
         /// The number of ticks that have elapsed
         /// </summary>
@@ -40,7 +40,7 @@ namespace csx64
         /// Creates a new processor view to monitor the specified computer
         /// </summary>
         /// <param name="computer">the computer to monitor</param>
-        public ProcessorView(CSX64 computer)
+        public ProcessorView(Computer computer)
         {
             InitializeComponent();
 
@@ -77,7 +77,7 @@ namespace csx64
             
             // alias graphics object and flags register
             Graphics g = e.Graphics;
-            CSX64.FlagsRegister f = Computer.GetFlags();
+            FlagsRegister f = Computer.GetFlags();
 
             // render position / settings
             float x, y;

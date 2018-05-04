@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.IO;
 
-namespace csx64
+namespace CSX64
 {
     [Obsolete]
     public partial class ConsoleClient : Form
@@ -33,7 +33,7 @@ namespace csx64
         /// <summary>
         /// The processor used for simulation
         /// </summary>
-        public CSX64 C;
+        public Computer C;
         /// <summary>
         /// The number of ticks that have elapsed
         /// </summary>
@@ -128,7 +128,7 @@ namespace csx64
         /// Creates a new graphical client with the specified computer
         /// </summary>
         /// <param name="computer">the computer to use for execution</param>
-        public ConsoleClient(CSX64 computer)
+        public ConsoleClient(Computer computer)
         {
             InitializeComponent();
 
@@ -458,7 +458,7 @@ namespace csx64
             switch (keyData)
             {
                 // rebind ctrl+C to abort
-                case Keys.Control | Keys.C: C.Terminate(CSX64.ErrorCode.Abort); return true;
+                case Keys.Control | Keys.C: C.Terminate(ErrorCode.Abort); return true;
             }
 
             // perform special interactive edit commands

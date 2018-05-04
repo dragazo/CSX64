@@ -1,4 +1,4 @@
-﻿namespace csx64
+﻿namespace CSX64
 {
     partial class GraphicalClient
     {

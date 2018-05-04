@@ -7,8 +7,8 @@
     <ProjectGuid>{A7B2AFFE-B544-4EB8-92B6-8B1BB85D6FC3}</ProjectGuid>
     <OutputType>Exe</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
-    <RootNamespace>csx64</RootNamespace>
-    <AssemblyName>csx64</AssemblyName>
+    <RootNamespace>CSX64</RootNamespace>
+    <AssemblyName>csx</AssemblyName>
     <TargetFrameworkVersion>v4.5.2</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
@@ -93,7 +93,16 @@
     <Compile Include="src\ConsoleClient.Designer.cs">
       <DependentUpon>ConsoleClient.cs</DependentUpon>
     </Compile>
-    <Compile Include="src\csx64.cs" />
+    <Compile Include="src\CSX64\Interface.cs" />
+    <Compile Include="src\CSX64\Memory.cs" />
+    <Compile Include="src\CSX64\Operators.cs" />
+    <Compile Include="src\CSX64\FileSystem.cs" />
+    <Compile Include="src\CSX64\Assembly.cs" />
+    <Compile Include="src\CSX64\Misc.cs" />
+    <Compile Include="src\CSX64\Utility.cs" />
+    <Compile Include="src\CSX64\Types.cs" />
+    <Compile Include="src\CSX64\Data.cs" />
+    <Compile Include="src\CSX64\Extensions.cs" />
     <Compile Include="src\OverflowQueue.cs" />
     <Compile Include="src\ProcessorView.cs">
       <SubType>Form</SubType>
@@ -151,6 +160,7 @@
     <Compile Include="Properties\Resources.Designer.cs">
       <AutoGen>True</AutoGen>
       <DependentUpon>Resources.resx</DependentUpon>
+      <DesignTime>True</DesignTime>
     </Compile>
     <EmbeddedResource Include="src\RenameDialog.resx">
       <DependentUpon>RenameDialog.cs</DependentUpon>
