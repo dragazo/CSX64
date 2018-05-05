@@ -281,6 +281,43 @@ namespace CSX64
             return stream;
         }
 
+        /// <summary>
+        /// Writes an ASCII C-style string to the <see cref="BinaryWriter"/>
+        /// </summary>
+        /// <param name="writer">the writer to use</param>
+        /// <param name="str">the string to write</param>
+        public static void WriteASCII_CString(this BinaryWriter writer, string str)
+        {
+            // write each character as an ASCII byte
+            foreach (char ch in str) writer.Write((byte)ch);
+            // then a terminator
+            writer.Write((byte)0);
+        }
+        /// <summary>
+        /// Reads an ASCII C-style string from the <see cref="BinaryReader"/>. Throws <see cref="EndOfStreamException"/> if the entire sting cannot be read.
+        /// </summary>
+        /// <param name="reader">the reader to use</param>
+        /// /// <exception cref="EndOfStreamException"></exception>
+        public static string ReadASCII_CString(this BinaryReader reader)
+        {
+            StringBuilder b = new StringBuilder();
+            byte ch;
+
+            while (true)
+            {
+                // read a character (stored as ASCII byte
+                ch = reader.ReadByte();
+
+                // if non-null, append as a character
+                if (ch != 0) b.Append((char)ch);
+                // otherwise we're done
+                else break;
+            }
+
+            // assign result
+            return b.ToString();
+        }
+
         // -- CSX64 encoding utilities -- //
 
         /// <summary>

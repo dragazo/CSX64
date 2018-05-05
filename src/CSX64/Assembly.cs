@@ -177,7 +177,7 @@ namespace CSX64
             // read the data (length-prefixed)
             count = reader.ReadInt32();
             byte[] data = new byte[count];
-            reader.Read(data, 0, count);
+            if (reader.Read(data, 0, count) != count) throw new FormatException("Object file was corrupted");
             obj.Data = data.ToList();
 
             // validate the object
@@ -896,7 +896,18 @@ namespace CSX64
             public UInt64 sizecode;
             public string[] args;       // must be array for ref params
 
-            public string last_static_label;
+            private int last_static_label_index = -1; // unique index for static labels
+            private string _last_static_label;
+            public string last_static_label // string value of last static label
+            {
+                get => _last_static_label;
+                set
+                {
+                    _last_static_label = value;
+                    ++last_static_label_index;
+                }
+            }
+
             public AssembleResult res;
 
             public UInt64 time;
@@ -1032,10 +1043,10 @@ namespace CSX64
                 return true;
             }
 
-            public static bool IsValidLabel(string token)
+            public static bool IsValidName(string token)
             {
-                // can't be nothing
-                if (token.Length == 0) return false;
+                // can't be empty or over 255 chars long
+                if (token.Length == 0 || token.Length > 255) return false;
 
                 // first char is underscore or letter
                 if (token[0] != '_' && !char.IsLetter(token[0])) return false;
@@ -1045,20 +1056,21 @@ namespace CSX64
 
                 return true;
             }
-            public bool MutateLabel(ref string label)
+            public bool MutateName(ref string label)
             {
                 // if defining a local label
                 if (label[0] == '.')
                 {
                     string sub = label.Substring(1); // local symbol name
-
+                    
                     // local name can't be empty
-                    if (!IsValidLabel(sub)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Local label name must be legal"); return false; }
+                    if (!IsValidName(sub)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: \"{label}\" is not a legal local symbol name"); return false; }
                     // can't make a local label before any non-local ones exist
-                    if (last_static_label == null) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: Cannot define a local label before the first static label"); return false; }
+                    if (last_static_label == null) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: Cannot define a local symbol before the first static label"); return false; }
 
                     // mutate the label
-                    label = $"__local_{time:x16}_{last_static_label}_{sub}";
+                    //label = $"__local_{time:x16}_{last_static_label}_{sub}";
+                    label = $"L{last_static_label_index:x}_{(time & 0xffff):x}_{sub}";
                 }
 
                 return true;
@@ -1276,13 +1288,13 @@ namespace CSX64
                             string val = token.Substring(pos, end - pos);
 
                             // mutate it
-                            if (!MutateLabel(ref val)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse imm \"{token}\"\n-> {res.ErrorMsg}"); return false; }
+                            if (!MutateName(ref val)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse imm \"{token}\"\n-> {res.ErrorMsg}"); return false; }
 
                             // create the hole for it
                             temp = new Expr() { Token = val };
 
                             // it either needs to be evaluatable or a valid label name
-                            if (!temp.Evaluate(file.Symbols, out UInt64 _res, out bool floating, ref err) && !IsValidLabel(val))
+                            if (!temp.Evaluate(file.Symbols, out UInt64 _res, out bool floating, ref err) && !IsValidName(val))
                             { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to resolve symbol as a valid imm \"{val}\"\n-> {err}"); return false; }
                         }
 
@@ -1787,7 +1799,12 @@ namespace CSX64
 
                 // make sure all symbols expressions were valid
                 foreach (var entry in file.Symbols)
+                {
                     if (!VerifyLegalExpression(entry.Value)) return false;
+
+                    // sanity check - ensure they also had legal names
+                    if (!IsValidName(entry.Key)) { res = new AssembleResult(AssembleError.InvalidLabel, $"Symbol name \"{entry.Key}\" is not valid"); return false; }
+                }
 
                 // make sure all hole expressions were valid
                 foreach (HoleData hole in file.Holes)
@@ -2144,15 +2161,21 @@ namespace CSX64
                 {
                     string label = args.label_defs[i]; // shorthand reference to current label
 
-                    // handle local mutation
-                    if (label.Length > 0 && label[0] != '.') args.last_static_label = label;
-                    if (!args.MutateLabel(ref label)) return args.res;
+                    // ensure it's not empty
+                    if (label.Length == 0) return new AssembleResult(AssembleError.InvalidLabel, $"line {args.line}: Empty label encountered");
 
-                    if (!AssembleArgs.IsValidLabel(label)) return new AssembleResult(AssembleError.InvalidLabel, $"line {args.line}: Symbol name \"{label}\" invalid");
+                    // handle local mutation
+                    if (label[0] != '.') args.last_static_label = label;
+
+                    // mutate and test result for legality
+                    if (!args.MutateName(ref label)) return args.res;
+                    if (!AssembleArgs.IsValidName(label)) return new AssembleResult(AssembleError.InvalidLabel, $"line {args.line}: Symbol name \"{label}\" is invalid");
+
+                    // ensure we don't redefine a symbol
                     if (file.Symbols.ContainsKey(label)) return new AssembleResult(AssembleError.SymbolRedefinition, $"line {args.line}: Symbol \"{label}\" was already defined");
 
                     // add the symbol as an address (uses illegal symbol #base, which will be defined at link time)
-                    file.Symbols.Add(label, new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Token = "#base" }, Right = new Expr() { Token = file.Data.LongCount().MakeUnsigned().ToString() } });
+                    file.Symbols.Add(label, new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Token = "#base" }, Right = new Expr() { IntResult = (UInt64)file.Data.Count } });
                 }
 
                 // empty lines are ignored
@@ -2169,7 +2192,7 @@ namespace CSX64
                                 if (symbol[0] == '.') return new AssembleResult(AssembleError.ArgError, $"line {args.line}: Cannot export local symbols");
 
                                 // test name for legality
-                                if (!AssembleArgs.IsValidLabel(symbol)) return new AssembleResult(AssembleError.InvalidLabel, $"line {args.line}: Invalid symbol name \"{symbol}\"");
+                                if (!AssembleArgs.IsValidName(symbol)) return new AssembleResult(AssembleError.InvalidLabel, $"line {args.line}: Invalid symbol name \"{symbol}\"");
 
                                 // don't add to global list twice
                                 if (file.GlobalSymbols.Contains(symbol)) return new AssembleResult(AssembleError.SymbolRedefinition, $"line {args.line}: Attempt to export symbol \"{symbol}\" multiple times");
@@ -2188,7 +2211,7 @@ namespace CSX64
                                 if (symbol[0] == '.') return new AssembleResult(AssembleError.ArgError, $"line {args.line}: Cannot import local symbols");
 
                                 // test name for legality
-                                if (!AssembleArgs.IsValidLabel(symbol)) return new AssembleResult(AssembleError.InvalidLabel, $"line {args.line}: Invalid symbol name \"{symbol}\"");
+                                if (!AssembleArgs.IsValidName(symbol)) return new AssembleResult(AssembleError.InvalidLabel, $"line {args.line}: Invalid symbol name \"{symbol}\"");
 
                                 // don't add to external list twice
                                 if (file.ExternalSymbols.Contains(symbol)) return new AssembleResult(AssembleError.SymbolRedefinition, $"line {args.line}: Attempt to import symbol \"{symbol}\" multiple times");
@@ -2201,9 +2224,9 @@ namespace CSX64
                         case "DEF":
                             if (args.args.Length != 2) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: DEF expected 2 args");
 
-                            // mutate and test name for legality
-                            if (!args.MutateLabel(ref args.args[0])) return args.res;
-                            if (!AssembleArgs.IsValidLabel(args.args[0])) return new AssembleResult(AssembleError.InvalidLabel, $"line {args.line}: Invalid label name \"{args.args[0]}\"");
+                            // mutate and test result for legality
+                            if (!args.MutateName(ref args.args[0])) return args.res;
+                            if (!AssembleArgs.IsValidName(args.args[0])) return new AssembleResult(AssembleError.InvalidLabel, $"line {args.line}: Invalid label name \"{args.args[0]}\"");
 
                             // get the expression
                             if (!args.TryParseImm(args.args[1], out hole)) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: DEF expected an expression as second arg\n-> {args.res.ErrorMsg}");

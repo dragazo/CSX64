@@ -152,7 +152,7 @@ namespace CSX64
             switch (action)
             {
                 case ProgramAction.ExecuteConsole:
-                    if (pathspec.Count == 1) { Print("Execution mode expected a file to execute"); return 0; }
+                    if (pathspec.Count == 0) { Print("Execution mode expected a file to execute"); return 0; }
 
                     // first path is file to run, then pass all of pathspec as command line args for client code
                     RunRawConsole(pathspec[0], pathspec.ToArray());
@@ -394,7 +394,7 @@ namespace CSX64
             obj = null;
 
             FileStream f = null; // file handle
-            
+
             try
             {
                 // open the file
@@ -415,11 +415,11 @@ namespace CSX64
             catch (UnauthorizedAccessException) { Print($"You do not have permission to open \"{path}\" for reading"); return false; }
             catch (FileNotFoundException) { Print($"File \"{path}\" could not be found"); return false; }
             catch (NotSupportedException) { Print($"Path \"{path}\" was of an unsupported format"); return false; }
+            catch (EndOfStreamException) { Print($"Object file \"{path}\" was corrupted"); return false; }
             catch (IOException) { Print($"An error occurred while reading file \"{path}\""); return false; }
 
-            // things from BinaryFormatter.Deserialize
-            catch (SerializationException) { Print($"file \"{path}\" was not an object file"); return false; }
-            catch (SecurityException) { Print($"You do not have permission to serialize object file \"{path}\""); return false; }
+            // things from ObjectFile.ReadFrom
+            catch (FormatException) { Print($"Object file \"{path}\" was corrupted"); return false; }
 
             // things from casting after deserialization
             catch (InvalidCastException) { Print($"file \"{path}\" was incorrectly-formatted"); return false; }
