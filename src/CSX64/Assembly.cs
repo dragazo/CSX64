@@ -908,6 +908,8 @@ namespace CSX64
                 }
             }
 
+            public UInt64 current_line_pos; // value used for the $ macro
+
             public AssembleResult res;
 
             public UInt64 time;
@@ -1272,69 +1274,84 @@ namespace CSX64
                     if (pos == end) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Empty token encountered in expression \"{token}\""); return false; }
 
                     // -- process value -- //
-                    {
-                        // -- convert value to an expression tree --
 
-                        // if sub-expression
-                        if (token[pos] == '(')
+                    // -- convert value to an expression tree -- //
+
+                    // if sub-expression
+                    if (token[pos] == '(')
+                    {
+                        // parse it into temp
+                        if (!TryParseImm(token.Substring(pos + 1, end - pos - 2), out temp)) return false;
+                    }
+                    // otherwise is value
+                    else
+                    {
+                        // get the value to insert
+                        string val = token.Substring(pos, end - pos);
+
+                        // mutate it
+                        if (!MutateName(ref val)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse imm \"{token}\"\n-> {res.ErrorMsg}"); return false; }
+
+                        // if it's the $ current line position macro
+                        if (val == "$")
                         {
-                            // parse it into temp
-                            if (!TryParseImm(token.Substring(pos + 1, end - pos - 2), out temp)) return false;
+                            temp = new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Token = "#base" }, Right = new Expr() { IntResult = current_line_pos } };
                         }
-                        // otherwise is value
+                        // if it's the $$ last static label macro
+                        else if (val == "$$")
+                        {
+                            // can't use this before there's a static label
+                            if (last_static_label == null) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Cannot use the last static label macro $$ before the first static label"); return false; }
+
+                            temp = new Expr() { Token = last_static_label };
+                        }
+                        // otherwise it's a normal value/symbol
                         else
                         {
-                            // get the value to insert
-                            string val = token.Substring(pos, end - pos);
-
-                            // mutate it
-                            if (!MutateName(ref val)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse imm \"{token}\"\n-> {res.ErrorMsg}"); return false; }
-
                             // create the hole for it
                             temp = new Expr() { Token = val };
 
                             // it either needs to be evaluatable or a valid label name
                             if (!temp.Evaluate(file.Symbols, out UInt64 _res, out bool floating, ref err) && !IsValidName(val))
-                            { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to resolve symbol as a valid imm \"{val}\"\n-> {err}"); return false; }
+                            { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to resolve token as a valid imm or symbol name \"{val}\"\n-> {err}"); return false; }
                         }
-
-                        // -- handle unary op by modifying subtree --
-
-                        // handle the unary ops in terms of binary ops (stack provides right-to-left evaluation)
-                        while (unaryOps.Count > 0)
-                        {
-                            char uop = unaryOps.Pop();
-                            switch (uop)
-                            {
-                                case '+': break;
-                                case '-': temp = new Expr() { OP = Expr.OPs.Neg, Left = temp }; break;
-                                case '~': temp = new Expr() { OP = Expr.OPs.BitNot, Left = temp }; break;
-                                case '!': temp = new Expr() { OP = Expr.OPs.LogNot, Left = temp }; break;
-                                case '*': temp = new Expr() { OP = Expr.OPs.Float, Left = temp }; break;
-                                case '/': temp = new Expr() { OP = Expr.OPs.Int, Left = temp }; break;
-
-                                default: throw new NotImplementedException($"unary op \'{uop}\' not implemented");
-                            }
-                        }
-
-                        // -- append subtree to main tree --
-
-                        // if no tree yet, use this one
-                        if (hole == null) hole = temp;
-                        // otherwise append to current (guaranteed to be defined by second pass)
-                        else
-                        {
-                            //if (stack.Peek().Left == null) stack.Peek().Left = temp; else stack.Peek().Right = temp;
-
-                            // put it in the right (guaranteed by this algorithm to be empty)
-                            stack.Peek().Right = temp;
-                        }
-
-                        // flag as a valid binary pair
-                        binPair = true;
                     }
 
+                    // -- handle unary op by modifying subtree -- //
+
+                    // handle the unary ops in terms of binary ops (stack provides right-to-left evaluation)
+                    while (unaryOps.Count > 0)
+                    {
+                        char uop = unaryOps.Pop();
+                        switch (uop)
+                        {
+                            case '+': break;
+                            case '-': temp = new Expr() { OP = Expr.OPs.Neg, Left = temp }; break;
+                            case '~': temp = new Expr() { OP = Expr.OPs.BitNot, Left = temp }; break;
+                            case '!': temp = new Expr() { OP = Expr.OPs.LogNot, Left = temp }; break;
+                            case '*': temp = new Expr() { OP = Expr.OPs.Float, Left = temp }; break;
+                            case '/': temp = new Expr() { OP = Expr.OPs.Int, Left = temp }; break;
+
+                            default: throw new NotImplementedException($"unary op \'{uop}\' not implemented");
+                        }
+                    }
+
+                    // -- append subtree to main tree --
+
+                    // if no tree yet, use this one
+                    if (hole == null) hole = temp;
+                    // otherwise append to current (guaranteed to be defined by second pass)
+                    else
+                    {
+                        // put it in the right (guaranteed by this algorithm to be empty)
+                        stack.Peek().Right = temp;
+                    }
+
+                    // flag as a valid binary pair
+                    binPair = true;
+
                     // -- process op -- //
+
                     if (end < token.Length)
                     {
                         // ternary conditional has special rules
@@ -2130,7 +2147,7 @@ namespace CSX64
                 ["__fepsilon__"] = new Expr() { FloatResult = double.Epsilon },
 
                 ["__pi__"] = new Expr() { FloatResult = Math.PI },
-                ["__e__"] = new Expr() { FloatResult = Math.E },
+                ["__e__"] = new Expr() { FloatResult = Math.E }
             };
 
             int pos = 0, end = 0; // position in code
@@ -2146,6 +2163,9 @@ namespace CSX64
 
             while (pos < code.Length)
             {
+                // update current line pos
+                args.current_line_pos = (UInt64)args.file.Data.Count;
+
                 // find the next separator
                 for (end = pos; end < code.Length && code[end] != '\n' && code[end] != AssembleArgs.CommentChar; ++end) ;
 
@@ -2175,7 +2195,7 @@ namespace CSX64
                     if (file.Symbols.ContainsKey(label)) return new AssembleResult(AssembleError.SymbolRedefinition, $"line {args.line}: Symbol \"{label}\" was already defined");
 
                     // add the symbol as an address (uses illegal symbol #base, which will be defined at link time)
-                    file.Symbols.Add(label, new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Token = "#base" }, Right = new Expr() { IntResult = (UInt64)file.Data.Count } });
+                    file.Symbols.Add(label, new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Token = "#base" }, Right = new Expr() { IntResult = args.current_line_pos } });
                 }
 
                 // empty lines are ignored
