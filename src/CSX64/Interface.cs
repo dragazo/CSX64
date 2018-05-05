@@ -89,15 +89,13 @@ namespace CSX64
         }
 
         /// <summary>
-        /// Initializes the computer for execution. Returns true if successful (fails on insufficient memory or empty/null data)
+        /// Initializes the computer for execution
         /// </summary>
-        /// <param name="data">The memory to load before starting execution (memory beyond this range is undefined)</param>
+        /// <param name="data">the memory to load before starting execution (memory beyond this range is undefined)</param>
+        /// <param name="args">the command line arguments to provide to the computer. pass null or empty array for none</param>
         /// <param name="stacksize">the amount of additional space to allocate for the program's stack</param>
-        public bool Initialize(byte[] data, UInt64 stacksize = 2 * 1024 * 1024)
+        public void Initialize(byte[] data, string[] args, UInt64 stacksize = 2 * 1024 * 1024)
         {
-            // make sure we're not loading null array
-            if (data == null || data.Length == 0) return false;
-            
             // get new memory array
             Memory = new byte[(UInt64)data.Length + stacksize];
             
@@ -113,18 +111,45 @@ namespace CSX64
             }
             // randomize public flags
             Flags.Flags = (Flags.Flags & ~PublicFlags) | ((UInt64)Rand.Next() & PublicFlags);
-            // initialize stack register to end of memory segment
-            Registers[15].x64 = (UInt64)Memory.Length;
 
             // set execution state
             Pos = 0;
             Running = true;
             SuspendedRead = false;
             Sleep = 0;
-
             Error = ErrorCode.None;
 
-            return true;
+            // get the stack pointer
+            UInt64 stack = (UInt64)Memory.Length;
+
+            // if we have cmd line args, load them
+            if (args != null && args.Length > 0)
+            {
+                UInt64[] pointers = new UInt64[args.Length]; // an array of pointers to args in computer memory
+
+                // for each arg (backwards to make more sense visually, but the order doesn't actually matter)
+                for (int i = args.Length - 1; i >= 0; --i)
+                {
+                    // push the arg onto the stack
+                    stack -= (UInt64)args[i].Length + 1;
+                    SetCString(stack, args[i]);
+
+                    // record pointer to this arg
+                    pointers[i] = stack;
+                }
+
+                // make room for the pointer array
+                stack -= 8 * (UInt64)pointers.Length;
+                // write pointer array to memory
+                for (int i = 0; i < pointers.Length; ++i) SetMem(stack + (UInt64)i * 8, pointers[i]);
+            }
+
+            // load arg count and arg array pointer to $0 and $1 respecively
+            Registers[0].x64 = args != null ? (UInt64)args.Length : 0;
+            Registers[1].x64 = stack;
+
+            // initialize stack register
+            Registers[15].x64 = stack;
         }
 
         /// <summary>

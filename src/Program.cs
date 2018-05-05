@@ -68,6 +68,7 @@ namespace CSX64
             "    -l, --link             object files should be linked into an executable\n" +
             "    -o, --out <pathspec>   specifies the output path. if not provided, will usually take on a default value\n" +
             "        --config           opens the settings menu\n" +
+            "        --end              stops parsing command line arguments as options and assumes the rest are all part of pathspec\n" +
             "\n" +
             "if no options are provided, will execute a program via the console client\n" +
             "";
@@ -94,82 +95,92 @@ namespace CSX64
             // run statics fom client sources
             GraphicalComputer.InitStatics();
             
-            List<string> paths = new List<string>();             // input paths
+            List<string> pathspec = new List<string>();          // input paths
             string output = null;                                // output path
             ProgramAction action = ProgramAction.ExecuteConsole; // requested action
+            bool accepting_options = true;                       // marks that we're still accepting options
 
             // process the terminal args
             for (int i = 0; i < args.Length; ++i)
             {
-                switch (args[i])
+                // if we're still accepting options
+                if (accepting_options)
                 {
-                    // do the long names
-                    case "--help": Print(HelpMessage); return 0;
-                    case "--graphical": if (action != ProgramAction.ExecuteConsole) { Print("usage error - see -h for help"); return 0; } action = ProgramAction.ExecuteGraphical; break;
-                    case "--assemble": if (action != ProgramAction.ExecuteConsole) { Print("usage error - see -h for help"); return 0; } action = ProgramAction.Assemble; break;
-                    case "--link": if (action != ProgramAction.ExecuteConsole) { Print("usage error - see -h for help"); return 0; } action = ProgramAction.Link; break;
-                    case "--output": if (output != null || i + 1 >= args.Length) { Print("usage error - see -h for help"); return 0; } output = args[++i]; break;
-                    case "--config": SettingsDialog.Prompt(); return 0;
-                    case "--": break; // -- is a no-op separator
+                    // parse as an option
+                    switch (args[i])
+                    {
+                        // do the long names
+                        case "--help": Print(HelpMessage); return 0;
+                        case "--graphical": if (action != ProgramAction.ExecuteConsole) { Print("usage error - see -h for help"); return 0; } action = ProgramAction.ExecuteGraphical; break;
+                        case "--assemble": if (action != ProgramAction.ExecuteConsole) { Print("usage error - see -h for help"); return 0; } action = ProgramAction.Assemble; break;
+                        case "--link": if (action != ProgramAction.ExecuteConsole) { Print("usage error - see -h for help"); return 0; } action = ProgramAction.Link; break;
+                        case "--output": if (output != null || i + 1 >= args.Length) { Print("usage error - see -h for help"); return 0; } output = args[++i]; break;
+                        case "--config": SettingsDialog.Prompt(); return 0;
+                        case "--end": accepting_options = false; break;
+                        case "--": break; // -- is a no-op separator
 
-                    default:
-                        // do the short names
-                        if (0 < args[i].Length && args[i][0] == '-')
-                        {
-                            string arg = args[i]; // record parsing arg (i may change upon -o option)
-                            for (int j = 1; j < arg.Length; ++j)
+                        default:
+                            // do the short names
+                            if (0 < args[i].Length && args[i][0] == '-')
                             {
-                                switch (arg[j])
+                                string arg = args[i]; // record parsing arg (i may change upon -o option)
+                                for (int j = 1; j < arg.Length; ++j)
                                 {
-                                    case 'h': Print(HelpMessage); return 0;
-                                    case 'g': if (action != ProgramAction.ExecuteConsole) { Print("usage error - see -h for help"); return 0; } action = ProgramAction.ExecuteGraphical; break;
-                                    case 'a': if (action != ProgramAction.ExecuteConsole) { Print("usage error - see -h for help"); return 0; } action = ProgramAction.Assemble; break;
-                                    case 'l': if (action != ProgramAction.ExecuteConsole) { Print("usage error - see -h for help"); return 0; } action = ProgramAction.Link; break;
-                                    case 'o': if (output != null || i + 1 >= args.Length) { Print("usage error - see -h for help"); return 0; } output = args[++i]; break;
+                                    switch (arg[j])
+                                    {
+                                        case 'h': Print(HelpMessage); return 0;
+                                        case 'g': if (action != ProgramAction.ExecuteConsole) { Print("usage error - see -h for help"); return 0; } action = ProgramAction.ExecuteGraphical; break;
+                                        case 'a': if (action != ProgramAction.ExecuteConsole) { Print("usage error - see -h for help"); return 0; } action = ProgramAction.Assemble; break;
+                                        case 'l': if (action != ProgramAction.ExecuteConsole) { Print("usage error - see -h for help"); return 0; } action = ProgramAction.Link; break;
+                                        case 'o': if (output != null || i + 1 >= args.Length) { Print("usage error - see -h for help"); return 0; } output = args[++i]; break;
 
-                                    default: Print($"unknown option '{arg[j]}' see -h for help"); return 0;
+                                        default: Print($"unknown option '{arg[j]}' see -h for help"); return 0;
+                                    }
                                 }
                             }
-                        }
-                        // otherwise it's a file path
-                        else paths.Add(args[i]);
+                            // otherwise it's part of pathspec
+                            else pathspec.Add(args[i]);
 
-                        break;
+                            break;
+                    }
                 }
+                // if we're not accepting options, it's part of pathspec
+                else pathspec.Add(args[i]);
             }
 
             // perform the action
             switch (action)
             {
                 case ProgramAction.ExecuteConsole:
-                    if (paths.Count != 1) { Print("Execution mode expected one argument\n"); return 0; }
+                    if (pathspec.Count == 1) { Print("Execution mode expected a file to execute"); return 0; }
 
-                    RunRawConsole(paths[0]);
+                    // first path is file to run, then pass all of pathspec as command line args for client code
+                    RunRawConsole(pathspec[0], pathspec.ToArray());
                     break;
                 case ProgramAction.ExecuteGraphical:
-                    if (paths.Count != 1) { Print("Execution mode expected one argument\n"); return 0; }
+                    if (pathspec.Count != 1) { Print("Execution mode expected one argument"); return 0; }
 
-                    RunGraphicalClient(paths[0]);
+                    RunGraphicalClient(pathspec[0]);
                     break;
 
                 case ProgramAction.Assemble:
                     // if no output is provided, batch process
                     if (output == null)
                     {
-                        foreach (string path in paths) Assemble(path);
+                        foreach (string path in pathspec) Assemble(path);
                     }
                     // otherwise, we're expecting only one input with a named output
                     else
                     {
-                        if (paths.Count != 1) { Print("Assemble mode with an explicit output expected only one input assembly file\n"); return 0; }
-                        Assemble(paths[0], output);
+                        if (pathspec.Count != 1) { Print("Assemble mode with an explicit output expected only one input assembly file\n"); return 0; }
+                        Assemble(pathspec[0], output);
                     }
                     break;
                 case ProgramAction.Link:
                     // if no output was specified, provide a default
                     if (output == null) output = "a.exe";
 
-                    Link(paths, output);
+                    Link(pathspec, output);
                     break;
             }
 
@@ -484,13 +495,14 @@ namespace CSX64
         /// Executes a program via the console client. returns true if there were no errors
         /// </summary>
         /// <param name="path">the file to execute</param>
-        private static bool RunRawConsole(string path)
+        /// <param name="args">the command line arguments for the client program</param>
+        private static bool RunRawConsole(string path, string[] args)
         {
             // read the binary data
             if (!LoadBinaryFile(path, out byte[] exe)) return false;
 
             // run as a console client and return success flag
-            return RunRawConsole(exe);
+            return RunRawConsole(exe, args);
         }
         /// <summary>
         /// Executes a program via the graphical client. returns true if there were no errors
@@ -519,13 +531,14 @@ namespace CSX64
         /// Executes a program via the console client. returns true if there were no errors
         /// </summary>
         /// <param name="exe">the code to execute</param>
-        private static bool RunRawConsole(byte[] exe)
+        /// <param name="args">the command line arguments for the client program</param>
+        private static bool RunRawConsole(byte[] exe, string[] args)
         {
             // create the computer
             using (Computer computer = new Computer())
             {
                 // initialize program
-                if (!computer.Initialize(exe)) { Print("Failed to initialize program"); return false; }
+                computer.Initialize(exe, args);
                 // set up private flags
                 SetupPrivateFlags(computer.GetFlags());
 
@@ -556,7 +569,7 @@ namespace CSX64
             using (GraphicalComputer computer = new GraphicalComputer())
             {
                 // initialize program
-                if (!computer.Initialize(exe)) { Print("Failed to initialize program"); return false; }
+                computer.Initialize(exe, null);
                 // set up private flags
                 SetupPrivateFlags(computer.GetFlags());
 
