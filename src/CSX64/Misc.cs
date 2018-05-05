@@ -6,19 +6,6 @@ namespace CSX64
 {
     public partial class Computer
     {
-        static Computer()
-        {
-            // create definitions for all the syscall codes
-            foreach (SyscallCode item in Enum.GetValues(typeof(SyscallCode)))
-                Assembly.DefineSymbol($"sys_{item.ToString().ToLower()}", (UInt64)item);
-
-            // create definitions for all the error codes
-            foreach (ErrorCode item in Enum.GetValues(typeof(ErrorCode)))
-                Assembly.DefineSymbol($"err_{item.ToString().ToLower()}", (UInt64)item);
-        }
-
-        // ------------------------------------------
-
         ~Computer()
         {
             Dispose(false);

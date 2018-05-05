@@ -8,6 +8,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using static CSX64.Utility;
 
 namespace CSX64
 {
@@ -294,11 +295,11 @@ namespace CSX64
                     break;
 
                 case (UInt64)GraphicalSyscallCodes.DrawString: // ($1 point) ($2 string)
-                    if (!GetPoint(GetRegister(1).x64, out point) || !GetString(GetRegister(2).x64, 2, out str)) { ret = false; break; }
+                    if (!GetPoint(GetRegister(1).x64, out point) || !GetCString(GetRegister(2).x64, out str)) { ret = false; break; }
                     Graphics.DrawString(str, Font, Brush, point);
                     break;
                 case (UInt64)GraphicalSyscallCodes.DrawStringBounded: // ($1 rect) ($2 string)
-                    if (!GetRect(GetRegister(1).x64, out rect) || !GetString(GetRegister(2).x64, 2, out str)) { ret = false; break; }
+                    if (!GetRect(GetRegister(1).x64, out rect) || !GetCString(GetRegister(2).x64, out str)) { ret = false; break; }
                     Graphics.DrawString(str, Font, Brush, rect);
                     break;
                     

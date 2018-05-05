@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Numerics;
+using static CSX64.Utility;
 
 // -- Operators -- //
 

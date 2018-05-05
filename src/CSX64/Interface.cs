@@ -1,4 +1,5 @@
 ﻿using System;
+using static CSX64.Utility;
 
 // -- Interface -- //
 
@@ -27,6 +28,15 @@ namespace CSX64
         public const int NFileDescriptors = 16;
 
         // ----------------------------------------
+
+        protected Register[] Registers = new Register[16];
+        protected FlagsRegister Flags = new FlagsRegister();
+
+        protected byte[] Memory = new byte[0];
+
+        protected FileDescriptor[] FileDescriptors = new FileDescriptor[NFileDescriptors];
+
+        protected Random Rand = new Random();
 
         /// <summary>
         /// The current execution positon (executed on next tick)
@@ -79,9 +89,9 @@ namespace CSX64
         }
 
         /// <summary>
-        /// Initializes the computer for execution. Returns true if successful (fails on insufficient memory)
+        /// Initializes the computer for execution. Returns true if successful (fails on insufficient memory or empty/null data)
         /// </summary>
-        /// <param name="data">The memory to load before starting execution (extra memory is undefined)</param>
+        /// <param name="data">The memory to load before starting execution (memory beyond this range is undefined)</param>
         /// <param name="stacksize">the amount of additional space to allocate for the program's stack</param>
         public bool Initialize(byte[] data, UInt64 stacksize = 2 * 1024 * 1024)
         {
@@ -94,15 +104,15 @@ namespace CSX64
             // copy over the data
             data.CopyTo(Memory, 0);
 
-            // randomize registers except stack register
-            for (int i = Registers.Length - 2; i >= 0; --i)
+            // randomize registers (except stack register)
+            for (int i = 0; i < Registers.Length - 1; ++i)
             {
                 Registers[i].x32 = (UInt64)Rand.Next();
                 Registers[i].x64 <<= 32;
                 Registers[i].x32 = (UInt64)Rand.Next();
             }
-            // randomize flags
-            Flags.Flags = (UInt64)Rand.Next() & PublicFlags;
+            // randomize public flags
+            Flags.Flags = (Flags.Flags & ~PublicFlags) | ((UInt64)Rand.Next() & PublicFlags);
             // initialize stack register to end of memory segment
             Registers[15].x64 = (UInt64)Memory.Length;
 
@@ -110,8 +120,9 @@ namespace CSX64
             Pos = 0;
             Running = true;
             SuspendedRead = false;
-            Error = ErrorCode.None;
             Sleep = 0;
+
+            Error = ErrorCode.None;
 
             return true;
         }
@@ -119,12 +130,12 @@ namespace CSX64
         /// <summary>
         /// Causes the machine to end execution and release various system resources (e.g. file handles).
         /// </summary>
-        /// <param name="code">The error code to emit</param>
-        public void Terminate(ErrorCode code = ErrorCode.None)
+        /// <param name="err">The error code to emit</param>
+        public void Terminate(ErrorCode err = ErrorCode.None)
         {
             if (Running)
             {
-                Error = code;
+                Error = err;
                 Running = false;
 
                 CloseFiles(); // close all the file descriptors
@@ -166,45 +177,38 @@ namespace CSX64
         }
 
         /// <summary>
+        /// Closes all the managed file descriptors and severs ties to unmanaged file descriptors.
+        /// </summary>
+        public void CloseFiles()
+        {
+            // close all files
+            foreach (FileDescriptor fd in FileDescriptors) fd.Close();
+        }
+
+        /// <summary>
         /// Handles syscall instructions from the processor. Returns true iff the syscall was handled successfully.
         /// Should not be called directly: only by interpreted syscall instructions
         /// </summary>
         protected virtual bool Syscall()
         {
-            // requested syscall in R0
             switch (Registers[0].x64)
             {
-                // R1 fd, R2 data, R3 count
-                // R0 <- #bytes read
-                // ZF = R0 == 0
-                case (UInt64)SyscallCode.Read: return FS_Read();
-                // R1 fd, R2 data, R3 count
-                case (UInt64)SyscallCode.Write: return FS_Write();
+                case (UInt64)SyscallCode.Read: return Sys_Read();
+                case (UInt64)SyscallCode.Write: return Sys_Write();
                 
-                // R1 path, R2 mode
-                // R0 <- fd
-                case (UInt64)SyscallCode.Open: return FS_Open();
-                // R1 fd
-                case (UInt64)SyscallCode.Close: return FS_Close();
+                case (UInt64)SyscallCode.Open: return Sys_Open();
+                case (UInt64)SyscallCode.Close: return Sys_Close();
 
-                // R1 fd
-                case (UInt64)SyscallCode.Flush: return FS_Flush();
+                case (UInt64)SyscallCode.Flush: return Sys_Flush();
 
-                // R1 fd, R2 pos, R3 origin
-                case (UInt64)SyscallCode.Seek: return FS_Seek();
-                // R1 fd
-                case (UInt64)SyscallCode.Tell: return FS_Tell();
+                case (UInt64)SyscallCode.Seek: return Sys_Seek();
+                case (UInt64)SyscallCode.Tell: return Sys_Tell();
 
-                // R1 from_path, R2 to_path
-                case (UInt64)SyscallCode.Move: return FS_Move();
-                // R1 path
-                case (UInt64)SyscallCode.Remove: return FS_Remove();
-                // R1 path
-                case (UInt64)SyscallCode.Mkdir: return FS_Mkdir();
-                // R1 path
-                case (UInt64)SyscallCode.Rmdir: return FS_Rmdir();
+                case (UInt64)SyscallCode.Move: return Sys_Move();
+                case (UInt64)SyscallCode.Remove: return Sys_Remove();
+                case (UInt64)SyscallCode.Mkdir: return Sys_Mkdir();
+                case (UInt64)SyscallCode.Rmdir: return Sys_Rmdir();
                 
-                // R1 err
                 case (UInt64)SyscallCode.Exit: Terminate((ErrorCode)Registers[1].x64); return true;
 
                 // ----------------------------------
@@ -398,7 +402,7 @@ namespace CSX64
                 case OPCode.LOOP:
                     if (!GetMemAdv(1, out a) || !GetAddressAdv(out b)) return false;
                     c = Registers[a >> 4].Get((a >> 2) & 3);
-                    c = c - Size(a & 3); // since we know we're subtracting a positive value and only comparing to zero, no need to truncate
+                    c -= Size(a & 3);
                     Registers[a >> 4].Set((a >> 2) & 3, c);
                     if (c != 0) Pos = b;
                     return true;
@@ -429,7 +433,6 @@ namespace CSX64
                     }
 
                 case OPCode.SLP: if (!FetchIMMRMFormat(out a, out b)) return false; Sleep = b; return true;
-
 
                 // otherwise, unknown opcode
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;

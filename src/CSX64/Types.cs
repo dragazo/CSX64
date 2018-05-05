@@ -222,7 +222,7 @@ namespace CSX64
         // ---------------------
 
         /// <summary>
-        /// Assigns the given data to this stream. Throws <see cref="AccessViolationException"/> if already in use
+        /// Assigns the given stream to this file descriptor. Throws <see cref="AccessViolationException"/> if already in use
         /// </summary>
         /// <param name="stream">the stream source</param>
         /// <param name="managed">marks that this stream is considered "managed". see CSX64 manual for more information</param>
@@ -237,17 +237,21 @@ namespace CSX64
             Interactive = interactive;
         }
         /// <summary>
-        /// Closes the file. If already closed, does nothing
+        /// Unlinks the stream and makes this file descriptor unused. If managed, first closes the stream. If not currenty in use, does nothing.
         /// </summary>
         public void Close()
         {
             if (InUse)
             {
-                // close the stream
-                try { __Stream.Close(); }
-                catch (Exception) { }
-                // ensure stream is nulled even if close() throws
-                finally { __Stream = null; }
+                if (Managed)
+                {
+                    // close the stream
+                    try { __Stream.Close(); }
+                    catch (Exception) { }
+                    // ensure stream is nulled even if close() throws
+                    finally { __Stream = null; }
+                }
+                else __Stream = null;
             }
         }
     }

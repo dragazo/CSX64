@@ -1,5 +1,5 @@
 ﻿using System;
-using System.Text;
+using static CSX64.Utility;
 
 // -- Memory -- //
 
@@ -16,13 +16,17 @@ namespace CSX64
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
         public bool GetMem(UInt64 pos, UInt64 size, out UInt64 res, bool _abide_slow = true)
         {
+            // refer to utility function
             if (Memory.Read(pos, size, out res))
             {
                 if (_abide_slow && Flags.SlowMemory) Sleep += size;
                 return true;
             }
-
-            Terminate(ErrorCode.OutOfBounds); return false;
+            else
+            {
+                Terminate(ErrorCode.OutOfBounds);
+                return false;
+            }
         }
         /// <summary>
         /// Writes a value to memory (fails with OutOfBounds if invalid)
@@ -33,13 +37,17 @@ namespace CSX64
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
         public bool SetMem(UInt64 pos, UInt64 size, UInt64 val, bool _abide_slow = true)
         {
+            // refer to utility function
             if (Memory.Write(pos, size, val))
             {
                 if (_abide_slow && Flags.SlowMemory) Sleep += size;
                 return true;
             }
-
-            Terminate(ErrorCode.OutOfBounds); return false;
+            else
+            {
+                Terminate(ErrorCode.OutOfBounds);
+                return false;
+            }
         }
 
         // -- typed memory access -- //
@@ -270,50 +278,46 @@ namespace CSX64
         // -- additional memory utilities -- //
 
         /// <summary>
-        /// Reads a null-terminated string from memory. Returns true if successful, otherwise fails with OutOfBounds and returns false
+        /// Reads a C-style string from memory. Returns true if successful, otherwise fails with OutOfBounds and returns false
         /// </summary>
         /// <param name="pos">the address in memory of the first character in the string</param>
         /// <param name="charsize">the size of each character in bytes</param>
         /// <param name="str">the resulting string</param>
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool GetString(UInt64 pos, UInt64 charsize, out string str, bool _abide_slow = true)
+        public bool GetCString(UInt64 pos, out string str, bool _abide_slow = true)
         {
-            // use builder for efficiency
-            StringBuilder b = new StringBuilder();
-            UInt64 val;
-
-            // read the string from memory
-            for (UInt64 i = 0; ; ++i)
+            // refer to utility function
+            if (Memory.ReadCString(pos, out str))
             {
-                // get a char from memory
-                if (!GetMem(pos + i * charsize, charsize, out val, _abide_slow)) { str = null; return false; }
-
-                // add if non-null, otherwise done
-                if (val != 0) b.Append((char)val);
-                else break;
+                if (_abide_slow && Flags.SlowMemory) Sleep += (UInt64)str.Length + 1;
+                return true;
             }
-
-            // return the resulting string
-            str = b.ToString();
-            return true;
+            else
+            {
+                Terminate(ErrorCode.OutOfBounds);
+                return false;
+            }
         }
         /// <summary>
-        /// Writes a null-terminated string to memory. Returns true if successful, otherwise fails with OutOfBounds and returns false
+        /// Writes a C-style string to memory. Returns true if successful, otherwise fails with OutOfBounds and returns false
         /// </summary>
         /// <param name="pos">the address in memory of the first character to write</param>
         /// <param name="charsize">the size of each character in bytes</param>
         /// <param name="str">the string to write</param>
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool SetString(UInt64 pos, UInt64 charsize, string str, bool _abide_slow = true)
+        public bool SetCString(UInt64 pos, string str, bool _abide_slow = true)
         {
-            // read the string from memory
-            for (UInt64 i = 0; i < (UInt64)str.Length; ++i)
-                if (!SetMem(pos + i * charsize, charsize, str[(int)i], _abide_slow)) return false;
-
-            // write the null terminator
-            if (!SetMem(pos + (UInt64)str.Length * charsize, charsize, 0, _abide_slow)) return false;
-
-            return true;
+            // refer to utility function
+            if (Memory.WriteCString(pos, str))
+            {
+                if (_abide_slow && Flags.SlowMemory) Sleep += (UInt64)str.Length + 1;
+                return true;
+            }
+            else
+            {
+                Terminate(ErrorCode.OutOfBounds);
+                return false;
+            }
         }
 
         /// <summary>

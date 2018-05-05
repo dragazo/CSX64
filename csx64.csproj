@@ -96,13 +96,11 @@
     <Compile Include="src\CSX64\Interface.cs" />
     <Compile Include="src\CSX64\Memory.cs" />
     <Compile Include="src\CSX64\Operators.cs" />
-    <Compile Include="src\CSX64\FileSystem.cs" />
+    <Compile Include="src\CSX64\Syscall.cs" />
     <Compile Include="src\CSX64\Assembly.cs" />
     <Compile Include="src\CSX64\Misc.cs" />
     <Compile Include="src\CSX64\Utility.cs" />
     <Compile Include="src\CSX64\Types.cs" />
-    <Compile Include="src\CSX64\Data.cs" />
-    <Compile Include="src\CSX64\Extensions.cs" />
     <Compile Include="src\OverflowQueue.cs" />
     <Compile Include="src\ProcessorView.cs">
       <SubType>Form</SubType>

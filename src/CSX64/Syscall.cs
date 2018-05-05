@@ -1,35 +1,19 @@
 ﻿using System;
 using System.IO;
 
-// -- File System -- //
+// -- Syscall -- //
 
 namespace CSX64
 {
     public partial class Computer
     {
         /// <summary>
-        /// Closes all the (managed) file descriptors that were allocated by client code.
-        /// Does not close streams provided by <see cref="SetUnmanagedStream(int, Stream)"/>, but does disassociate them
-        /// </summary>
-        private void CloseFiles()
-        {
-            // sever all files from this object
-            foreach (FileDescriptor fd in FileDescriptors)
-            {
-                // if it's managed, close it
-                if (fd.Managed) fd.Close();
-                // otherwise unmanaged, just disassociate it
-                else fd.__Stream = null;
-            }
-        }
-
-        /// <summary>
         /// Attempts to read a series of bytes from the file and store them in memory
         /// </summary>
         /// <param name="fd">the file descriptor to use</param>
         /// <param name="pos">the position in memory to store the read data</param>
         /// <param name="count">the number of bytes to read</param>
-        private bool FS_Read()
+        private bool Sys_Read()
         {
             // get fd index
             UInt64 fd_index = Registers[1].x64;
@@ -64,7 +48,7 @@ namespace CSX64
         /// <param name="fd">the file descriptor to use</param>
         /// <param name="pos">the position in memory of the data to write</param>
         /// <param name="count">the number of bytes to read</param>
-        private bool FS_Write()
+        private bool Sys_Write()
         {
             // get fd index
             UInt64 fd_index = Registers[1].x64;
@@ -85,7 +69,7 @@ namespace CSX64
         /// </summary>
         /// <param name="path">the path of the file to open</param>
         /// <param name="mode">the mode to open the file in (see System.IO.FileAccess)"/></param>
-        private bool FS_Open()
+        private bool Sys_Open()
         {
             // make sure we're allowed to do this
             if (!Flags.FileSystem) { Terminate(ErrorCode.FSDisabled); return false; }
@@ -95,7 +79,7 @@ namespace CSX64
             if (fd == null) { Terminate(ErrorCode.InsufficientFDs); return false; }
 
             // get path
-            if (!GetString(Registers[1].x64, 2, out string path)) return false;
+            if (!GetCString(Registers[1].x64, out string path)) return false;
 
             FileStream f; // resulting stream
 
@@ -115,7 +99,7 @@ namespace CSX64
         /// Cannot be used to close an unmanaged stream set by <see cref="SetUnmanagedStream(int, Stream)"/>
         /// </summary>
         /// <param name="fd">The file descriptor to close</param>
-        private bool FS_Close()
+        private bool Sys_Close()
         {
             // get fd index
             UInt64 fd_index = Registers[1].x64;
@@ -123,23 +107,17 @@ namespace CSX64
 
             // get fd
             FileDescriptor fd = FileDescriptors[fd_index];
-            if (!fd.InUse) { Terminate(ErrorCode.FDNotInUse); return false; }
 
-            // we can't close an unmanaged stream
-            if (!fd.Managed) { Terminate(ErrorCode.AccessViolation); return false; }
-
-            // attempt to close the file
-            try { fd.__Stream.Close(); return true; }
-            catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
-            // ensure we null the stream even upon error in close
-            finally { fd.__Stream = null; }
+            // close it (un/managed and not-in-use cases are handled internally)
+            fd.Close();
+            return true;
         }
 
         /// <summary>
         /// Flushes the stream associated with the file
         /// </summary>
         /// <param name="fd">the file descriptor to flush</param>
-        private bool FS_Flush()
+        private bool Sys_Flush()
         {
             // get fd index
             UInt64 fd_index = Registers[1].x64;
@@ -160,7 +138,7 @@ namespace CSX64
         /// <param name="fd">the file descriptor to perform seek on</param>
         /// <param name="pos">the position to seek to</param>
         /// <param name="mode">the offset mode</param>
-        private bool FS_Seek()
+        private bool Sys_Seek()
         {
             // get fd index
             UInt64 fd_index = Registers[1].x64;
@@ -179,7 +157,7 @@ namespace CSX64
         /// </summary>
         /// <param name="fd">the file to get current position of</param>
         /// <param name="pos">position of stream upon success</param>
-        private bool FS_Tell()
+        private bool Sys_Tell()
         {
             // get fd index
             UInt64 fd_index = Registers[1].x64;
@@ -199,13 +177,13 @@ namespace CSX64
         /// </summary>
         /// <param name="from">the file to move</param>
         /// <param name="to">the destination path</param>
-        private bool FS_Move()
+        private bool Sys_Move()
         {
             // make sure we're allowed to do this
             if (!Flags.FileSystem) { Terminate(ErrorCode.FSDisabled); return false; }
 
             // get the paths
-            if (!GetString(Registers[1].x64, 2, out string from) || !GetString(Registers[2].x64, 2, out string to)) return false;
+            if (!GetCString(Registers[1].x64, out string from) || !GetCString(Registers[2].x64, out string to)) return false;
 
             // attempt the move operation
             try { File.Move(from, to); return true; }
@@ -216,13 +194,13 @@ namespace CSX64
         /// </summary>
         /// <param name="path">the file to remove</param>
         /// <returns></returns>
-        private bool FS_Remove()
+        private bool Sys_Remove()
         {
             // make sure we're allowed to do this
             if (!Flags.FileSystem) { Terminate(ErrorCode.FSDisabled); return false; }
 
             // get the path
-            if (!GetString(Registers[1].x64, 2, out string path)) return false;
+            if (!GetCString(Registers[1].x64, out string path)) return false;
 
             // attempt the move operation
             try { File.Delete(path); return true; }
@@ -233,13 +211,13 @@ namespace CSX64
         /// Attempts to make a new directory
         /// </summary>
         /// <param name="path">path to new directory</param>
-        private bool FS_Mkdir()
+        private bool Sys_Mkdir()
         {
             // make sure we're allowed to do this
             if (!Flags.FileSystem) { Terminate(ErrorCode.FSDisabled); return false; }
 
             // get the path
-            if (!GetString(Registers[1].x64, 2, out string path)) return false;
+            if (!GetCString(Registers[1].x64, out string path)) return false;
 
             // attempt the move operation
             try { Directory.CreateDirectory(path); return true; }
@@ -249,13 +227,13 @@ namespace CSX64
         /// Attempts to remove a directory
         /// </summary>
         /// <param name="path">path to directory to remove</param>
-        private bool FS_Rmdir()
+        private bool Sys_Rmdir()
         {
             // make sure we're allowed to do this
             if (!Flags.FileSystem) { Terminate(ErrorCode.FSDisabled); return false; }
 
             // get the path
-            if (!GetString(Registers[1].x64, 2, out string path)) return false;
+            if (!GetCString(Registers[1].x64, out string path)) return false;
 
             // attempt the move operation
             try { Directory.Delete(path, RecursiveRmdir); return true; }

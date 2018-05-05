@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text;
+using System.IO;
 
 // -- Utility -- //
 
@@ -8,6 +9,19 @@ namespace CSX64
 {
     public static class Utility
     {
+        // -- memory utilities -- //
+
+        public static Int64 MakeSigned(this UInt64 val)
+        {
+            //return (val & 0x8000000000000000) != 0 ? -(Int64)(~val + 1) : (Int64)val;
+            return (Int64)val;
+        }
+        public static UInt64 MakeUnsigned(this Int64 val)
+        {
+            //return val < 0 ? ~(UInt64)(-val) + 1 : (UInt64)val;
+            return (UInt64)val;
+        }
+
         /// <summary>
         /// Gets the register partition with the specified size code
         /// </summary>
@@ -120,6 +134,51 @@ namespace CSX64
         }
 
         /// <summary>
+        /// Writes a C-style string to memory. Returns true on success
+        /// </summary>
+        /// <param name="arr">the data array to write to</param>
+        /// <param name="pos">the position in the array to begin writing</param>
+        /// <param name="str">the string to write</param>
+        public static bool WriteCString(this byte[] arr, UInt64 pos, string str)
+        {
+            // make sure we're not exceeding memory bounds
+            if (pos >= (UInt64)arr.Length || pos + (UInt64)(str.Length + 1) > (UInt64)arr.Length) return false;
+
+            // write each character
+            for (int i = 0; i < str.Length; ++i) arr[pos + (UInt64)i] = (byte)str[i];
+            // write a null terminator
+            arr[pos + (UInt64)str.Length] = 0;
+
+            return true;
+        }
+        /// <summary>
+        /// Reads a C-style string from memory. Returns true on success
+        /// </summary>
+        /// <param name="arr">the data array to read from</param>
+        /// <param name="pos">the position in the array to begin reading</param>
+        /// <param name="str">the string read</param>
+        public static bool ReadCString(this byte[] arr, UInt64 pos, out string str)
+        {
+            StringBuilder b = new StringBuilder();
+
+            // read the string
+            for (; ; ++pos)
+            {
+                // ensure we're in bounds
+                if (pos >= (UInt64)arr.Length) { str = null; return false; }
+
+                // if it's not a terminator, append it
+                if (arr[pos] != 0) b.Append((char)arr[pos]);
+                // otherwise we're done reading
+                else break;
+            }
+
+            // return the string
+            str = b.ToString();
+            return true;
+        }
+
+        /// <summary>
         /// Appends a value to an array of bytes in a list
         /// </summary>
         /// <param name="data">the byte array</param>
@@ -181,10 +240,49 @@ namespace CSX64
 
             return true;
         }
-    }
 
-    public partial class Computer
-    {
+        /// <summary>
+        /// Converts a byte array representation into a unicode string, obeying current system endianness
+        /// </summary>
+        /// <param name="bytes">the byte array to decode</param>
+        /// <param name="index">the index of the first byte in the array</param>
+        /// <param name="count">the number of bytes to decode</param>
+        public static string ConvertToString(this byte[] bytes, int index, int count)
+        {
+            if (BitConverter.IsLittleEndian) return Encoding.Unicode.GetString(bytes, index, count);
+            else return Encoding.BigEndianUnicode.GetString(bytes, index, count);
+        }
+        /// <summary>
+        /// Converts a string into its byte representation, obeying current system endianness
+        /// </summary>
+        /// <param name="str">the string to convert</param>
+        public static byte[] ConvertToBytes(this string str)
+        {
+            if (BitConverter.IsLittleEndian) return Encoding.Unicode.GetBytes(str);
+            else return Encoding.BigEndianUnicode.GetBytes(str);
+        }
+
+        /// <summary>
+        /// Converts a string into a stream onject
+        /// </summary>
+        /// <param name="str">the string source</param>
+        public static Stream ToStream(this string str)
+        {
+            // create the stream
+            Stream stream = new MemoryStream();
+
+            // write the string contents
+            using (StreamWriter writer = new StreamWriter(stream))
+                writer.Write(str);
+
+            // reposition to beginning
+            stream.Position = 0;
+
+            return stream;
+        }
+
+        // -- CSX64 encoding utilities -- //
+
         /// <summary>
         /// Returns if the value with specified size code is positive
         /// </summary>

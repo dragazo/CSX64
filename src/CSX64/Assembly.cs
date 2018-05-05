@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.IO;
+using static CSX64.Utility;
 
 // -- Assembly -- //
 
@@ -291,7 +292,7 @@ namespace CSX64
         /// </summary>
         public double FloatResult
         {
-            set => CacheResult(Computer.DoubleAsUInt64(value), true);
+            set => CacheResult(DoubleAsUInt64(value), true);
         }
 
         /// <summary>
@@ -341,7 +342,7 @@ namespace CSX64
                         else { if (Token.TryParseUInt64(out res, 10)) break; }
 
                         // try floating-point
-                        if (double.TryParse(Token, out double f)) { res = Computer.DoubleAsUInt64(f); floating = true; break; }
+                        if (double.TryParse(Token, out double f)) { res = DoubleAsUInt64(f); floating = true; break; }
 
                         // if nothing worked, it's an ill-formed numeric literal
                         err = $"Ill-formed numeric literal encountered: \"{Token}\"";
@@ -384,7 +385,7 @@ namespace CSX64
                     if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
                     if (ret == false) return false;
 
-                    if (LF || RF) { res = Computer.DoubleAsUInt64((LF ? Computer.AsDouble(L) : L.MakeSigned()) * (RF ? Computer.AsDouble(R) : R.MakeSigned())); floating = true; }
+                    if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : L.MakeSigned()) * (RF ? AsDouble(R) : R.MakeSigned())); floating = true; }
                     else res = L * R;
                     break;
                 case OPs.Div:
@@ -392,7 +393,7 @@ namespace CSX64
                     if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
                     if (ret == false) return false;
 
-                    if (LF || RF) { res = Computer.DoubleAsUInt64((LF ? Computer.AsDouble(L) : L.MakeSigned()) / (RF ? Computer.AsDouble(R) : R.MakeSigned())); floating = true; }
+                    if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : L.MakeSigned()) / (RF ? AsDouble(R) : R.MakeSigned())); floating = true; }
                     else res = (L.MakeSigned() / R.MakeSigned()).MakeUnsigned();
                     break;
                 case OPs.Mod:
@@ -400,7 +401,7 @@ namespace CSX64
                     if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
                     if (ret == false) return false;
 
-                    if (LF || RF) { res = Computer.DoubleAsUInt64((LF ? Computer.AsDouble(L) : L.MakeSigned()) % (RF ? Computer.AsDouble(R) : R.MakeSigned())); floating = true; }
+                    if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : L.MakeSigned()) % (RF ? AsDouble(R) : R.MakeSigned())); floating = true; }
                     else res = (L.MakeSigned() % R.MakeSigned()).MakeUnsigned();
                     break;
                 case OPs.Add:
@@ -408,7 +409,7 @@ namespace CSX64
                     if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
                     if (ret == false) return false;
 
-                    if (LF || RF) { res = Computer.DoubleAsUInt64((LF ? Computer.AsDouble(L) : L.MakeSigned()) + (RF ? Computer.AsDouble(R) : R.MakeSigned())); floating = true; }
+                    if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : L.MakeSigned()) + (RF ? AsDouble(R) : R.MakeSigned())); floating = true; }
                     else res = L + R;
                     break;
                 case OPs.Sub:
@@ -416,7 +417,7 @@ namespace CSX64
                     if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
                     if (ret == false) return false;
 
-                    if (LF || RF) { res = Computer.DoubleAsUInt64((LF ? Computer.AsDouble(L) : L.MakeSigned()) - (RF ? Computer.AsDouble(R) : R.MakeSigned())); floating = true; }
+                    if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : L.MakeSigned()) - (RF ? AsDouble(R) : R.MakeSigned())); floating = true; }
                     else res = L - R;
                     break;
 
@@ -440,7 +441,7 @@ namespace CSX64
                     if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
                     if (ret == false) return false;
 
-                    if (LF || RF) res = (LF ? Computer.AsDouble(L) : L.MakeSigned()) < (RF ? Computer.AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
+                    if (LF || RF) res = (LF ? AsDouble(L) : L.MakeSigned()) < (RF ? AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
                     else res = L.MakeSigned() < R.MakeSigned() ? 1 : 0ul;
                     break;
                 case OPs.LessE:
@@ -448,7 +449,7 @@ namespace CSX64
                     if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
                     if (ret == false) return false;
 
-                    if (LF || RF) res = (LF ? Computer.AsDouble(L) : L.MakeSigned()) <= (RF ? Computer.AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
+                    if (LF || RF) res = (LF ? AsDouble(L) : L.MakeSigned()) <= (RF ? AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
                     else res = L.MakeSigned() <= R.MakeSigned() ? 1 : 0ul;
                     break;
                 case OPs.Great:
@@ -456,7 +457,7 @@ namespace CSX64
                     if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
                     if (ret == false) return false;
 
-                    if (LF || RF) res = (LF ? Computer.AsDouble(L) : L.MakeSigned()) > (RF ? Computer.AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
+                    if (LF || RF) res = (LF ? AsDouble(L) : L.MakeSigned()) > (RF ? AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
                     else res = L.MakeSigned() > R.MakeSigned() ? 1 : 0ul;
                     break;
                 case OPs.GreatE:
@@ -464,7 +465,7 @@ namespace CSX64
                     if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
                     if (ret == false) return false;
 
-                    if (LF || RF) res = (LF ? Computer.AsDouble(L) : L.MakeSigned()) >= (RF ? Computer.AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
+                    if (LF || RF) res = (LF ? AsDouble(L) : L.MakeSigned()) >= (RF ? AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
                     else res = L.MakeSigned() >= R.MakeSigned() ? 1 : 0ul;
                     break;
 
@@ -473,7 +474,7 @@ namespace CSX64
                     if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
                     if (ret == false) return false;
 
-                    if (LF || RF) res = (LF ? Computer.AsDouble(L) : L.MakeSigned()) == (RF ? Computer.AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
+                    if (LF || RF) res = (LF ? AsDouble(L) : L.MakeSigned()) == (RF ? AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
                     else res = L == R ? 1 : 0ul;
                     break;
                 case OPs.Neq:
@@ -481,7 +482,7 @@ namespace CSX64
                     if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
                     if (ret == false) return false;
 
-                    if (LF || RF) res = (LF ? Computer.AsDouble(L) : L.MakeSigned()) != (RF ? Computer.AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
+                    if (LF || RF) res = (LF ? AsDouble(L) : L.MakeSigned()) != (RF ? AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
                     else res = L != R ? 1 : 0ul;
                     break;
 
@@ -527,7 +528,7 @@ namespace CSX64
                 case OPs.Neg:
                     if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
 
-                    res = LF ? Computer.DoubleAsUInt64(-Computer.AsDouble(L)) : ~L + 1; floating = LF;
+                    res = LF ? DoubleAsUInt64(-AsDouble(L)) : ~L + 1; floating = LF;
                     break;
                 case OPs.BitNot:
                     if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
@@ -542,12 +543,12 @@ namespace CSX64
                 case OPs.Int:
                     if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
 
-                    res = LF ? ((Int64)Computer.AsDouble(L)).MakeUnsigned() : L;
+                    res = LF ? ((Int64)AsDouble(L)).MakeUnsigned() : L;
                     break;
                 case OPs.Float:
                     if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
 
-                    res = LF ? L : Computer.DoubleAsUInt64((double)L.MakeSigned());
+                    res = LF ? L : DoubleAsUInt64((double)L.MakeSigned());
                     floating = true;
                     break;
 
@@ -721,7 +722,7 @@ namespace CSX64
         {
             if (OP == OPs.None)
             {
-                b.Append(Token == null ? _Floating ? Computer.AsDouble(_Result).ToString("e17") : _Result.MakeSigned().ToString() : Token);
+                b.Append(Token == null ? _Floating ? AsDouble(_Result).ToString("e17") : _Result.MakeSigned().ToString() : Token);
             }
             else
             {
@@ -1740,9 +1741,9 @@ namespace CSX64
                 // if the negative register is r1, swap with r2
                 if (n1)
                 {
-                    Utility.Swap(ref r1, ref r2);
-                    Utility.Swap(ref m1, ref m2);
-                    Utility.Swap(ref n1, ref n2);
+                    Swap(ref r1, ref r2);
+                    Swap(ref m1, ref m2);
+                    Swap(ref n1, ref n2);
                 }
 
                 // if we can evaluate the hole to zero, there is no hole (null it)
@@ -1804,7 +1805,7 @@ namespace CSX64
                 Expr hole1, hole2;
 
                 if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 2 args"); return false; }
-                if ((Computer.Size(sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
+                if ((Size(sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
 
                 AppendVal(1, (UInt64)op);
 
@@ -1837,7 +1838,7 @@ namespace CSX64
                         if (!TryParseImm(args[1], out hole1)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as an imm\n-> {res.ErrorMsg}"); return false; }
 
                         AppendVal(1, (a << 4) | (sizecode << 2) | 0);
-                        if (!TryAppendExpr(Computer.Size(b_sizecode), hole1)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                        if (!TryAppendExpr(Size(b_sizecode), hole1)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
                     }
                 }
                 // mem, *
@@ -1862,7 +1863,7 @@ namespace CSX64
                         if (!TryParseImm(args[1], out hole2)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as an imm\n-> {res.ErrorMsg}"); return false; }
 
                         AppendVal(1, (sizecode << 2) | 3);
-                        if (!TryAppendExpr(Computer.Size(b_sizecode), hole2)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                        if (!TryAppendExpr(Size(b_sizecode), hole2)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
                         if (!TryAppendAddress(a, b, hole1)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
                     }
                 }
@@ -1876,7 +1877,7 @@ namespace CSX64
                 Expr hole;
 
                 if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 1 arg"); return false; }
-                if ((Computer.Size(sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
+                if ((Size(sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
 
                 AppendVal(1, (UInt64)op);
 
@@ -1941,7 +1942,7 @@ namespace CSX64
 
                         // already wrote 1 copy, now write the others
                         for (UInt64 j = 1; j < mult; ++j)
-                            if (!TryAppendExpr(Computer.Size(sizecode), hole)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                            if (!TryAppendExpr(Size(sizecode), hole)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
                     }
                     // if a string
                     else if (args[i][0] == '"')
@@ -1955,7 +1956,7 @@ namespace CSX64
                             // make sure there's no string splicing
                             if (args[i][j] == args[i][0]) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: String emission prematurely reached a terminating quote"); return false; }
 
-                            AppendVal(Computer.Size(sizecode), args[i][j]);
+                            AppendVal(Size(sizecode), args[i][j]);
                         }
                     }
                     // otherwise is a value
@@ -1965,7 +1966,7 @@ namespace CSX64
                         if (!TryParseImm(args[i], out hole)) return false;
 
                         // make one of them
-                        if (!TryAppendExpr(Computer.Size(sizecode), hole)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                        if (!TryAppendExpr(Size(sizecode), hole)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
                     }
                 }
 
@@ -2001,7 +2002,7 @@ namespace CSX64
                     if (!TryParseImm(args[0], out hole)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as an imm\n-> {res.ErrorMsg}"); return false; }
 
                     AppendVal(1, (sizecode << 2) | 0);
-                    if (!TryAppendExpr(Computer.Size(sizecode), hole)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                    if (!TryAppendExpr(Size(sizecode), hole)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
                 }
 
                 return true;
@@ -2032,6 +2033,17 @@ namespace CSX64
         /// <param name="value">the symbol value</param>
         public static void DefineSymbol(string key, double value) { PredefinedSymbols.Add(key, new Expr() { FloatResult = value }); }
 
+        static Assembly()
+        {
+            // create definitions for all the syscall codes
+            foreach (SyscallCode item in Enum.GetValues(typeof(SyscallCode)))
+                DefineSymbol($"sys_{item.ToString().ToLower()}", (UInt64)item);
+
+            // create definitions for all the error codes
+            foreach (ErrorCode item in Enum.GetValues(typeof(ErrorCode)))
+                DefineSymbol($"err_{item.ToString().ToLower()}", (UInt64)item);
+        }
+
         // -----------------------------------
 
         /// <summary>
@@ -2053,7 +2065,7 @@ namespace CSX64
                     switch (data.Size)
                     {
                         case 8: res.Write(data.Address, 8, val); break;
-                        case 4: res.Write(data.Address, 4, Computer.FloatAsUInt64((float)Computer.AsDouble(val))); break;
+                        case 4: res.Write(data.Address, 4, FloatAsUInt64((float)AsDouble(val))); break;
 
                         default: err = $"line {data.Line}: Attempt to use unsupported floating-point size"; return PatchError.Error;
                     }
@@ -2430,7 +2442,7 @@ namespace CSX64
                             if (args.TryParseImm(args.args[0], out hole))
                             {
                                 args.AppendVal(1, (args.sizecode << 2) | 0);
-                                if (!args.TryAppendExpr(Computer.Size(args.sizecode), hole)) return new AssembleResult(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.res.ErrorMsg}");
+                                if (!args.TryAppendExpr(Size(args.sizecode), hole)) return new AssembleResult(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.res.ErrorMsg}");
                             }
                             else if (args.TryParseRegister(args.args[0], out a))
                             {
