@@ -84,7 +84,7 @@ namespace CSX64
         /// <summary>
         /// gets/sets the full 64 bits of the register
         /// </summary>
-        public UInt64 x64;
+        public UInt64 x64 = 0;
 
         /// <summary>
         /// gets/sets the low 32 bits of the register
@@ -122,7 +122,7 @@ namespace CSX64
         /// <summary>
         /// Contains the actual flag data
         /// </summary>
-        public UInt64 Flags;
+        public UInt64 Flags = 0;
 
         /// <summary>
         /// The Zero flag
@@ -176,20 +176,12 @@ namespace CSX64
         public bool le { get => Z || S != O; }
 
         /// <summary>
-        /// The flag that indicates that memory access should be artificially slowed
-        /// </summary>
-        public bool SlowMemory
-        {
-            get => (Flags & 0x20ul) != 0;
-            set => Flags = (Flags & ~0x20ul) | (value ? 0x20ul : 0);
-        }
-        /// <summary>
         /// The flag that indicates that we're allowed to run commands that may potentially modify the file system
         /// </summary>
         public bool FileSystem
         {
-            get => (Flags & 0x40ul) != 0;
-            set => Flags = (Flags & ~0x40ul) | (value ? 0x40ul : 0);
+            get => (Flags & 0x20ul) != 0;
+            set => Flags = (Flags & ~0x20ul) | (value ? 0x20ul : 0);
         }
     }
 

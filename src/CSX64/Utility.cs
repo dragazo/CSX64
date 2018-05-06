@@ -57,6 +57,44 @@ namespace CSX64
         }
 
         /// <summary>
+        /// Gets the public flags of the flags register
+        /// </summary>
+        /// <param name="flags">the flags register to extract flags from</param>
+        public static UInt64 GetPublicFlags(this FlagsRegister flags)
+        {
+            return flags.Flags & Computer.PublicFlags;
+        }
+        /// <summary>
+        /// Sets the public flags of the flags register
+        /// </summary>
+        /// <param name="flags">the flags register to modify</param>
+        /// <param name="publicFlags">the values to use for public flags</param>
+        public static void SetPublicFlags(this FlagsRegister flags, UInt64 publicFlags)
+        {
+            flags.Flags = (flags.Flags & ~Computer.PublicFlags) | (publicFlags & Computer.PublicFlags);
+        }
+
+        /// <summary>
+        /// Gets the private flags of the flags register
+        /// </summary>
+        /// <param name="flags">the flags register to extract flags from</param>
+        public static UInt64 GetPrivateFlags(this FlagsRegister flags)
+        {
+            return flags.Flags & ~Computer.PublicFlags;
+        }
+        /// <summary>
+        /// Sets the private flags of the flags register
+        /// </summary>
+        /// <param name="flags">the flags register to modify</param>
+        /// <param name="privateFlags">the values to use for private flags</param>
+        public static void SetPrivateFlags(this FlagsRegister flags, UInt64 privateFlags)
+        {
+            flags.Flags = (flags.Flags & Computer.PublicFlags) | (privateFlags & ~Computer.PublicFlags);
+        }
+
+        // -----------------------------
+
+        /// <summary>
         /// Swaps the contents of the specified l-values
         /// </summary>
         public static void Swap<T>(ref T a, ref T b)

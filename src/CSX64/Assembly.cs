@@ -358,12 +358,9 @@ namespace CSX64
                         res = Token[1];
                         break;
                     }
-                    // if it's a defined symbol
-                    else if (symbols.TryGetValue(Token, out Expr expr))
+                    // if it's a defined symbol we haven't already visited
+                    else if (!visited.Contains(Token) && symbols.TryGetValue(Token, out Expr expr))
                     {
-                        // fail if looking up a symbol we've already looked up (infinite recursion)
-                        if (visited.Contains(Token)) { err = $"Cyclic dependence on \"{Token}\" encountered"; return false; }
-
                         visited.Push(Token); // mark token as visited
 
                         // if we can't evaluate it, fail
@@ -374,7 +371,7 @@ namespace CSX64
                         break; // break so we can resolve the reference
                     }
                     // otherwise we can't evaluate it
-                    else { err = $"Failed to parse \"{Token}\" as a number or defined symbol"; return false; }
+                    else { err = $"Failed to evaluate \"{Token}\""; return false; }
 
                 // -- operators -- //
 
@@ -610,7 +607,7 @@ namespace CSX64
             };
         }
 
-        public bool _FindPath(string value, Stack<Expr> path)
+        private bool _FindPath(string value, Stack<Expr> path)
         {
             // mark ourselves as a candidate
             path.Push(this);
@@ -1200,9 +1197,9 @@ namespace CSX64
                 // if nothing found, fail
                 return false;
             }
-            public bool TryParseImm(string token, out Expr hole)
+            public bool TryParseImm(string token, out Expr expr)
             {
-                hole = null; // initially-nulled result
+                expr = null; // initially-nulled result
 
                 Expr temp; // temporary for node creation
 
@@ -1339,7 +1336,7 @@ namespace CSX64
                     // -- append subtree to main tree --
 
                     // if no tree yet, use this one
-                    if (hole == null) hole = temp;
+                    if (expr == null) expr = temp;
                     // otherwise append to current (guaranteed to be defined by second pass)
                     else
                     {
@@ -1386,7 +1383,7 @@ namespace CSX64
                         else
                         {
                             // splice in the new operator, moving entire tree to left of new node
-                            stack.Push(hole = new Expr() { OP = op, Left = hole });
+                            stack.Push(expr = new Expr() { OP = op, Left = expr });
                         }
 
                         binPair = false; // flag as invalid binary pair
@@ -1406,6 +1403,9 @@ namespace CSX64
                 // make sure all conditionals were matched
                 if (unpaired_conditionals != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expression contained {unpaired_conditionals} incomplete ternary {(unpaired_conditionals == 1 ? "conditional" : "conditionals")}"); return false; }
 
+                // run ptrdiff logic on result
+                Ptrdiff(expr);
+
                 return true;
             }
             public bool TryParseInstantImm(string token, out UInt64 val, out bool floating)
@@ -1416,6 +1416,108 @@ namespace CSX64
                 if (!hole.Evaluate(file.Symbols, out val, out floating, ref err)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to parse instant imm \"{token}\"\n-> {err}"); return false; }
 
                 return true;
+            }
+
+            /// <summary>
+            /// Attempts to extract the numeric portion of a standard label: val in (#base + val). Returns true on success
+            /// </summary>
+            /// <param name="expr">the expression representing the label (either the label itself or a token expression reference to it)</param>
+            /// <param name="val">the resulting value portion</param>
+            public bool TryExtractPtrVal(Expr expr, out Expr val)
+            {
+                // if this is a leaf, extract the expression from symbols table
+                if (expr.OP == Expr.OPs.None)
+                {
+                    // if there's no token, fail
+                    if (expr.Token == null) { val = null; return false; }
+
+                    // get the symbol
+                    if (!file.Symbols.TryGetValue(expr.Token, out expr)) { val = null; return false; }
+                }
+
+                // must be of standard label form
+                if (expr.OP != Expr.OPs.Add || expr.Left.Token != "#base") { val = null; return false; }
+
+                // return the value portion
+                val = expr.Right;
+                return true;
+            }
+            /// <summary>
+            /// Performs pointer subtraction on the specified expression where possible
+            /// </summary>
+            /// <param name="expr">the expression to operate on</param>
+            public void Ptrdiff(Expr expr)
+            {
+                // -- fix up the expression tree -- //
+
+                top:
+
+                // if we're subtracting
+                if (expr.OP == Expr.OPs.Sub)
+                {
+                    // if right is negated
+                    if (expr.Right.OP == Expr.OPs.Neg)
+                    {
+                        // bypass negation by making ourselves addition
+                        expr.OP = Expr.OPs.Add;
+                        expr.Right = expr.Right.Left;
+
+                        // back to top
+                        goto top;
+                    }
+                    // if left is double negated
+                    else if (expr.Left.OP == Expr.OPs.Neg && expr.Left.Left.OP == Expr.OPs.Neg)
+                    {
+                        // eliminate it trivially
+                        expr.Left = expr.Left.Left.Left;
+
+                        // back to top
+                        goto top;
+                    }
+                }
+                // if we're adding
+                else if (expr.OP == Expr.OPs.Add)
+                {
+                    // if right is negated
+                    if (expr.Right.OP == Expr.OPs.Neg)
+                    {
+                        // bypass negation by making ourselves subtraction
+                        expr.OP = Expr.OPs.Sub;
+                        expr.Right = expr.Right.Left;
+
+                        // back to top
+                        goto top;
+                    }
+                    // if left is negated
+                    else if (expr.Left.OP == Expr.OPs.Neg)
+                    {
+                        // bypass negation by making ourselves subtraction
+                        expr.OP = Expr.OPs.Sub;
+                        expr.Left = expr.Left.Left;
+                        Swap(ref expr.Left, ref expr.Right);
+
+                        // back to top
+                        goto top;
+                    }
+                }
+
+                // -- the main attraction -- //
+
+                // if we're subtracting, we can eliminate #base if both sides are pointers
+                if (expr.OP == Expr.OPs.Sub)
+                {
+                    // if we can get their pointer values
+                    if (TryExtractPtrVal(expr.Left, out Expr a) && TryExtractPtrVal(expr.Right, out Expr b))
+                    {
+                        // replace left and right with a and b (eliminating #base)
+                        expr.Left = a;
+                        expr.Right = b;
+                    }
+                }
+
+                // recurse to children (to ensure we cover all non-trivial uses)
+                if (expr.Left != null) Ptrdiff(expr.Left);
+                if (expr.Right != null) Ptrdiff(expr.Right);
             }
 
             /// <summary>

@@ -22,42 +22,6 @@ namespace CSX64
 
         // ---------------------------------
 
-        /// <summary>
-        /// Gets or sets the BackgroundColor setting. Modifications are not automatically saved
-        /// </summary>
-        public static Color BackgroundColor
-        {
-            get => Properties.Settings.Default.BackgroundColor;
-            set => Properties.Settings.Default.BackgroundColor = value;
-        }
-        /// <summary>
-        /// Gets or sets the TextColor setting. Modifications are not automatically saved
-        /// </summary>
-        public static Color TextColor
-        {
-            get => Properties.Settings.Default.TextColor;
-            set => Properties.Settings.Default.TextColor = value;
-        }
-
-        /// <summary>
-        /// Gets or sets the SlowMemory setting. Modifications are not automatically saved
-        /// </summary>
-        public static bool SlowMemory
-        {
-            get => Properties.Settings.Default.SlowMemory;
-            set => Properties.Settings.Default.SlowMemory = value;
-        }
-        /// <summary>
-        /// Gets or sets the FileSystem setting. Modifications are not automatically saved
-        /// </summary>
-        public static bool FileSystem
-        {
-            get => Properties.Settings.Default.FileSystem;
-            set => Properties.Settings.Default.FileSystem = value;
-        }
-
-        // ---------------------------------
-
         private const string HelpMessage =
             "\n" +
             "usage: csx64 [<options>] [--] <pathspec>...\n" +
@@ -67,8 +31,8 @@ namespace CSX64
             "    -a, --assemble         assembly files should be assembled into object files\n" +
             "    -l, --link             object files should be linked into an executable\n" +
             "    -o, --out <pathspec>   specifies the output path. if not provided, will usually take on a default value\n" +
-            "        --config           opens the settings menu\n" +
-            "        --end              stops parsing command line arguments as options and assumes the rest are all part of pathspec\n" +
+            "        --end              stops parsing command line arguments as options and takes remaining args as pathspec\n" +
+            "        --fs               sets the file system flag\n" +
             "\n" +
             "if no options are provided, will execute a program via the console client\n" +
             "";
@@ -99,6 +63,7 @@ namespace CSX64
             string output = null;                                // output path
             ProgramAction action = ProgramAction.ExecuteConsole; // requested action
             bool accepting_options = true;                       // marks that we're still accepting options
+            FlagsRegister flags = new FlagsRegister();           // the flags register to provide (only supplies private flags)
 
             // process the terminal args
             for (int i = 0; i < args.Length; ++i)
@@ -115,8 +80,8 @@ namespace CSX64
                         case "--assemble": if (action != ProgramAction.ExecuteConsole) { Print("usage error - see -h for help"); return 0; } action = ProgramAction.Assemble; break;
                         case "--link": if (action != ProgramAction.ExecuteConsole) { Print("usage error - see -h for help"); return 0; } action = ProgramAction.Link; break;
                         case "--output": if (output != null || i + 1 >= args.Length) { Print("usage error - see -h for help"); return 0; } output = args[++i]; break;
-                        case "--config": SettingsDialog.Prompt(); return 0;
                         case "--end": accepting_options = false; break;
+                        case "--fs": flags.FileSystem = true; break;
                         case "--": break; // -- is a no-op separator
 
                         default:
@@ -155,12 +120,13 @@ namespace CSX64
                     if (pathspec.Count == 0) { Print("Execution mode expected a file to execute"); return 0; }
 
                     // first path is file to run, then pass all of pathspec as command line args for client code
-                    RunRawConsole(pathspec[0], pathspec.ToArray());
+                    RunRawConsole(pathspec[0], pathspec.ToArray(), flags);
                     break;
                 case ProgramAction.ExecuteGraphical:
-                    if (pathspec.Count != 1) { Print("Execution mode expected one argument"); return 0; }
+                    if (pathspec.Count == 0) { Print("Graphical execution mode expected a file to execute"); return 0; }
 
-                    RunGraphicalClient(pathspec[0]);
+                    // first path is file to run, then pass all of pathspec as command line args for client code
+                    RunGraphicalClient(pathspec[0], pathspec.ToArray(), flags);
                     break;
 
                 case ProgramAction.Assemble:
@@ -496,35 +462,25 @@ namespace CSX64
         /// </summary>
         /// <param name="path">the file to execute</param>
         /// <param name="args">the command line arguments for the client program</param>
-        private static bool RunRawConsole(string path, string[] args)
+        private static bool RunRawConsole(string path, string[] args, FlagsRegister flags)
         {
             // read the binary data
             if (!LoadBinaryFile(path, out byte[] exe)) return false;
 
             // run as a console client and return success flag
-            return RunRawConsole(exe, args);
+            return RunRawConsole(exe, args, flags);
         }
         /// <summary>
         /// Executes a program via the graphical client. returns true if there were no errors
         /// </summary>
         /// <param name="path">the file to execute</param>
-        private static bool RunGraphicalClient(string path)
+        private static bool RunGraphicalClient(string path, string[] args, FlagsRegister flags)
         {
             // read the binary data
             if (!LoadBinaryFile(path, out byte[] exe)) return false;
 
             // run as a console client and return success flag
-            return RunGraphicalClient(exe);
-        }
-
-        /// <summary>
-        /// Initializes the private flags for execution
-        /// </summary>
-        /// <param name="flags">the flags object to modify</param>
-        private static void SetupPrivateFlags(FlagsRegister flags)
-        {
-            flags.SlowMemory = SlowMemory;
-            flags.FileSystem = FileSystem;
+            return RunGraphicalClient(exe, args, flags);
         }
 
         /// <summary>
@@ -532,15 +488,16 @@ namespace CSX64
         /// </summary>
         /// <param name="exe">the code to execute</param>
         /// <param name="args">the command line arguments for the client program</param>
-        private static bool RunRawConsole(byte[] exe, string[] args)
+        private static bool RunRawConsole(byte[] exe, string[] args, FlagsRegister flags)
         {
             // create the computer
             using (Computer computer = new Computer())
             {
                 // initialize program
                 computer.Initialize(exe, args);
-                // set up private flags
-                SetupPrivateFlags(computer.GetFlags());
+
+                // set private flags
+                computer.GetFlags().SetPrivateFlags(flags.Flags);
 
                 // tie standard streams
                 computer.GetFileDescriptor(0).Open(Console.OpenStandardInput(), false, false); // stdin is non-interactive because we're not the ones that will be adding data to it. that's the console's responsibility
@@ -563,15 +520,16 @@ namespace CSX64
         /// Executes a program via the graphical client. returns true if there were no errors
         /// </summary>
         /// <param name="exe">the code to execute</param>
-        private static bool RunGraphicalClient(byte[] exe)
+        private static bool RunGraphicalClient(byte[] exe, string[] args, FlagsRegister flags)
         {
             // create the computer
             using (GraphicalComputer computer = new GraphicalComputer())
             {
                 // initialize program
-                computer.Initialize(exe, null);
-                // set up private flags
-                SetupPrivateFlags(computer.GetFlags());
+                computer.Initialize(exe, args);
+
+                // set private flags
+                computer.GetFlags().SetPrivateFlags(flags.Flags);
 
                 // create the console client
                 using (GraphicalClient graphics = new GraphicalClient(computer))

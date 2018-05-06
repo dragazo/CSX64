@@ -14,14 +14,10 @@ namespace CSX64
         /// <param name="size">Number of bytes to read</param>
         /// <param name="res">The result</param>
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool GetMem(UInt64 pos, UInt64 size, out UInt64 res, bool _abide_slow = true)
+        public bool GetMem(UInt64 pos, UInt64 size, out UInt64 res)
         {
             // refer to utility function
-            if (Memory.Read(pos, size, out res))
-            {
-                if (_abide_slow && Flags.SlowMemory) Sleep += size;
-                return true;
-            }
+            if (Memory.Read(pos, size, out res)) return true;
             else
             {
                 Terminate(ErrorCode.OutOfBounds);
@@ -35,14 +31,10 @@ namespace CSX64
         /// <param name="size">Number of bytes to write</param>
         /// <param name="val">The value to write</param>
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool SetMem(UInt64 pos, UInt64 size, UInt64 val, bool _abide_slow = true)
+        public bool SetMem(UInt64 pos, UInt64 size, UInt64 val)
         {
             // refer to utility function
-            if (Memory.Write(pos, size, val))
-            {
-                if (_abide_slow && Flags.SlowMemory) Sleep += size;
-                return true;
-            }
+            if (Memory.Write(pos, size, val)) return true;
             else
             {
                 Terminate(ErrorCode.OutOfBounds);
@@ -58,9 +50,9 @@ namespace CSX64
         /// <param name="pos">the position of the value in memory</param>
         /// <param name="res">the resulting value</param>
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool GetMem(UInt64 pos, out UInt64 res, bool _abide_slow = true)
+        public bool GetMem(UInt64 pos, out UInt64 res)
         {
-            return GetMem(pos, 8, out res, _abide_slow);
+            return GetMem(pos, 8, out res);
         }
         /// <summary>
         /// Writes a 64-bit unsigned integer to memory
@@ -68,9 +60,9 @@ namespace CSX64
         /// <param name="pos">the position of the value in memory</param>
         /// <param name="res">the resulting value</param>
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool SetMem(UInt64 pos, UInt64 val, bool _abide_slow = true)
+        public bool SetMem(UInt64 pos, UInt64 val)
         {
-            return SetMem(pos, 8, val, _abide_slow);
+            return SetMem(pos, 8, val);
         }
 
         /// <summary>
@@ -79,9 +71,9 @@ namespace CSX64
         /// <param name="pos">the position of the value in memory</param>
         /// <param name="res">the resulting value</param>
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool GetMem(UInt64 pos, out UInt32 res, bool _abide_slow = true)
+        public bool GetMem(UInt64 pos, out UInt32 res)
         {
-            if (GetMem(pos, 4, out UInt64 temp, _abide_slow)) { res = (UInt32)temp; return true; }
+            if (GetMem(pos, 4, out UInt64 temp)) { res = (UInt32)temp; return true; }
             else { res = 0; return false; }
         }
         /// <summary>
@@ -90,9 +82,9 @@ namespace CSX64
         /// <param name="pos">the position of the value in memory</param>
         /// <param name="res">the resulting value</param>
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool SetMem(UInt64 pos, UInt32 val, bool _abide_slow = true)
+        public bool SetMem(UInt64 pos, UInt32 val)
         {
-            return SetMem(pos, 4, val, _abide_slow);
+            return SetMem(pos, 4, val);
         }
 
         /// <summary>
@@ -101,9 +93,9 @@ namespace CSX64
         /// <param name="pos">the position of the value in memory</param>
         /// <param name="res">the resulting value</param>
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool GetMem(UInt64 pos, out UInt16 res, bool _abide_slow = true)
+        public bool GetMem(UInt64 pos, out UInt16 res)
         {
-            if (GetMem(pos, 2, out UInt64 temp, _abide_slow)) { res = (UInt16)temp; return true; }
+            if (GetMem(pos, 2, out UInt64 temp)) { res = (UInt16)temp; return true; }
             else { res = 0; return false; }
         }
         /// <summary>
@@ -112,9 +104,9 @@ namespace CSX64
         /// <param name="pos">the position of the value in memory</param>
         /// <param name="res">the resulting value</param>
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool SetMem(UInt64 pos, UInt16 val, bool _abide_slow = true)
+        public bool SetMem(UInt64 pos, UInt16 val)
         {
-            return SetMem(pos, 2, val, _abide_slow);
+            return SetMem(pos, 2, val);
         }
 
         /// <summary>
@@ -123,9 +115,9 @@ namespace CSX64
         /// <param name="pos">the position of the value in memory</param>
         /// <param name="res">the resulting value</param>
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool GetMem(UInt64 pos, out byte res, bool _abide_slow = true)
+        public bool GetMem(UInt64 pos, out byte res)
         {
-            if (GetMem(pos, 1, out UInt64 temp, _abide_slow)) { res = (byte)temp; return true; }
+            if (GetMem(pos, 1, out UInt64 temp)) { res = (byte)temp; return true; }
             else { res = 0; return false; }
         }
         /// <summary>
@@ -134,9 +126,9 @@ namespace CSX64
         /// <param name="pos">the position of the value in memory</param>
         /// <param name="res">the resulting value</param>
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool SetMem(UInt64 pos, byte val, bool _abide_slow = true)
+        public bool SetMem(UInt64 pos, byte val)
         {
-            return SetMem(pos, 1, val, _abide_slow);
+            return SetMem(pos, 1, val);
         }
 
         // -------------------------
@@ -147,9 +139,9 @@ namespace CSX64
         /// <param name="pos">the position of the value in memory</param>
         /// <param name="res">the resulting value</param>
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool GetMem(UInt64 pos, out Int64 res, bool _abide_slow = true)
+        public bool GetMem(UInt64 pos, out Int64 res)
         {
-            if (GetMem(pos, 8, out UInt64 temp, _abide_slow)) { res = (Int64)temp; return true; }
+            if (GetMem(pos, 8, out UInt64 temp)) { res = (Int64)temp; return true; }
             else { res = 0; return false; }
         }
         /// <summary>
@@ -158,9 +150,9 @@ namespace CSX64
         /// <param name="pos">the position of the value in memory</param>
         /// <param name="res">the resulting value</param>
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool SetMem(UInt64 pos, Int64 val, bool _abide_slow = true)
+        public bool SetMem(UInt64 pos, Int64 val)
         {
-            return SetMem(pos, 8, (UInt64)val, _abide_slow);
+            return SetMem(pos, 8, (UInt64)val);
         }
 
         /// <summary>
@@ -169,9 +161,9 @@ namespace CSX64
         /// <param name="pos">the position of the value in memory</param>
         /// <param name="res">the resulting value</param>
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool GetMem(UInt64 pos, out Int32 res, bool _abide_slow = true)
+        public bool GetMem(UInt64 pos, out Int32 res)
         {
-            if (GetMem(pos, 4, out UInt64 temp, _abide_slow)) { res = (Int32)temp; return true; }
+            if (GetMem(pos, 4, out UInt64 temp)) { res = (Int32)temp; return true; }
             else { res = 0; return false; }
         }
         /// <summary>
@@ -180,9 +172,9 @@ namespace CSX64
         /// <param name="pos">the position of the value in memory</param>
         /// <param name="res">the resulting value</param>
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool SetMem(UInt64 pos, Int32 val, bool _abide_slow = true)
+        public bool SetMem(UInt64 pos, Int32 val)
         {
-            return SetMem(pos, 4, (UInt64)val, _abide_slow);
+            return SetMem(pos, 4, (UInt64)val);
         }
 
         /// <summary>
@@ -191,9 +183,9 @@ namespace CSX64
         /// <param name="pos">the position of the value in memory</param>
         /// <param name="res">the resulting value</param>
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool GetMem(UInt64 pos, out Int16 res, bool _abide_slow = true)
+        public bool GetMem(UInt64 pos, out Int16 res)
         {
-            if (GetMem(pos, 2, out UInt64 temp, _abide_slow)) { res = (Int16)temp; return true; }
+            if (GetMem(pos, 2, out UInt64 temp)) { res = (Int16)temp; return true; }
             else { res = 0; return false; }
         }
         /// <summary>
@@ -202,9 +194,9 @@ namespace CSX64
         /// <param name="pos">the position of the value in memory</param>
         /// <param name="res">the resulting value</param>
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool SetMem(UInt64 pos, Int16 val, bool _abide_slow = true)
+        public bool SetMem(UInt64 pos, Int16 val)
         {
-            return SetMem(pos, 2, (UInt64)val, _abide_slow);
+            return SetMem(pos, 2, (UInt64)val);
         }
 
         /// <summary>
@@ -213,9 +205,9 @@ namespace CSX64
         /// <param name="pos">the position of the value in memory</param>
         /// <param name="res">the resulting value</param>
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool GetMem(UInt64 pos, out sbyte res, bool _abide_slow = true)
+        public bool GetMem(UInt64 pos, out sbyte res)
         {
-            if (GetMem(pos, 1, out UInt64 temp, _abide_slow)) { res = (sbyte)temp; return true; }
+            if (GetMem(pos, 1, out UInt64 temp)) { res = (sbyte)temp; return true; }
             else { res = 0; return false; }
         }
         /// <summary>
@@ -224,9 +216,9 @@ namespace CSX64
         /// <param name="pos">the position of the value in memory</param>
         /// <param name="res">the resulting value</param>
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool SetMem(UInt64 pos, sbyte val, bool _abide_slow = true)
+        public bool SetMem(UInt64 pos, sbyte val)
         {
-            return SetMem(pos, 1, (UInt64)val, _abide_slow);
+            return SetMem(pos, 1, (UInt64)val);
         }
 
         // -------------------------
@@ -237,9 +229,9 @@ namespace CSX64
         /// <param name="pos">the position of the value in memory</param>
         /// <param name="res">the resulting value</param>
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool GetMem(UInt64 pos, out double res, bool _abide_slow = true)
+        public bool GetMem(UInt64 pos, out double res)
         {
-            if (GetMem(pos, 4, out UInt64 temp, _abide_slow)) { res = AsDouble(temp); return true; }
+            if (GetMem(pos, 4, out UInt64 temp)) { res = AsDouble(temp); return true; }
             else { res = 0; return false; }
         }
         /// <summary>
@@ -248,9 +240,9 @@ namespace CSX64
         /// <param name="pos">the position of the value in memory</param>
         /// <param name="res">the resulting value</param>
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool SetMem(UInt64 pos, double val, bool _abide_slow = true)
+        public bool SetMem(UInt64 pos, double val)
         {
-            return SetMem(pos, 8, DoubleAsUInt64(val), _abide_slow);
+            return SetMem(pos, 8, DoubleAsUInt64(val));
         }
 
         /// <summary>
@@ -259,9 +251,9 @@ namespace CSX64
         /// <param name="pos">the position of the value in memory</param>
         /// <param name="res">the resulting value</param>
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool GetMem(UInt64 pos, out float res, bool _abide_slow = true)
+        public bool GetMem(UInt64 pos, out float res)
         {
-            if (GetMem(pos, 4, out UInt64 temp, _abide_slow)) { res = AsFloat(temp); return true; }
+            if (GetMem(pos, 4, out UInt64 temp)) { res = AsFloat(temp); return true; }
             else { res = 0; return false; }
         }
         /// <summary>
@@ -270,9 +262,9 @@ namespace CSX64
         /// <param name="pos">the position of the value in memory</param>
         /// <param name="res">the resulting value</param>
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool SetMem(UInt64 pos, float val, bool _abide_slow = true)
+        public bool SetMem(UInt64 pos, float val)
         {
-            return SetMem(pos, 4, FloatAsUInt64(val), _abide_slow);
+            return SetMem(pos, 4, FloatAsUInt64(val));
         }
 
         // -- additional memory utilities -- //
@@ -284,14 +276,10 @@ namespace CSX64
         /// <param name="charsize">the size of each character in bytes</param>
         /// <param name="str">the resulting string</param>
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool GetCString(UInt64 pos, out string str, bool _abide_slow = true)
+        public bool GetCString(UInt64 pos, out string str)
         {
             // refer to utility function
-            if (Memory.ReadCString(pos, out str))
-            {
-                if (_abide_slow && Flags.SlowMemory) Sleep += (UInt64)str.Length + 1;
-                return true;
-            }
+            if (Memory.ReadCString(pos, out str)) return true;
             else
             {
                 Terminate(ErrorCode.OutOfBounds);
@@ -305,14 +293,10 @@ namespace CSX64
         /// <param name="charsize">the size of each character in bytes</param>
         /// <param name="str">the string to write</param>
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
-        public bool SetCString(UInt64 pos, string str, bool _abide_slow = true)
+        public bool SetCString(UInt64 pos, string str)
         {
             // refer to utility function
-            if (Memory.WriteCString(pos, str))
-            {
-                if (_abide_slow && Flags.SlowMemory) Sleep += (UInt64)str.Length + 1;
-                return true;
-            }
+            if (Memory.WriteCString(pos, str)) return true;
             else
             {
                 Terminate(ErrorCode.OutOfBounds);

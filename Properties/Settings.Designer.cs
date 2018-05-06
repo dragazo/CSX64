@@ -22,53 +22,5 @@ namespace CSX64.Properties {
                 return defaultInstance;
             }
         }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("Black")]
-        public global::System.Drawing.Color BackgroundColor {
-            get {
-                return ((global::System.Drawing.Color)(this["BackgroundColor"]));
-            }
-            set {
-                this["BackgroundColor"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("LimeGreen")]
-        public global::System.Drawing.Color TextColor {
-            get {
-                return ((global::System.Drawing.Color)(this["TextColor"]));
-            }
-            set {
-                this["TextColor"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("False")]
-        public bool SlowMemory {
-            get {
-                return ((bool)(this["SlowMemory"]));
-            }
-            set {
-                this["SlowMemory"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("True")]
-        public bool FileSystem {
-            get {
-                return ((bool)(this["FileSystem"]));
-            }
-            set {
-                this["FileSystem"] = value;
-            }
-        }
     }
 }
