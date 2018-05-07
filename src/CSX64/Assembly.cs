@@ -715,6 +715,41 @@ namespace CSX64
             return vals;
         }
 
+        /// <summary>
+        /// Populates add and sub lists with terms that are strictly being added and subtracted. All items in add are being added. All items in sub are subtracted.
+        /// </summary>
+        /// <param name="add">the resulting added terms. should be empty before the call</param>
+        /// <param name="sub">the resulting subtracted terms. should be empty before the call</param>
+        public void PopulateAddSub(List<Expr> add, List<Expr> sub)
+        {
+            // if it's addition
+            if (OP == OPs.Add)
+            {
+                // recurse to children
+                Left.PopulateAddSub(add, sub);
+                Right.PopulateAddSub(add, sub);
+            }
+            // if it's subtraction
+            else if (OP == OPs.Sub)
+            {
+                // recurse to children
+                Left.PopulateAddSub(add, sub);
+                Right.PopulateAddSub(sub, add); // reverse add/sub lists to account for subtraction
+            }
+            // if it's negation
+            else if (OP == OPs.Neg)
+            {
+                // recurse to child
+                Left.PopulateAddSub(sub, add); // reverse add/sub lists to account for subtraction
+            }
+            // otherwise it's not part of addition or subtraction
+            else
+            {
+                // add to addition tree
+                add.Add(this);
+            }
+        }
+
         private void _ToString(StringBuilder b)
         {
             if (OP == OPs.None)
@@ -755,6 +790,30 @@ namespace CSX64
         }
 
         // ----------------------------
+
+        /// <summary>
+        /// Creates an expression tree that adds all the items
+        /// </summary>
+        /// <param name="items">the items to create a tree from</param>
+        public static Expr ChainAddition(List<Expr> items)
+        {
+            // if there's nothing, return a zero
+            if (items.Count == 0) return new Expr() { IntResult = 0 };
+            // otherwise we have work to do
+            else
+            {
+                Expr res = items[0]; // resulting tree begins as first item
+
+                // for each item additionl item
+                for (int i = 1; i < items.Count; ++i)
+                {
+                    // add this item to the tree
+                    res = new Expr() { OP = Expr.OPs.Add, Left = res, Right = items[i] };
+                }
+
+                return res;
+            }
+        }
 
         /// <summary>
         /// Writes a binary representation of an expression to the stream
@@ -1404,7 +1463,7 @@ namespace CSX64
                 if (unpaired_conditionals != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expression contained {unpaired_conditionals} incomplete ternary {(unpaired_conditionals == 1 ? "conditional" : "conditionals")}"); return false; }
 
                 // run ptrdiff logic on result
-                Ptrdiff(expr);
+                expr = Ptrdiff(expr);
 
                 return true;
             }
@@ -1423,15 +1482,18 @@ namespace CSX64
             /// </summary>
             /// <param name="expr">the expression representing the label (either the label itself or a token expression reference to it)</param>
             /// <param name="val">the resulting value portion</param>
-            public bool TryExtractPtrVal(Expr expr, out Expr val)
+            private bool TryExtractPtrVal(Expr expr, out Expr val)
             {
-                // if this is a leaf, extract the expression from symbols table
+                // if this is a leaf
                 if (expr.OP == Expr.OPs.None)
                 {
-                    // if there's no token, fail
+                    // if there's no token, fail (not a pointer)
                     if (expr.Token == null) { val = null; return false; }
 
-                    // get the symbol
+                    // if this is the #base offset itself, value is zero (this can happen with the $ macro)
+                    if (expr.Token == "#base") { val = new Expr(); return true; }
+
+                    // otherwise get the symbol
                     if (!file.Symbols.TryGetValue(expr.Token, out expr)) { val = null; return false; }
                 }
 
@@ -1443,81 +1505,65 @@ namespace CSX64
                 return true;
             }
             /// <summary>
-            /// Performs pointer subtraction on the specified expression where possible
+            /// Performs pointer difference arithmetic on the expression tree and returns the result
             /// </summary>
-            /// <param name="expr">the expression to operate on</param>
-            public void Ptrdiff(Expr expr)
+            /// <param name="expr">the expression tree to operate on</param>
+            private Expr Ptrdiff(Expr expr)
             {
-                // -- fix up the expression tree -- //
+                // on null, return null as well
+                if (expr == null) return null;
 
-                top:
+                List<Expr> add = new List<Expr>(); // list of added terms
+                List<Expr> sub = new List<Expr>(); // list of subtracted terms
 
-                // if we're subtracting
-                if (expr.OP == Expr.OPs.Sub)
+                Expr a = null, b = null; // expression temporaries (initiailzed so compiler won't complain)
+
+                // populate lists
+                expr.PopulateAddSub(add, sub);
+
+                // perform ptrdiff reduction
+                for (int i = 0, j = 0; ; ++i, ++j)
                 {
-                    // if right is negated
-                    if (expr.Right.OP == Expr.OPs.Neg)
-                    {
-                        // bypass negation by making ourselves addition
-                        expr.OP = Expr.OPs.Add;
-                        expr.Right = expr.Right.Left;
+                    // wind i up to next add label
+                    for (; i < add.Count && !TryExtractPtrVal(add[i], out a); ++i) ;
+                    // if this exceeds bounds, break
+                    if (i == add.Count) break;
 
-                        // back to top
-                        goto top;
-                    }
-                    // if left is double negated
-                    else if (expr.Left.OP == Expr.OPs.Neg && expr.Left.Left.OP == Expr.OPs.Neg)
-                    {
-                        // eliminate it trivially
-                        expr.Left = expr.Left.Left.Left;
+                    // wind j up to next sub label
+                    for (; j < sub.Count && !TryExtractPtrVal(sub[j], out b); ++j) ;
+                    // if this exceeds bounds, break
+                    if (j == sub.Count) break;
 
-                        // back to top
-                        goto top;
+                    // we got a pair: replace items in add/sub with their pointer values
+                    add[i] = a;
+                    sub[j] = b;
+                }
+
+                // for each add item
+                for (int i = 0; i < add.Count; ++i)
+                {
+                    // if it's not a leaf
+                    if (!add[i].IsLeaf)
+                    {
+                        // recurse on children
+                        add[i] = new Expr() { OP = add[i].OP, Left = Ptrdiff(add[i].Left), Right = Ptrdiff(add[i].Right) };
                     }
                 }
-                // if we're adding
-                else if (expr.OP == Expr.OPs.Add)
+                // for each sub item
+                for (int i = 0; i < sub.Count; ++i)
                 {
-                    // if right is negated
-                    if (expr.Right.OP == Expr.OPs.Neg)
+                    // if it's not a leaf
+                    if (!sub[i].IsLeaf)
                     {
-                        // bypass negation by making ourselves subtraction
-                        expr.OP = Expr.OPs.Sub;
-                        expr.Right = expr.Right.Left;
-
-                        // back to top
-                        goto top;
-                    }
-                    // if left is negated
-                    else if (expr.Left.OP == Expr.OPs.Neg)
-                    {
-                        // bypass negation by making ourselves subtraction
-                        expr.OP = Expr.OPs.Sub;
-                        expr.Left = expr.Left.Left;
-                        Swap(ref expr.Left, ref expr.Right);
-
-                        // back to top
-                        goto top;
+                        // recurse on children
+                        sub[i] = new Expr() { OP = sub[i].OP, Left = Ptrdiff(sub[i].Left), Right = Ptrdiff(sub[i].Right) };
                     }
                 }
 
-                // -- the main attraction -- //
-
-                // if we're subtracting, we can eliminate #base if both sides are pointers
-                if (expr.OP == Expr.OPs.Sub)
-                {
-                    // if we can get their pointer values
-                    if (TryExtractPtrVal(expr.Left, out Expr a) && TryExtractPtrVal(expr.Right, out Expr b))
-                    {
-                        // replace left and right with a and b (eliminating #base)
-                        expr.Left = a;
-                        expr.Right = b;
-                    }
-                }
-
-                // recurse to children (to ensure we cover all non-trivial uses)
-                if (expr.Left != null) Ptrdiff(expr.Left);
-                if (expr.Right != null) Ptrdiff(expr.Right);
+                // stitch together the new tree
+                if (sub.Count == 0) return Expr.ChainAddition(add);
+                else if (add.Count == 0) return new Expr() { OP = Expr.OPs.Neg, Left = Expr.ChainAddition(sub) };
+                else return new Expr() { OP = Expr.OPs.Sub, Left = Expr.ChainAddition(add), Right = Expr.ChainAddition(sub) };
             }
 
             /// <summary>

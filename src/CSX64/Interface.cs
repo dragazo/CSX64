@@ -102,8 +102,8 @@ namespace CSX64
             // copy over the data
             data.CopyTo(Memory, 0);
 
-            // randomize registers (except stack register)
-            for (int i = 0; i < Registers.Length - 1; ++i)
+            // randomize registers
+            for (int i = 0; i < Registers.Length; ++i)
             {
                 Registers[i].x32 = (UInt64)Rand.Next();
                 Registers[i].x64 <<= 32;
