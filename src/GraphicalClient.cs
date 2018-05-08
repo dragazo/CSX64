@@ -314,7 +314,7 @@ namespace CSX64
         // ptr struct {8:type, 32:forecolor, 32:backcolor}
         private bool GetBrush(UInt64 pos)
         {
-            if (!GetMem(pos, 1, out UInt64 _type) || !GetMem(pos + 1, 4, out UInt64 _fore) || !GetMem(pos + 5, 4, out UInt64 _back)) return false;
+            if (!GetMem(pos, out byte _type) || !GetMem(pos + 1, out UInt32 _fore) || !GetMem(pos + 5, out UInt32 _back)) return false;
 
             Color forecolor = Color.FromArgb((int)_fore);
             Color backcolor = Color.FromArgb((int)_back);
@@ -330,7 +330,7 @@ namespace CSX64
         // ptr struct {32:pen type, 32:color}
         private bool GetPen(UInt64 pos)
         {
-            if (!GetMem(pos, 4, out UInt64 _type) || !GetMem(pos + 4, 4, out UInt64 _color)) return false;
+            if (!GetMem(pos, out UInt32 _type) || !GetMem(pos + 4, out UInt32 _color)) return false;
 
             Pen.Dispose();
             Pen = new Pen(Color.FromArgb((int)_color));
@@ -340,7 +340,7 @@ namespace CSX64
         // ptr struct {16:font type, 16:font style, 32f:size}
         private bool GetFont(UInt64 pos)
         {
-            if (!GetMem(pos, 2, out UInt64 _type) || !GetMem(pos + 2, 2, out UInt64 _style) || !GetMem(pos + 4, 4, out UInt64 _size)) return false;
+            if (!GetMem(pos, out UInt16 _type) || !GetMem(pos + 2, out UInt16 _style) || !GetMem(pos + 4, out UInt32 _size)) return false;
 
             // get font type
             FontFamily family;
@@ -363,24 +363,22 @@ namespace CSX64
         // ptr struct {32:x, 32:y, 32:width, 32:height}
         private bool GetRect(UInt64 pos, out Rectangle rect)
         {
-            UInt64 x, y, w, h;
+            int x, y, w, h;
 
-            if (!GetMem(pos, 4, out x) || !GetMem(pos + 4, 4, out y) || !GetMem(pos + 8, 4, out w) || !GetMem(pos + 12, 4, out h))
-            { rect = Rectangle.Empty; return false; }
+            if (!GetMem(pos, out x) || !GetMem(pos + 4, out y) || !GetMem(pos + 8, out w) || !GetMem(pos + 12, out h)) { rect = Rectangle.Empty; return false; }
 
-            rect = new Rectangle((int)x, (int)y, (int)w, (int)h);
+            rect = new Rectangle(x, y, w, h);
 
             return true;
         }
         // ptr struct {32:x, 32:y}
         private bool GetPoint(UInt64 pos, out Point point)
         {
-            UInt64 x, y;
+            int x, y;
 
-            if (!GetMem(pos, 4, out x) || !GetMem(pos + 4, 4, out y))
-            { point = Point.Empty; return false; }
+            if (!GetMem(pos, out x) || !GetMem(pos + 4, out y)) { point = Point.Empty; return false; }
 
-            point = new Point((int)x, (int)y);
+            point = new Point(x, y);
             
             return true;
         }

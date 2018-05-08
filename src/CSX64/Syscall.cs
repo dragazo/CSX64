@@ -75,7 +75,7 @@ namespace CSX64
             if (!Flags.FileSystem) { Terminate(ErrorCode.FSDisabled); return false; }
 
             // get an available file descriptor
-            FileDescriptor fd = FindAvailableFileDescriptor(out UInt64 fd_index);
+            FileDescriptor fd = FindAvailableFD(out UInt64 fd_index);
             if (fd == null) { Terminate(ErrorCode.InsufficientFDs); return false; }
 
             // get path

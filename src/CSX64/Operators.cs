@@ -41,7 +41,7 @@ namespace CSX64
                     break;
                 case 1:
                     a = Registers[s >> 4].Get(a_sizecode);
-                    if (!GetAddressAdv(out b) || !GetMem(b, Size(b_sizecode), out b)) return false;
+                    if (!GetAddressAdv(out b) || !GetMemRaw(b, Size(b_sizecode), out b)) return false;
                     break;
                 case 2:
                     if (!GetMemAdv(1, out b)) return false;
@@ -52,7 +52,7 @@ namespace CSX64
                             b = Registers[b & 15].Get(b_sizecode);
                             break;
                         case 1:
-                            if (!GetAddressAdv(out m) || !GetMem(m, Size(a_sizecode), out a)) return false;
+                            if (!GetAddressAdv(out m) || !GetMemRaw(m, Size(a_sizecode), out a)) return false;
                             b = Registers[b & 15].Get(b_sizecode);
                             s |= 256; // mark as memory path of mode 2
                             break;
@@ -60,7 +60,7 @@ namespace CSX64
                     break;
                 case 3:
                     if (!GetMemAdv(Size(b_sizecode), out b)) return false;
-                    if (!GetAddressAdv(out m) || !GetMem(m, Size(a_sizecode), out a)) return false;
+                    if (!GetAddressAdv(out m) || !GetMemRaw(m, Size(a_sizecode), out a)) return false;
                     break;
             }
 
@@ -82,7 +82,7 @@ namespace CSX64
                     if (s < 256) goto reg; else goto mem;
                 case 3:
                     mem:
-                    if (!SetMem(m, Size(sizecode), res)) return false;
+                    if (!SetMemRaw(m, Size(sizecode), res)) return false;
                     break;
             }
 
@@ -110,7 +110,7 @@ namespace CSX64
                     a = Registers[s >> 4].Get(a_sizecode);
                     break;
                 case 1:
-                    if (!GetAddressAdv(out m) || !GetMem(m, Size(a_sizecode), out a)) return false;
+                    if (!GetAddressAdv(out m) || !GetMemRaw(m, Size(a_sizecode), out a)) return false;
                     break;
             }
 
@@ -127,7 +127,7 @@ namespace CSX64
                     Registers[s >> 4].Set(sizecode, res);
                     break;
                 case 1:
-                    if (!SetMem(m, Size(sizecode), res)) return false;
+                    if (!SetMemRaw(m, Size(sizecode), res)) return false;
                     break;
             }
 
@@ -151,7 +151,7 @@ namespace CSX64
             {
                 case 0: if (!GetMemAdv(Size((s >> 2) & 3), out a)) return false; break;
                 case 1: a = Registers[s >> 4].Get((s >> 2) & 3); break;
-                case 2: if (!GetAddressAdv(out a) || !GetMem(a, Size((s >> 2) & 3), out a)) return false; break;
+                case 2: if (!GetAddressAdv(out a) || !GetMemRaw(a, Size((s >> 2) & 3), out a)) return false; break;
                 default: Terminate(ErrorCode.UndefinedBehavior); { a = 0; return false; }
             }
 
@@ -1448,10 +1448,10 @@ namespace CSX64
                     Registers[b & 15].Set((a >> 2) & 3, c);
                     break;
                 case 1:
-                    if (!GetAddressAdv(out b) || !GetMem(b, Size((a >> 2) & 3), out c)) return false;
+                    if (!GetAddressAdv(out b) || !GetMemRaw(b, Size((a >> 2) & 3), out c)) return false;
                     d = Registers[a >> 4].x64;
                     Registers[a >> 4].Set((a >> 2) & 3, c);
-                    if (!SetMem(b, Size((a >> 2) & 3), d)) return false;
+                    if (!SetMemRaw(b, Size((a >> 2) & 3), d)) return false;
                     break;
             }
 

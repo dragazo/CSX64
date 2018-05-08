@@ -20,7 +20,30 @@ namespace CSX64
             Assemble, Link
         }
 
+        /// <summary>
+        /// An extension of assembly and link error codes for use specifically in <see cref="Main(string[])"/>
+        /// </summary>
+        private enum AsmLnkErrorExt
+        {
+            FailOpen = 100,
+            NullPath,
+            InvalidPath,
+            DirectoryNotFound,
+            AccessViolation,
+            FileNotFound,
+            PathFormatUnsupported,
+            IOError,
+            FormatError,
+
+            UnknownError = 199
+        }
+
         // ---------------------------------
+
+        /// <summary>
+        /// The return value to use in the case of error during execution
+        /// </summary>
+        private const int ExecReturnCode = -1;
 
         private const string HelpMessage =
             "\n" +
@@ -120,26 +143,28 @@ namespace CSX64
                     if (pathspec.Count == 0) { Print("Execution mode expected a file to execute"); return 0; }
 
                     // first path is file to run, then pass all of pathspec as command line args for client code
-                    RunRawConsole(pathspec[0], pathspec.ToArray(), flags);
-                    break;
+                    return RunRawConsole(pathspec[0], pathspec.ToArray(), flags);
                 case ProgramAction.ExecuteGraphical:
                     if (pathspec.Count == 0) { Print("Graphical execution mode expected a file to execute"); return 0; }
 
                     // first path is file to run, then pass all of pathspec as command line args for client code
-                    RunGraphicalClient(pathspec[0], pathspec.ToArray(), flags);
-                    break;
+                    return RunGraphicalClient(pathspec[0], pathspec.ToArray(), flags);
 
                 case ProgramAction.Assemble:
                     // if no output is provided, batch process
                     if (output == null)
                     {
-                        foreach (string path in pathspec) Assemble(path);
+                        foreach (string path in pathspec)
+                        {
+                            int res = Assemble(path);
+                            if (res != 0) return res;
+                        }
                     }
                     // otherwise, we're expecting only one input with a named output
                     else
                     {
                         if (pathspec.Count != 1) { Print("Assemble mode with an explicit output expected only one input assembly file\n"); return 0; }
-                        Assemble(pathspec[0], output);
+                        return Assemble(pathspec[0], output);
                     }
                     break;
                 case ProgramAction.Link:
@@ -160,7 +185,7 @@ namespace CSX64
         /// </summary>
         /// <param name="path">the file to save to</param>
         /// <param name="exe">the binary data to save</param>
-        private static bool SaveBinaryFile(string path, byte[] exe)
+        private static int SaveBinaryFile(string path, byte[] exe)
         {
             FileStream f = null; // file handle
 
@@ -172,21 +197,21 @@ namespace CSX64
                 // write the data
                 f.Write(exe, 0, exe.Length);
 
-                return true;
+                return 0;
             }
 
             // things from File.OpenRead
-            catch (ArgumentNullException) { Print($"Path was null"); return false; }
-            catch (ArgumentException) { Print($"Path \"{path}\" was invalid"); return false; }
-            catch (PathTooLongException) { Print($"Path \"{path}\" was too long"); return false; }
-            catch (DirectoryNotFoundException) { Print($"Path \"{path}\" directory was not found"); return false; }
-            catch (UnauthorizedAccessException) { Print($"You do not have permission to open \"{path}\" for reading"); return false; }
-            catch (FileNotFoundException) { Print($"File \"{path}\" could not be found"); return false; }
-            catch (NotSupportedException) { Print($"Path \"{path}\" was of an unsupported format"); return false; }
-            catch (IOException) { Print($"An error occurred while reading file \"{path}\""); return false; }
+            catch (ArgumentNullException) { Print($"Path was null"); return (int)AsmLnkErrorExt.NullPath; }
+            catch (ArgumentException) { Print($"Path \"{path}\" was invalid"); return (int)AsmLnkErrorExt.InvalidPath; }
+            catch (PathTooLongException) { Print($"Path \"{path}\" was too long"); return (int)AsmLnkErrorExt.InvalidPath; }
+            catch (DirectoryNotFoundException) { Print($"Path \"{path}\" directory was not found"); return (int)AsmLnkErrorExt.DirectoryNotFound; }
+            catch (UnauthorizedAccessException) { Print($"You do not have permission to open \"{path}\" for reading"); return (int)AsmLnkErrorExt.AccessViolation; }
+            catch (FileNotFoundException) { Print($"File \"{path}\" could not be found"); return (int)AsmLnkErrorExt.FileNotFound; }
+            catch (NotSupportedException) { Print($"Path \"{path}\" was of an unsupported format"); return (int)AsmLnkErrorExt.PathFormatUnsupported; }
+            catch (IOException) { Print($"An error occurred while reading file \"{path}\""); return (int)AsmLnkErrorExt.IOError; }
 
             // everything else that might happen for some reason
-            catch (Exception ex) { Print($"An error occurred while attempting to execute \"{path}\"\n-> {ex}"); return false; }
+            catch (Exception ex) { Print($"An error occurred while attempting to execute \"{path}\"\n-> {ex}"); return (int)AsmLnkErrorExt.UnknownError; }
 
             // close the file
             finally { f?.Dispose(); }
@@ -196,7 +221,7 @@ namespace CSX64
         /// </summary>
         /// <param name="path">the file to read</param>
         /// <param name="exe">the resulting binary data</param>
-        private static bool LoadBinaryFile(string path, out byte[] exe)
+        private static int LoadBinaryFile(string path, out byte[] exe)
         {
             exe = null;
 
@@ -211,21 +236,21 @@ namespace CSX64
                 exe = new byte[f.Length];
                 f.Read(exe, 0, (int)f.Length);
 
-                return true;
+                return 0;
             }
 
             // things from File.OpenRead
-            catch (ArgumentNullException) { Print($"Path was null"); return false; }
-            catch (ArgumentException) { Print($"Path \"{path}\" was invalid"); return false; }
-            catch (PathTooLongException) { Print($"Path \"{path}\" was too long"); return false; }
-            catch (DirectoryNotFoundException) { Print($"Path \"{path}\" directory was not found"); return false; }
-            catch (UnauthorizedAccessException) { Print($"You do not have permission to open \"{path}\" for reading"); return false; }
-            catch (FileNotFoundException) { Print($"File \"{path}\" could not be found"); return false; }
-            catch (NotSupportedException) { Print($"Path \"{path}\" was of an unsupported format"); return false; }
-            catch (IOException) { Print($"An error occurred while reading file \"{path}\""); return false; }
+            catch (ArgumentNullException) { Print($"Path was null"); return (int)AsmLnkErrorExt.NullPath; }
+            catch (ArgumentException) { Print($"Path \"{path}\" was invalid"); return (int)AsmLnkErrorExt.InvalidPath; }
+            catch (PathTooLongException) { Print($"Path \"{path}\" was too long"); return (int)AsmLnkErrorExt.InvalidPath; }
+            catch (DirectoryNotFoundException) { Print($"Path \"{path}\" directory was not found"); return (int)AsmLnkErrorExt.DirectoryNotFound; }
+            catch (UnauthorizedAccessException) { Print($"You do not have permission to open \"{path}\" for reading"); return (int)AsmLnkErrorExt.AccessViolation; }
+            catch (FileNotFoundException) { Print($"File \"{path}\" could not be found"); return (int)AsmLnkErrorExt.FileNotFound; }
+            catch (NotSupportedException) { Print($"Path \"{path}\" was of an unsupported format"); return (int)AsmLnkErrorExt.PathFormatUnsupported; }
+            catch (IOException) { Print($"An error occurred while reading file \"{path}\""); return (int)AsmLnkErrorExt.IOError; }
 
             // everything else that might happen for some reason
-            catch (Exception ex) { Print($"An error occurred while attempting to execute \"{path}\"\n-> {ex}"); return false; }
+            catch (Exception ex) { Print($"An error occurred while attempting to execute \"{path}\"\n-> {ex}"); return (int)AsmLnkErrorExt.UnknownError; }
 
             // close the file
             finally { f?.Dispose(); }
@@ -236,7 +261,7 @@ namespace CSX64
         /// </summary>
         /// <param name="path">the file to save to</param>
         /// <param name="txt">the text data to save</param>
-        private static bool SaveTextFile(string path, out string txt)
+        private static int SaveTextFile(string path, out string txt)
         {
             txt = null;
 
@@ -251,21 +276,21 @@ namespace CSX64
                 using (StreamWriter writer = new StreamWriter(f))
                     writer.Write(txt);
 
-                return true;
+                return 0;
             }
 
             // things from File.OpenRead
-            catch (ArgumentNullException) { Print($"Path was null"); return false; }
-            catch (ArgumentException) { Print($"Path \"{path}\" was invalid"); return false; }
-            catch (PathTooLongException) { Print($"Path \"{path}\" was too long"); return false; }
-            catch (DirectoryNotFoundException) { Print($"Path \"{path}\" directory was not found"); return false; }
-            catch (UnauthorizedAccessException) { Print($"You do not have permission to open \"{path}\" for reading"); return false; }
-            catch (FileNotFoundException) { Print($"File \"{path}\" could not be found"); return false; }
-            catch (NotSupportedException) { Print($"Path \"{path}\" was of an unsupported format"); return false; }
-            catch (IOException) { Print($"An error occurred while reading file \"{path}\""); return false; }
+            catch (ArgumentNullException) { Print($"Path was null"); return (int)AsmLnkErrorExt.NullPath; }
+            catch (ArgumentException) { Print($"Path \"{path}\" was invalid"); return (int)AsmLnkErrorExt.InvalidPath; }
+            catch (PathTooLongException) { Print($"Path \"{path}\" was too long"); return (int)AsmLnkErrorExt.InvalidPath; }
+            catch (DirectoryNotFoundException) { Print($"Path \"{path}\" directory was not found"); return (int)AsmLnkErrorExt.DirectoryNotFound; }
+            catch (UnauthorizedAccessException) { Print($"You do not have permission to open \"{path}\" for reading"); return (int)AsmLnkErrorExt.AccessViolation; }
+            catch (FileNotFoundException) { Print($"File \"{path}\" could not be found"); return (int)AsmLnkErrorExt.FileNotFound; }
+            catch (NotSupportedException) { Print($"Path \"{path}\" was of an unsupported format"); return (int)AsmLnkErrorExt.PathFormatUnsupported; }
+            catch (IOException) { Print($"An error occurred while reading file \"{path}\""); return (int)AsmLnkErrorExt.IOError; }
 
             // everything else that might happen for some reason
-            catch (Exception ex) { Print($"An error occurred while attempting to execute \"{path}\"\n-> {ex}"); return false; }
+            catch (Exception ex) { Print($"An error occurred while attempting to execute \"{path}\"\n-> {ex}"); return (int)AsmLnkErrorExt.UnknownError; }
 
             // close the file
             finally { f?.Dispose(); }
@@ -275,7 +300,7 @@ namespace CSX64
         /// </summary>
         /// <param name="path">the file to read</param>
         /// <param name="txt">the resulting text data</param>
-        private static bool LoadTextFile(string path, out string txt)
+        private static int LoadTextFile(string path, out string txt)
         {
             txt = null;
 
@@ -289,21 +314,21 @@ namespace CSX64
                 // read the contents
                 txt = f.ReadToEnd();
 
-                return true;
+                return 0;
             }
 
             // things from File.OpenRead
-            catch (ArgumentNullException) { Print($"Path was null"); return false; }
-            catch (ArgumentException) { Print($"Path \"{path}\" was invalid"); return false; }
-            catch (PathTooLongException) { Print($"Path \"{path}\" was too long"); return false; }
-            catch (DirectoryNotFoundException) { Print($"Path \"{path}\" directory was not found"); return false; }
-            catch (UnauthorizedAccessException) { Print($"You do not have permission to open \"{path}\" for reading"); return false; }
-            catch (FileNotFoundException) { Print($"File \"{path}\" could not be found"); return false; }
-            catch (NotSupportedException) { Print($"Path \"{path}\" was of an unsupported format"); return false; }
-            catch (IOException) { Print($"An error occurred while reading file \"{path}\""); return false; }
+            catch (ArgumentNullException) { Print($"Path was null"); return (int)AsmLnkErrorExt.NullPath; }
+            catch (ArgumentException) { Print($"Path \"{path}\" was invalid"); return (int)AsmLnkErrorExt.InvalidPath; }
+            catch (PathTooLongException) { Print($"Path \"{path}\" was too long"); return (int)AsmLnkErrorExt.InvalidPath; }
+            catch (DirectoryNotFoundException) { Print($"Path \"{path}\" directory was not found"); return (int)AsmLnkErrorExt.DirectoryNotFound; }
+            catch (UnauthorizedAccessException) { Print($"You do not have permission to open \"{path}\" for reading"); return (int)AsmLnkErrorExt.AccessViolation; }
+            catch (FileNotFoundException) { Print($"File \"{path}\" could not be found"); return (int)AsmLnkErrorExt.FileNotFound; }
+            catch (NotSupportedException) { Print($"Path \"{path}\" was of an unsupported format"); return (int)AsmLnkErrorExt.PathFormatUnsupported; }
+            catch (IOException) { Print($"An error occurred while reading file \"{path}\""); return (int)AsmLnkErrorExt.IOError; }
 
             // everything else that might happen for some reason
-            catch (Exception ex) { Print($"An error occurred while attempting to execute \"{path}\"\n-> {ex}"); return false; }
+            catch (Exception ex) { Print($"An error occurred while attempting to execute \"{path}\"\n-> {ex}"); return (int)AsmLnkErrorExt.UnknownError; }
 
             // close the file
             finally { f?.Dispose(); }
@@ -314,7 +339,7 @@ namespace CSX64
         /// </summary>
         /// <param name="path">the destination file to save to</param>
         /// <param name="obj">the object file to serialize</param>
-        private static bool SaveObjectFile(string path, ObjectFile obj)
+        private static int SaveObjectFile(string path, ObjectFile obj)
         {
             FileStream f = null; // file handle
 
@@ -327,25 +352,21 @@ namespace CSX64
                 using (BinaryWriter writer = new BinaryWriter(f))
                     ObjectFile.WriteTo(writer, obj);
 
-                return true;
+                return 0;
             }
 
             // things from File.OpenRead
-            catch (ArgumentNullException) { Print($"Path was null"); return false; }
-            catch (ArgumentException) { Print($"Path \"{path}\" was invalid"); return false; }
-            catch (PathTooLongException) { Print($"Path \"{path}\" was too long"); return false; }
-            catch (DirectoryNotFoundException) { Print($"Path \"{path}\" directory was not found"); return false; }
-            catch (UnauthorizedAccessException) { Print($"You do not have permission to open \"{path}\" for reading"); return false; }
-            catch (FileNotFoundException) { Print($"File \"{path}\" could not be found"); return false; }
-            catch (NotSupportedException) { Print($"Path \"{path}\" was of an unsupported format"); return false; }
-            catch (IOException) { Print($"An error occurred while reading file \"{path}\""); return false; }
-
-            // things from BinaryFormatter.Serialize
-            catch (SerializationException) { Print($"An error occurred while saving object file \"{path}\""); return false; }
-            catch (SecurityException) { Print($"You do not have permission to serialize object file \"{path}\""); return false; }
+            catch (ArgumentNullException) { Print($"Path was null"); return (int)AsmLnkErrorExt.NullPath; }
+            catch (ArgumentException) { Print($"Path \"{path}\" was invalid"); return (int)AsmLnkErrorExt.InvalidPath; }
+            catch (PathTooLongException) { Print($"Path \"{path}\" was too long"); return (int)AsmLnkErrorExt.InvalidPath; }
+            catch (DirectoryNotFoundException) { Print($"Path \"{path}\" directory was not found"); return (int)AsmLnkErrorExt.DirectoryNotFound; }
+            catch (UnauthorizedAccessException) { Print($"You do not have permission to open \"{path}\" for reading"); return (int)AsmLnkErrorExt.AccessViolation; }
+            catch (FileNotFoundException) { Print($"File \"{path}\" could not be found"); return (int)AsmLnkErrorExt.FileNotFound; }
+            catch (NotSupportedException) { Print($"Path \"{path}\" was of an unsupported format"); return (int)AsmLnkErrorExt.PathFormatUnsupported; }
+            catch (IOException) { Print($"An error occurred while reading file \"{path}\""); return (int)AsmLnkErrorExt.IOError; }
 
             // everything else that might happen for some reason
-            catch (Exception ex) { Print($"An error occurred while attempting to execute \"{path}\"\n-> {ex}"); return false; }
+            catch (Exception ex) { Print($"An error occurred while attempting to execute \"{path}\"\n-> {ex}"); return (int)AsmLnkErrorExt.UnknownError; }
 
             // close the file
             finally { f?.Dispose(); }
@@ -355,7 +376,7 @@ namespace CSX64
         /// </summary>
         /// <param name="path">the source file to read from</param>
         /// <param name="obj">the resulting object file</param>
-        private static bool LoadObjectFile(string path, out ObjectFile obj)
+        private static int LoadObjectFile(string path, out ObjectFile obj)
         {
             obj = null;
 
@@ -370,28 +391,27 @@ namespace CSX64
                 using (BinaryReader reader = new BinaryReader(f))
                     ObjectFile.ReadFrom(reader, out obj);
 
-                return true;
+                return 0;
             }
 
             // things from File.OpenRead
-            catch (ArgumentNullException) { Print($"Path was null"); return false; }
-            catch (ArgumentException) { Print($"Path \"{path}\" was invalid"); return false; }
-            catch (PathTooLongException) { Print($"Path \"{path}\" was too long"); return false; }
-            catch (DirectoryNotFoundException) { Print($"Path \"{path}\" directory was not found"); return false; }
-            catch (UnauthorizedAccessException) { Print($"You do not have permission to open \"{path}\" for reading"); return false; }
-            catch (FileNotFoundException) { Print($"File \"{path}\" could not be found"); return false; }
-            catch (NotSupportedException) { Print($"Path \"{path}\" was of an unsupported format"); return false; }
-            catch (EndOfStreamException) { Print($"Object file \"{path}\" was corrupted"); return false; }
-            catch (IOException) { Print($"An error occurred while reading file \"{path}\""); return false; }
+            catch (ArgumentNullException) { Print($"Path was null"); return (int)AsmLnkErrorExt.NullPath; }
+            catch (ArgumentException) { Print($"Path \"{path}\" was invalid"); return (int)AsmLnkErrorExt.InvalidPath; }
+            catch (PathTooLongException) { Print($"Path \"{path}\" was too long"); return (int)AsmLnkErrorExt.InvalidPath; }
+            catch (DirectoryNotFoundException) { Print($"Path \"{path}\" directory was not found"); return (int)AsmLnkErrorExt.DirectoryNotFound; }
+            catch (UnauthorizedAccessException) { Print($"You do not have permission to open \"{path}\" for reading"); return (int)AsmLnkErrorExt.AccessViolation; }
+            catch (FileNotFoundException) { Print($"File \"{path}\" could not be found"); return (int)AsmLnkErrorExt.FileNotFound; }
+            catch (NotSupportedException) { Print($"Path \"{path}\" was of an unsupported format"); return (int)AsmLnkErrorExt.PathFormatUnsupported; }
+            catch (IOException) { Print($"An error occurred while reading file \"{path}\""); return (int)AsmLnkErrorExt.IOError; }
 
             // things from ObjectFile.ReadFrom
-            catch (FormatException) { Print($"Object file \"{path}\" was corrupted"); return false; }
+            catch (FormatException) { Print($"Object file \"{path}\" was corrupted"); return (int)AsmLnkErrorExt.FormatError; }
 
             // things from casting after deserialization
-            catch (InvalidCastException) { Print($"file \"{path}\" was incorrectly-formatted"); return false; }
+            catch (InvalidCastException) { Print($"file \"{path}\" was incorrectly-formatted"); return (int)AsmLnkErrorExt.FormatError; }
 
             // everything else that might happen for some reason
-            catch (Exception ex) { Print($"An error occurred while attempting to execute \"{path}\"\n-> {ex}"); return false; }
+            catch (Exception ex) { Print($"An error occurred while attempting to execute \"{path}\"\n-> {ex}"); return (int)AsmLnkErrorExt.UnknownError; }
 
             // close the file
             finally { f?.Dispose(); }
@@ -404,10 +424,11 @@ namespace CSX64
         /// </summary>
         /// <param name="from">source assembly file</param>
         /// <param name="to">destination for resulting object file</param>
-        private static bool Assemble(string from, string to)
+        private static int Assemble(string from, string to)
         {
             // read the file contents
-            if (!LoadTextFile(from, out string code)) return false;
+            int ret = LoadTextFile(from, out string code);
+            if (ret != 0) return ret;
 
             // assemble the program
             AssembleResult res = Assembly.Assemble(code, out ObjectFile obj);
@@ -419,13 +440,13 @@ namespace CSX64
                 return SaveObjectFile(to, obj);
             }
             // otherwise show error message
-            else { Print($"Assemble Error:\n{res.ErrorMsg}"); return false; }
+            else { Print($"Assemble Error:\n{res.ErrorMsg}"); return (int)res.Error; }
         }
         /// <summary>
         /// Assembles the (from) file into an object file and saves it as the same name but with a .o extension
         /// </summary>
         /// <param name="from">the source assembly file</param>
-        private static bool Assemble(string from)
+        private static int Assemble(string from)
         {
             return Assemble(from, Path.ChangeExtension(from, ".o"));
         }
@@ -435,12 +456,15 @@ namespace CSX64
         /// </summary>
         /// <param name="paths">the object files to link</param>
         /// <param name="to">destination for the resulting executable</param>
-        private static bool Link(List<string> paths, string to)
+        private static int Link(List<string> paths, string to)
         {
             // get all the object files
             ObjectFile[] objs = new ObjectFile[paths.Count];
             for (int i = 0; i < paths.Count; ++i)
-                if (!LoadObjectFile(paths[i], out objs[i])) return false;
+            {
+                int ret = LoadObjectFile(paths[i], out objs[i]);
+                if (ret != 0) return ret; 
+            }
 
             // link the object files
             LinkResult res = Assembly.Link(out byte[] exe, objs);
@@ -452,7 +476,7 @@ namespace CSX64
                 return SaveBinaryFile(to, exe);
             }
             // otherwise show error message
-            else { Print($"Link Error:\n{res.ErrorMsg}"); return false; }
+            else { Print($"Link Error:\n{res.ErrorMsg}"); return (int)res.Error; }
         }
 
         // -- execution -- //
@@ -462,10 +486,11 @@ namespace CSX64
         /// </summary>
         /// <param name="path">the file to execute</param>
         /// <param name="args">the command line arguments for the client program</param>
-        private static bool RunRawConsole(string path, string[] args, FlagsRegister flags)
+        private static int RunRawConsole(string path, string[] args, FlagsRegister flags)
         {
             // read the binary data
-            if (!LoadBinaryFile(path, out byte[] exe)) return false;
+            int ret = LoadBinaryFile(path, out byte[] exe);
+            if (ret != 0) return ret;
 
             // run as a console client and return success flag
             return RunRawConsole(exe, args, flags);
@@ -474,10 +499,11 @@ namespace CSX64
         /// Executes a program via the graphical client. returns true if there were no errors
         /// </summary>
         /// <param name="path">the file to execute</param>
-        private static bool RunGraphicalClient(string path, string[] args, FlagsRegister flags)
+        private static int RunGraphicalClient(string path, string[] args, FlagsRegister flags)
         {
             // read the binary data
-            if (!LoadBinaryFile(path, out byte[] exe)) return false;
+            int ret = LoadBinaryFile(path, out byte[] exe);
+            if (ret != 0) return ret;
 
             // run as a console client and return success flag
             return RunGraphicalClient(exe, args, flags);
@@ -488,7 +514,7 @@ namespace CSX64
         /// </summary>
         /// <param name="exe">the code to execute</param>
         /// <param name="args">the command line arguments for the client program</param>
-        private static bool RunRawConsole(byte[] exe, string[] args, FlagsRegister flags)
+        private static int RunRawConsole(byte[] exe, string[] args, FlagsRegister flags)
         {
             // create the computer
             using (Computer computer = new Computer())
@@ -500,27 +526,30 @@ namespace CSX64
                 computer.GetFlags().SetPrivateFlags(flags.Flags);
 
                 // tie standard streams
-                computer.GetFileDescriptor(0).Open(Console.OpenStandardInput(), false, false); // stdin is non-interactive because we're not the ones that will be adding data to it. that's the console's responsibility
-                computer.GetFileDescriptor(1).Open(Console.OpenStandardOutput(), false, false);
-                computer.GetFileDescriptor(2).Open(Console.OpenStandardError(), false, false);
+                computer.GetFD(0).Open(Console.OpenStandardInput(), false, false); // stdin is non-interactive because we're not the ones that will be adding data to it. that's the console's responsibility
+                computer.GetFD(1).Open(Console.OpenStandardOutput(), false, false);
+                computer.GetFD(2).Open(Console.OpenStandardError(), false, false);
 
                 // begin execution
                 while (computer.Tick()) ;
-                
-                // print error code if there was one
+
+                // if there was an error
                 if (computer.Error != ErrorCode.None)
                 {
+                    // print error message
                     Print($"\n\nError Encountered: {computer.Error}");
+                    // return execution error code
+                    return ExecReturnCode;
                 }
+                // otherwise use return value
+                else return computer.ReturnValue;
             }
-
-            return true;
         }
         /// <summary>
         /// Executes a program via the graphical client. returns true if there were no errors
         /// </summary>
         /// <param name="exe">the code to execute</param>
-        private static bool RunGraphicalClient(byte[] exe, string[] args, FlagsRegister flags)
+        private static int RunGraphicalClient(byte[] exe, string[] args, FlagsRegister flags)
         {
             // create the computer
             using (GraphicalComputer computer = new GraphicalComputer())
@@ -536,10 +565,19 @@ namespace CSX64
                 {
                     // begin execution
                     graphics.ShowDialog();
+
+                    // if there was an error
+                    if (computer.Error != ErrorCode.None)
+                    {
+                        // print error message
+                        Print($"\n\nError Encountered: {computer.Error}");
+                        // return execution error code
+                        return ExecReturnCode;
+                    }
+                    // otherwise use return value
+                    else return computer.ReturnValue;
                 }
             }
-
-            return true;
         }
     }
 }

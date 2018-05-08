@@ -356,6 +356,16 @@ namespace CSX64
             return b.ToString();
         }
 
+        /// <summary>
+        /// Returns true if the string starts with the specified character
+        /// </summary>
+        /// <param name="str">the string to test</param>
+        /// <param name="ch">the character it must start with</param>
+        public static bool StartsWith(this string str, char ch)
+        {
+            return str.Length > 0 && str[0] == ch;
+        }
+
         // -- CSX64 encoding utilities -- //
 
         /// <summary>

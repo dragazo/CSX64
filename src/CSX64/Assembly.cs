@@ -939,11 +939,59 @@ namespace CSX64
 
     public static class Assembly
     {
+        private const char CommentChar = ';';
+        private const char LabelDefChar = ':';
+        private const char OpSizeSeparatorChar = ':';
+
+        private const char RegisterPrefix = '$';
+
+        private const string CurrentLineMacro = "@";
+        private const string LastStaticLabelMacro = "@@";
+
+        private const string EmissionMultPrefix = "#";
+        private const UInt64 EmissionMaxMultiplier = 1000000;
+
+        private static readonly Dictionary<Expr.OPs, int> Precedence = new Dictionary<Expr.OPs, int>()
+            {
+                { Expr.OPs.Mul, 5 },
+                { Expr.OPs.Div, 5 },
+                { Expr.OPs.Mod, 5 },
+
+                { Expr.OPs.Add, 6 },
+                { Expr.OPs.Sub, 6 },
+
+                { Expr.OPs.SL, 7 },
+                { Expr.OPs.SR, 7 },
+
+                { Expr.OPs.Less, 9 },
+                { Expr.OPs.LessE, 9 },
+                { Expr.OPs.Great, 9 },
+                { Expr.OPs.GreatE, 9 },
+
+                { Expr.OPs.Eq, 10 },
+                { Expr.OPs.Neq, 10 },
+
+                { Expr.OPs.BitAnd, 11 },
+                { Expr.OPs.BitXor, 12 },
+                { Expr.OPs.BitOr, 13 },
+                { Expr.OPs.LogAnd, 14 },
+                { Expr.OPs.LogOr, 15 },
+
+                { Expr.OPs.NullCoalesce, 99 },
+                { Expr.OPs.Pair, 100 },
+                { Expr.OPs.Condition, 100 }
+            };
+        private static readonly List<char> UnaryOps = new List<char>() { '+', '-', '~', '!', '*', '/' };
+
+        private static readonly List<string> VerifyLegalExpressionIgnores = new List<string>() { "#base", "__prog_end__" };
+
         /// <summary>
         /// Holds all the variables used during assembly
         /// </summary>
         private class AssembleArgs
         {
+            // -- data -- //
+
             public ObjectFile file;
             public int line;
 
@@ -964,23 +1012,13 @@ namespace CSX64
                 }
             }
 
-            public UInt64 current_line_pos; // value used for the $ macro
+            public UInt64 current_line_pos; // value used for the current line macro
 
             public AssembleResult res;
 
             public UInt64 time;
 
-            // -- Assembly Functions --
-
-            public const char CommentChar = ';';
-            public const char LabelDefChar = ':';
-            public const char OpSizeSeparatorChar = ':';
-
-            public const UInt64 EmissionMaxMultiplier = 1000000;
-            public const char EmissionMultiplierChar = '#';
-
-            public static readonly List<string> VerifyLegalExpressionIgnores = new List<string>()
-            { "#base", "__prog_end__" };
+            // -- Assembly Functions -- //
 
             /// <summary>
             /// Splits the raw line into its separate components. The raw line should not have a comment section.
@@ -1170,38 +1208,6 @@ namespace CSX64
                 return true;
             }
 
-            public static readonly Dictionary<Expr.OPs, int> Precedence = new Dictionary<Expr.OPs, int>()
-            {
-                { Expr.OPs.Mul, 5 },
-                { Expr.OPs.Div, 5 },
-                { Expr.OPs.Mod, 5 },
-
-                { Expr.OPs.Add, 6 },
-                { Expr.OPs.Sub, 6 },
-
-                { Expr.OPs.SL, 7 },
-                { Expr.OPs.SR, 7 },
-
-                { Expr.OPs.Less, 9 },
-                { Expr.OPs.LessE, 9 },
-                { Expr.OPs.Great, 9 },
-                { Expr.OPs.GreatE, 9 },
-
-                { Expr.OPs.Eq, 10 },
-                { Expr.OPs.Neq, 10 },
-
-                { Expr.OPs.BitAnd, 11 },
-                { Expr.OPs.BitXor, 12 },
-                { Expr.OPs.BitOr, 13 },
-                { Expr.OPs.LogAnd, 14 },
-                { Expr.OPs.LogOr, 15 },
-
-                { Expr.OPs.NullCoalesce, 99 },
-                { Expr.OPs.Pair, 100 },
-                { Expr.OPs.Condition, 100 }
-            };
-            public static readonly List<char> UnaryOps = new List<char>() { '+', '-', '~', '!', '*', '/' };
-
             public static bool TryGetOp(string token, int pos, out Expr.OPs op, out int oplen)
             {
                 // default to invalid op
@@ -1348,16 +1354,16 @@ namespace CSX64
                         // mutate it
                         if (!MutateName(ref val)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse imm \"{token}\"\n-> {res.ErrorMsg}"); return false; }
 
-                        // if it's the $ current line position macro
-                        if (val == "$")
+                        // if it's the current line position macro
+                        if (val == CurrentLineMacro)
                         {
                             temp = new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Token = "#base" }, Right = new Expr() { IntResult = current_line_pos } };
                         }
-                        // if it's the $$ last static label macro
-                        else if (val == "$$")
+                        // if it's the last static label macro
+                        else if (val == LastStaticLabelMacro)
                         {
                             // can't use this before there's a static label
-                            if (last_static_label == null) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Cannot use the last static label macro $$ before the first static label"); return false; }
+                            if (last_static_label == null) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Cannot use the last static label macro {LastStaticLabelMacro} before the first static label"); return false; }
 
                             temp = new Expr() { Token = last_static_label };
                         }
@@ -1461,7 +1467,7 @@ namespace CSX64
 
                 // make sure all conditionals were matched
                 if (unpaired_conditionals != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expression contained {unpaired_conditionals} incomplete ternary {(unpaired_conditionals == 1 ? "conditional" : "conditionals")}"); return false; }
-
+                
                 // run ptrdiff logic on result
                 expr = Ptrdiff(expr);
 
@@ -1490,7 +1496,7 @@ namespace CSX64
                     // if there's no token, fail (not a pointer)
                     if (expr.Token == null) { val = null; return false; }
 
-                    // if this is the #base offset itself, value is zero (this can happen with the $ macro)
+                    // if this is the #base offset itself, value is zero (this can happen with the current line macro)
                     if (expr.Token == "#base") { val = new Expr(); return true; }
 
                     // otherwise get the symbol
@@ -1618,7 +1624,7 @@ namespace CSX64
             public bool TryParseRegister(string token, out UInt64 val)
             {
                 // get the prefixed instant imm
-                if (!TryParseInstantPrefixedImm(token, "$", out val, out bool floating)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{token}\" as a valid register address\n-> {res.ErrorMsg}"); return false; }
+                if (!TryParseInstantPrefixedImm(token, RegisterPrefix.ToString(), out val, out bool floating)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{token}\" as a valid register address\n-> {res.ErrorMsg}"); return false; }
 
                 // ensure not floating and in proper range
                 if (floating) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Attempt to use floating point value to specify register \"{token}\""); return false; }
@@ -1856,7 +1862,7 @@ namespace CSX64
                 while (true)
                 {
                     // find the next register marker
-                    for (pos = 1; pos < token.Length && token[pos] != '$'; ++pos) ;
+                    for (pos = 1; pos < token.Length && token[pos] != RegisterPrefix; ++pos) ;
                     // if this starts parenthetical region
                     if (pos + 1 < token.Length && token[pos + 1] == '(')
                     {
@@ -1958,19 +1964,9 @@ namespace CSX64
                 foreach (string global in file.GlobalSymbols)
                     if (!file.Symbols.ContainsKey(global)) { res = new AssembleResult(AssembleError.UnknownSymbol, $"Global symbol \"{global}\" was never defined"); return false; }
 
-                // make sure we didn't define an external symbol
-                foreach (string external in file.ExternalSymbols)
-                    if (file.Symbols.ContainsKey(external)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"External symbol \"{external}\" was defined within the file"); return false; }
-
-                // make sure all symbols expressions were valid
+                // make sure all symbol expressions were valid
                 foreach (var entry in file.Symbols)
-                {
                     if (!VerifyLegalExpression(entry.Value)) return false;
-
-                    // sanity check - ensure they also had legal names
-                    if (!IsValidName(entry.Key)) { res = new AssembleResult(AssembleError.InvalidLabel, $"Symbol name \"{entry.Key}\" is not valid"); return false; }
-                }
-
                 // make sure all hole expressions were valid
                 foreach (HoleData hole in file.Holes)
                     if (!VerifyLegalExpression(hole.Expr)) return false;
@@ -1994,12 +1990,12 @@ namespace CSX64
                 UInt64 b_sizecode = _b_sizecode == -1 ? sizecode : (UInt64)_b_sizecode;
 
                 // reg, *
-                if (args[0][0] == '$')
+                if (args[0][0] == RegisterPrefix)
                 {
                     if (!TryParseRegister(args[0], out a)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as a register\n-> {res.ErrorMsg}"); return false; }
 
                     // reg, reg
-                    if (args[1][0] == '$')
+                    if (args[1][0] == RegisterPrefix)
                     {
                         if (!TryParseRegister(args[1], out b)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as a register\n-> {res.ErrorMsg}"); return false; }
 
@@ -2029,7 +2025,7 @@ namespace CSX64
                     if (!TryParseAddress(args[0], out a, out b, out hole1)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as an address\n-> {res.ErrorMsg}"); return false; }
 
                     // mem, reg
-                    if (args[1][0] == '$')
+                    if (args[1][0] == RegisterPrefix)
                     {
                         if (!TryParseRegister(args[1], out c)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as a register\n-> {res.ErrorMsg}"); return false; }
 
@@ -2064,7 +2060,7 @@ namespace CSX64
                 AppendVal(1, (UInt64)op);
 
                 // reg
-                if (args[0][0] == '$')
+                if (args[0][0] == RegisterPrefix)
                 {
                     if (!TryParseRegister(args[0], out a)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as a register\n-> {res.ErrorMsg}"); return false; }
 
@@ -2107,15 +2103,15 @@ namespace CSX64
                     if (args[i].Length == 0) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Emission encountered empty argument"); return false; }
 
                     // if a multiplier
-                    if (args[i][0] == EmissionMultiplierChar)
+                    if (args[i].StartsWith(EmissionMultPrefix))
                     {
                         // cannot be used immediately following another multiplier
-                        if (i > 0 && args[i - 1][0] == EmissionMultiplierChar) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Emission multiplier cannot immediately follow an emission multiplier"); return false; }
+                        if (i > 0 && args[i - 1].StartsWith(EmissionMultPrefix)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Emission multiplier cannot immediately follow an emission multiplier"); return false; }
                         // cannot be used immediately following a string
                         if (i > 0 && args[i - 1][0] == '"') { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Emission multiplier cannot immediately follow a string argument"); return false; }
 
                         // get the prefixed multiplier
-                        if (!TryParseInstantPrefixedImm(args[i], EmissionMultiplierChar.ToString(), out mult, out floating)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[i]}\" as an emission multiplier\n-> {res.ErrorMsg}"); return false; }
+                        if (!TryParseInstantPrefixedImm(args[i], EmissionMultPrefix, out mult, out floating)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[i]}\" as an emission multiplier\n-> {res.ErrorMsg}"); return false; }
 
                         // ensure the multiplier we got was valid
                         if (floating) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Emission multiplier cannot be floating point"); return false; }
@@ -2164,7 +2160,7 @@ namespace CSX64
                 AppendVal(1, (UInt64)op);
 
                 // reg
-                if (args[0][0] == '$')
+                if (args[0][0] == RegisterPrefix)
                 {
                     if (!TryParseRegister(args[0], out a)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as a register\n-> {res.ErrorMsg}"); return false; }
 
@@ -2315,13 +2311,13 @@ namespace CSX64
                 args.current_line_pos = (UInt64)args.file.Data.Count;
 
                 // find the next separator
-                for (end = pos; end < code.Length && code[end] != '\n' && code[end] != AssembleArgs.CommentChar; ++end) ;
+                for (end = pos; end < code.Length && code[end] != '\n' && code[end] != CommentChar; ++end) ;
 
                 ++args.line; // advance line counter
                 // split the line
                 if (!args.SplitLine(code.Substring(pos, end - pos))) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Failed to parse line\n-> {args.res.ErrorMsg}");
                 // if the separator was a comment character, consume the rest of the line as well as no-op
-                if (end < code.Length && code[end] == AssembleArgs.CommentChar)
+                if (end < code.Length && code[end] == CommentChar)
                     for (; end < code.Length && code[end] != '\n'; ++end) ;
 
                 // process marked labels
@@ -2341,6 +2337,8 @@ namespace CSX64
 
                     // ensure we don't redefine a symbol
                     if (file.Symbols.ContainsKey(label)) return new AssembleResult(AssembleError.SymbolRedefinition, $"line {args.line}: Symbol \"{label}\" was already defined");
+                    // ensure we don't define an external
+                    if (file.ExternalSymbols.Contains(label)) return new AssembleResult(AssembleError.SymbolRedefinition, $"line {args.line}: Cannot define external symbol \"{label}\" internally");
 
                     // add the symbol as an address (uses illegal symbol #base, which will be defined at link time)
                     file.Symbols.Add(label, new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Token = "#base" }, Right = new Expr() { IntResult = args.current_line_pos } });
@@ -2363,7 +2361,9 @@ namespace CSX64
                                 if (!AssembleArgs.IsValidName(symbol)) return new AssembleResult(AssembleError.InvalidLabel, $"line {args.line}: Invalid symbol name \"{symbol}\"");
 
                                 // don't add to global list twice
-                                if (file.GlobalSymbols.Contains(symbol)) return new AssembleResult(AssembleError.SymbolRedefinition, $"line {args.line}: Attempt to export symbol \"{symbol}\" multiple times");
+                                if (file.GlobalSymbols.Contains(symbol)) return new AssembleResult(AssembleError.SymbolRedefinition, $"line {args.line}: Attempt to global symbol \"{symbol}\" multiple times");
+                                // ensure we don't global an external
+                                if (file.ExternalSymbols.Contains(symbol)) return new AssembleResult(AssembleError.SymbolRedefinition, $"line {args.line}: Cannot define external symbol \"{symbol}\" as global");
 
                                 // add it to the globals list
                                 file.GlobalSymbols.Add(symbol);
@@ -2383,6 +2383,8 @@ namespace CSX64
 
                                 // don't add to external list twice
                                 if (file.ExternalSymbols.Contains(symbol)) return new AssembleResult(AssembleError.SymbolRedefinition, $"line {args.line}: Attempt to import symbol \"{symbol}\" multiple times");
+                                // ensure we don't extern a global
+                                if (file.GlobalSymbols.Contains(symbol)) return new AssembleResult(AssembleError.SymbolRedefinition, $"line {args.line}: Cannot define global symbol \"{symbol}\" as external");
 
                                 // add it to the external list
                                 file.ExternalSymbols.Add(symbol);
@@ -2401,6 +2403,8 @@ namespace CSX64
 
                             // don't redefine a symbol
                             if (file.Symbols.ContainsKey(args.args[0])) return new AssembleResult(AssembleError.SymbolRedefinition, $"line {args.line}: Symbol \"{args.args[0]}\" was already defined");
+                            // ensure we don't define an external
+                            if (file.ExternalSymbols.Contains(args.args[0])) return new AssembleResult(AssembleError.SymbolRedefinition, $"line {args.line}: Cannot define external symbol \"{args.args[0]}\" internally");
 
                             // add it to the dictionary
                             file.Symbols.Add(args.args[0], hole);
@@ -2455,12 +2459,12 @@ namespace CSX64
                             args.AppendVal(1, (UInt64)OPCode.SWAP);
 
                             // reg, *
-                            if (args.args[0][0] == '$')
+                            if (args.args[0][0] == RegisterPrefix)
                             {
                                 if (!args.TryParseRegister(args.args[0], out a)) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[0]}\" as a register\n-> {args.res.ErrorMsg}");
 
                                 // reg, reg
-                                if (args.args[1][0] == '$')
+                                if (args.args[1][0] == RegisterPrefix)
                                 {
                                     if (!args.TryParseRegister(args.args[1], out b)) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[1]}\" as a register\n-> {args.res.ErrorMsg}");
 
@@ -2484,7 +2488,7 @@ namespace CSX64
                                 if (!args.TryParseAddress(args.args[0], out a, out b, out hole)) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[0]}\" as an address\n-> {args.res.ErrorMsg}");
 
                                 // mem, reg
-                                if (args.args[1][0] == '$')
+                                if (args.args[1][0] == RegisterPrefix)
                                 {
                                     if (!args.TryParseRegister(args.args[1], out c)) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[1]}\" as a register\n-> {args.res.ErrorMsg}");
 
@@ -2807,7 +2811,14 @@ namespace CSX64
             // -- define things -- //
 
             // resulting binary (we don't know how large the resulting file will be, so it needs to be expandable) (sets aside space for header)
-            List<byte> data = new List<byte>() { (byte)OPCode.CALL, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, (byte)OPCode.STOP };
+            List<byte> data = new List<byte>()
+            {
+                (byte)OPCode.CALL, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, // call    [main]       ; call main function
+                (byte)OPCode.MOV, 0x1e, 0x00,                    // mov     $1, $0       ; mov ret value to $1 for sys_exit
+                (byte)OPCode.XOR, 0x0e, 0x00,                    // xor     $0, $0       ; clear $0
+                (byte)OPCode.MOV, 0x00, (byte)SyscallCode.Exit,  // mov:8   $0, sys_exit ; load sys_exit (bypasses endianness by only using low byte)
+                (byte)OPCode.SYSCALL                             // syscall              ; perform sys_exit to set error code and stop execution
+            };
 
             // a table for relating global symbols to their object file
             var global_to_obj = new Dictionary<string, ObjectFile>();

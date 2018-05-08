@@ -59,6 +59,10 @@ namespace CSX64
         /// Gets the current error code
         /// </summary>
         public ErrorCode Error { get; protected set; }
+        /// <summary>
+        /// The return value from the program after errorless termination
+        /// </summary>
+        public int ReturnValue { get; protected set; }
 
         /// <summary>
         /// Gets the total amount of memory the processor currently has access to
@@ -150,17 +154,39 @@ namespace CSX64
 
             // initialize stack register
             Registers[15].x64 = stack;
+
+            // also push $0 and $1 onto the stack so it'll work with stack calling conventions
+            Push(Registers[0].x64);
+            Push(Registers[1].x64);
         }
 
         /// <summary>
-        /// Causes the machine to end execution and release various system resources (e.g. file handles).
+        /// Causes the machine to end execution with an error code and release various system resources (e.g. file handles).
         /// </summary>
-        /// <param name="err">The error code to emit</param>
+        /// <param name="err">the error code to emit</param>
         public void Terminate(ErrorCode err = ErrorCode.None)
         {
+            // only do this if we're currently running (so we don't override what error caused the initial termination)
             if (Running)
             {
+                // set error and stop execution
                 Error = err;
+                Running = false;
+
+                CloseFiles(); // close all the file descriptors
+            }
+        }
+        /// <summary>
+        /// Causes the machine to end execution with a return value and release various system resources (e.g. file handles).
+        /// </summary>
+        /// <param name="ret">the program return value to emit</param>
+        public void Exit(int ret = 0)
+        {
+            // only do this if we're currently running (so we don't override what error caused the initial termination)
+            if (Running)
+            {
+                // set error and stop execution
+                ReturnValue = ret;
                 Running = false;
 
                 CloseFiles(); // close all the file descriptors
@@ -181,12 +207,12 @@ namespace CSX64
         /// Gets the file descriptor at the specified index. (no bounds checking)
         /// </summary>
         /// <param name="index">the index of the file descriptor</param>
-        public FileDescriptor GetFileDescriptor(int index) => FileDescriptors[index];
+        public FileDescriptor GetFD(int index) => FileDescriptors[index];
         /// <summary>
         /// Finds the first available file descriptor, or null if there are none available
         /// </summary>
         /// <param name="index">the index of the result</param>
-        public FileDescriptor FindAvailableFileDescriptor(out UInt64 index)
+        public FileDescriptor FindAvailableFD(out UInt64 index)
         {
             index = UInt64.MaxValue;
 
@@ -234,7 +260,7 @@ namespace CSX64
                 case (UInt64)SyscallCode.Mkdir: return Sys_Mkdir();
                 case (UInt64)SyscallCode.Rmdir: return Sys_Rmdir();
                 
-                case (UInt64)SyscallCode.Exit: Terminate((ErrorCode)Registers[1].x64); return true;
+                case (UInt64)SyscallCode.Exit: Exit((int)Registers[1].x64); return true;
 
                 // ----------------------------------
 
@@ -402,16 +428,16 @@ namespace CSX64
                         case 0: if (!GetMemAdv(Size((a >> 2) & 3), out b)) return false; break;
                         case 1: b = Registers[a >> 4].x64; break;
                     }
-                    return Push(Size((a >> 2) & 3), b);
+                    return PushRaw(Size((a >> 2) & 3), b);
                 case OPCode.POP:
-                    if (!GetMemAdv(1, out a) || !Pop(Size((a >> 2) & 3), out b)) return false;
+                    if (!GetMemAdv(1, out a) || !PopRaw(Size((a >> 2) & 3), out b)) return false;
                     Registers[a >> 4].Set((a >> 2) & 3, b);
                     return true;
                 case OPCode.CALL:
-                    if (!GetAddressAdv(out a) || !Push(8, Pos)) return false;
+                    if (!GetAddressAdv(out a) || !PushRaw(8, Pos)) return false;
                     Pos = a; return true;
                 case OPCode.RET:
-                    if (!Pop(8, out a)) return false;
+                    if (!PopRaw(8, out a)) return false;
                     Pos = a; return true;
 
                 case OPCode.BSWAP: return ProcessBSWAP();
