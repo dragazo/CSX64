@@ -50,14 +50,14 @@ namespace CSX64
             "usage: csx64 [<options>] [--] <pathspec>...\n" +
             "\n" +
             "    -h, --help             shows this help mesage\n" +
-            "    -g, --graphical        executes a program via the graphical client\n" +
-            "    -a, --assemble         assembly files should be assembled into object files\n" +
-            "    -l, --link             object files should be linked into an executable\n" +
-            "    -o, --out <pathspec>   specifies the output path. if not provided, will usually take on a default value\n" +
-            "        --end              stops parsing command line arguments as options and takes remaining args as pathspec\n" +
+            "    -g, --graphical        executes a graphical program\n" +
+            "    -a, --assemble         assembe files into object files\n" +
+            "    -l, --link             link object files into an executable\n" +
+            "    -o, --out <pathspec>   specifies explicit output path\n" +
+            "        --end              remaining args are pathspec\n" +
             "        --fs               sets the file system flag\n" +
             "\n" +
-            "if no options are provided, will execute a program via the console client\n" +
+            "if no -g/-a/-l provided, executes a console program\n" +
             "";
 
         /// <summary>
