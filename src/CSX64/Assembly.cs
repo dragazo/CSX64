@@ -1158,7 +1158,7 @@ namespace CSX64
                 if (label[0] == '.')
                 {
                     string sub = label.Substring(1); // local symbol name
-                    
+
                     // local name can't be empty
                     if (!IsValidName(sub)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: \"{label}\" is not a legal local symbol name"); return false; }
                     // can't make a local label before any non-local ones exist
@@ -1177,7 +1177,7 @@ namespace CSX64
                 // write the value (little-endian)
                 file.Data.Append(size, val);
             }
-            public bool TryAppendExpr(UInt64 size, Expr expr, int type = 3)
+            public bool TryAppendExpr(UInt64 size, Expr expr)
             {
                 string err = null; // evaluation error
 
@@ -1467,7 +1467,7 @@ namespace CSX64
 
                 // make sure all conditionals were matched
                 if (unpaired_conditionals != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expression contained {unpaired_conditionals} incomplete ternary {(unpaired_conditionals == 1 ? "conditional" : "conditionals")}"); return false; }
-                
+
                 // run ptrdiff logic on result
                 expr = Ptrdiff(expr);
 
@@ -1975,118 +1975,72 @@ namespace CSX64
                 return true;
             }
 
-            // -- op formats -- //
+            // -- misc -- //
 
-            public bool TryProcessBinaryOp(OPCode op, int _b_sizecode = -1, UInt64 sizemask = 15)
+            public bool TryProcessGlobal()
             {
-                UInt64 a, b, c; // parsing temporaries
-                Expr hole1, hole2;
+                if (args.Length == 0) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: GLOBAL expected at least one symbol to export"); return false; }
 
-                if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 2 args"); return false; }
-                if ((Size(sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
-
-                AppendVal(1, (UInt64)op);
-
-                UInt64 b_sizecode = _b_sizecode == -1 ? sizecode : (UInt64)_b_sizecode;
-
-                // reg, *
-                if (args[0][0] == RegisterPrefix)
+                foreach (string symbol in args)
                 {
-                    if (!TryParseRegister(args[0], out a)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as a register\n-> {res.ErrorMsg}"); return false; }
+                    // special error message for using global on local labels
+                    if (symbol[0] == '.') { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Cannot export local symbols"); return false; }
 
-                    // reg, reg
-                    if (args[1][0] == RegisterPrefix)
-                    {
-                        if (!TryParseRegister(args[1], out b)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as a register\n-> {res.ErrorMsg}"); return false; }
+                    // test name for legality
+                    if (!IsValidName(symbol)) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: Invalid symbol name \"{symbol}\""); return false; }
 
-                        AppendVal(1, (a << 4) | (sizecode << 2) | 2);
-                        AppendVal(1, b);
-                    }
-                    // reg, mem
-                    else if (args[1][0] == '[')
-                    {
-                        if (!TryParseAddress(args[1], out b, out c, out hole1)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as an address\n-> {res.ErrorMsg}"); return false; }
+                    // don't add to global list twice
+                    if (file.GlobalSymbols.Contains(symbol)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Attempt to global symbol \"{symbol}\" multiple times"); return false; }
+                    // ensure we don't global an external
+                    if (file.ExternalSymbols.Contains(symbol)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Cannot define external symbol \"{symbol}\" as global"); return false; }
 
-                        AppendVal(1, (a << 4) | (sizecode << 2) | 1);
-                        if (!TryAppendAddress(b, c, hole1)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
-                    }
-                    // reg, imm
-                    else
-                    {
-                        if (!TryParseImm(args[1], out hole1)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as an imm\n-> {res.ErrorMsg}"); return false; }
-
-                        AppendVal(1, (a << 4) | (sizecode << 2) | 0);
-                        if (!TryAppendExpr(Size(b_sizecode), hole1)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
-                    }
+                    // add it to the globals list
+                    file.GlobalSymbols.Add(symbol);
                 }
-                // mem, *
-                else if (args[0][0] == '[')
-                {
-                    if (!TryParseAddress(args[0], out a, out b, out hole1)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as an address\n-> {res.ErrorMsg}"); return false; }
-
-                    // mem, reg
-                    if (args[1][0] == RegisterPrefix)
-                    {
-                        if (!TryParseRegister(args[1], out c)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as a register\n-> {res.ErrorMsg}"); return false; }
-
-                        AppendVal(1, (sizecode << 2) | 2);
-                        AppendVal(1, 16 | c);
-                        if (!TryAppendAddress(a, b, hole1)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; };
-                    }
-                    // mem, mem
-                    else if (args[1][0] == '[') { res = new AssembleResult(AssembleError.FormatError, $"line {line}: {op} does not support memory-to-memory"); return false; }
-                    // mem, imm
-                    else
-                    {
-                        if (!TryParseImm(args[1], out hole2)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as an imm\n-> {res.ErrorMsg}"); return false; }
-
-                        AppendVal(1, (sizecode << 2) | 3);
-                        if (!TryAppendExpr(Size(b_sizecode), hole2)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
-                        if (!TryAppendAddress(a, b, hole1)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
-                    }
-                }
-                else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Destination must be register or memory"); return false; }
 
                 return true;
             }
-            public bool TryProcessUnaryOp(OPCode op, UInt64 sizemask = 15)
+            public bool TryProcessExtern()
             {
-                UInt64 a, b;
-                Expr hole;
+                if (args.Length == 0) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: EXTERN expected at least one symbol to import"); return false; }
 
-                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 1 arg"); return false; }
-                if ((Size(sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
-
-                AppendVal(1, (UInt64)op);
-
-                // reg
-                if (args[0][0] == RegisterPrefix)
+                foreach (string symbol in args)
                 {
-                    if (!TryParseRegister(args[0], out a)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as a register\n-> {res.ErrorMsg}"); return false; }
+                    // special error message for using extern on local labels
+                    if (symbol[0] == '.') { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Cannot import local symbols"); return false; }
 
-                    AppendVal(1, (a << 4) | (sizecode << 2) | 0);
-                }
-                // mem
-                else if (args[0][0] == '[')
-                {
-                    if (!TryParseAddress(args[0], out a, out b, out hole)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as an address\n-> {res.ErrorMsg}"); return false; }
+                    // test name for legality
+                    if (!IsValidName(symbol)) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: Invalid symbol name \"{symbol}\""); return false; }
 
-                    AppendVal(1, (sizecode << 2) | 1);
-                    if (!TryAppendAddress(a, b, hole)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                    // don't add to external list twice
+                    if (file.ExternalSymbols.Contains(symbol)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Attempt to import symbol \"{symbol}\" multiple times"); return false; }
+                    // ensure we don't extern a global
+                    if (file.GlobalSymbols.Contains(symbol)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Cannot define global symbol \"{symbol}\" as external"); return false; }
+
+                    // add it to the external list
+                    file.ExternalSymbols.Add(symbol);
                 }
-                // imm
-                else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Destination must be register or memory"); return false; }
 
                 return true;
             }
-            public bool TryProcessJump(OPCode op)
+            public bool TryProcessDef()
             {
-                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 1 arg"); return false; }
+                if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: DEF expected 2 args"); return false; }
 
-                if (!TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr hole)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Jump expected address as first arg\n-> {res.ErrorMsg}"); return false; }
+                // mutate and test result for legality
+                if (!MutateName(ref args[0])) return false;
+                if (!IsValidName(args[0])) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: Invalid label name \"{args[0]}\""); return false; }
 
-                AppendVal(1, (UInt64)op);
-                if (!TryAppendAddress(a, b, hole)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                // get the expression
+                if (!TryParseImm(args[1], out Expr expr)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: DEF expected an expression as second arg\n-> {res.ErrorMsg}"); return false; }
+
+                // don't redefine a symbol
+                if (file.Symbols.ContainsKey(args[0])) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Symbol \"{args[0]}\" was already defined"); return false; }
+                // ensure we don't define an external
+                if (file.ExternalSymbols.Contains(args[0])) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Cannot define external symbol \"{args[0]}\" internally"); return false; }
+
+                // add it to the dictionary
+                file.Symbols.Add(args[0], expr);
 
                 return true;
             }
@@ -2150,11 +2104,107 @@ namespace CSX64
 
                 return true;
             }
+
+            // -- op formats -- //
+
+            public bool TryProcessBinaryOp(OPCode op, int _b_sizecode = -1, UInt64 sizemask = 15)
+            {
+                if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 2 args"); return false; }
+                if ((Size(sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
+
+                AppendVal(1, (UInt64)op);
+
+                UInt64 b_sizecode = _b_sizecode == -1 ? sizecode : (UInt64)_b_sizecode;
+
+                // reg, *
+                if (args[0][0] == RegisterPrefix)
+                {
+                    if (!TryParseRegister(args[0], out UInt64 dest)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as a register\n-> {res.ErrorMsg}"); return false; }
+
+                    // reg, reg
+                    if (args[1][0] == RegisterPrefix)
+                    {
+                        if (!TryParseRegister(args[1], out UInt64 src)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as a register\n-> {res.ErrorMsg}"); return false; }
+
+                        AppendVal(1, (dest << 4) | (sizecode << 2) | 2);
+                        AppendVal(1, src);
+                    }
+                    // reg, mem
+                    else if (args[1][0] == '[')
+                    {
+                        if (!TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as an address\n-> {res.ErrorMsg}"); return false; }
+
+                        AppendVal(1, (dest << 4) | (sizecode << 2) | 1);
+                        if (!TryAppendAddress(a, b, ptr_base)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                    }
+                    // reg, imm
+                    else
+                    {
+                        if (!TryParseImm(args[1], out Expr imm)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as an imm\n-> {res.ErrorMsg}"); return false; }
+
+                        AppendVal(1, (dest << 4) | (sizecode << 2) | 0);
+                        if (!TryAppendExpr(Size(b_sizecode), imm)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                    }
+                }
+                // mem, *
+                else if (args[0][0] == '[')
+                {
+                    if (!TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as an address\n-> {res.ErrorMsg}"); return false; }
+
+                    // mem, reg
+                    if (args[1][0] == RegisterPrefix)
+                    {
+                        if (!TryParseRegister(args[1], out UInt64 src)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as a register\n-> {res.ErrorMsg}"); return false; }
+
+                        AppendVal(1, (sizecode << 2) | 2);
+                        AppendVal(1, 16 | src);
+                        if (!TryAppendAddress(a, b, ptr_base)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; };
+                    }
+                    // mem, mem
+                    else if (args[1][0] == '[') { res = new AssembleResult(AssembleError.FormatError, $"line {line}: {op} does not support memory-to-memory"); return false; }
+                    // mem, imm
+                    else
+                    {
+                        if (!TryParseImm(args[1], out Expr imm)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as an imm\n-> {res.ErrorMsg}"); return false; }
+
+                        AppendVal(1, (sizecode << 2) | 3);
+                        if (!TryAppendExpr(Size(b_sizecode), imm)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                        if (!TryAppendAddress(a, b, ptr_base)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                    }
+                }
+                else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Destination must be register or memory"); return false; }
+
+                return true;
+            }
+            public bool TryProcessUnaryOp(OPCode op, UInt64 sizemask = 15)
+            {
+                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 1 arg"); return false; }
+                if ((Size(sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
+
+                AppendVal(1, (UInt64)op);
+
+                // reg
+                if (args[0][0] == RegisterPrefix)
+                {
+                    if (!TryParseRegister(args[0], out UInt64 reg)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as a register\n-> {res.ErrorMsg}"); return false; }
+
+                    AppendVal(1, (reg << 4) | (sizecode << 2) | 0);
+                }
+                // mem
+                else if (args[0][0] == '[')
+                {
+                    if (!TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as an address\n-> {res.ErrorMsg}"); return false; }
+
+                    AppendVal(1, (sizecode << 2) | 1);
+                    if (!TryAppendAddress(a, b, ptr_base)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                }
+                // imm
+                else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Destination must be register or memory"); return false; }
+
+                return true;
+            }
             public bool TryProcessIMMRM(OPCode op)
             {
-                UInt64 a, b;
-                Expr hole;
-
                 if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 1 arg"); return false; }
 
                 AppendVal(1, (UInt64)op);
@@ -2162,26 +2212,153 @@ namespace CSX64
                 // reg
                 if (args[0][0] == RegisterPrefix)
                 {
-                    if (!TryParseRegister(args[0], out a)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as a register\n-> {res.ErrorMsg}"); return false; }
+                    if (!TryParseRegister(args[0], out UInt64 reg)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as a register\n-> {res.ErrorMsg}"); return false; }
 
-                    AppendVal(1, (a << 4) | (sizecode << 2) | 1);
+                    AppendVal(1, (reg << 4) | (sizecode << 2) | 1);
                 }
                 // mem
                 else if (args[0][0] == '[')
                 {
-                    if (!TryParseAddress(args[0], out a, out b, out hole)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as an address\n-> {res.ErrorMsg}"); return false; }
+                    if (!TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as an address\n-> {res.ErrorMsg}"); return false; }
 
                     AppendVal(1, (sizecode << 2) | 2);
-                    if (!TryAppendAddress(a, b, hole)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                    if (!TryAppendAddress(a, b, ptr_base)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
                 }
                 // imm
                 else
                 {
-                    if (!TryParseImm(args[0], out hole)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as an imm\n-> {res.ErrorMsg}"); return false; }
+                    if (!TryParseImm(args[0], out Expr imm)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as an imm\n-> {res.ErrorMsg}"); return false; }
 
                     AppendVal(1, (sizecode << 2) | 0);
-                    if (!TryAppendExpr(Size(sizecode), hole)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                    if (!TryAppendExpr(Size(sizecode), imm)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
                 }
+
+                return true;
+            }
+
+            public bool TryProcessNoArgOp(OPCode op)
+            {
+                if (args.Length != 0) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 0 args"); return false; }
+
+                AppendVal(1, (UInt64)op);
+
+                return true;
+            }
+            public bool TryProcessSWAP(OPCode op)
+            {
+                if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 2 args"); return false; }
+
+                AppendVal(1, (UInt64)op);
+
+                // reg, *
+                if (args[0][0] == RegisterPrefix)
+                {
+                    if (!TryParseRegister(args[0], out UInt64 reg)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as a register\n-> {res.ErrorMsg}"); return false; }
+
+                    // reg, reg
+                    if (args[1][0] == RegisterPrefix)
+                    {
+                        if (!TryParseRegister(args[1], out UInt64 src)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as a register\n-> {res.ErrorMsg}"); return false; }
+
+                        AppendVal(1, (reg << 4) | (sizecode << 2) | 0);
+                        AppendVal(1, src);
+                    }
+                    // reg, mem
+                    else if (args[1][0] == '[')
+                    {
+                        if (!TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as an address\n-> {res.ErrorMsg}"); return false; }
+
+                        AppendVal(1, (reg << 4) | (sizecode << 2) | 1);
+                        if (!TryAppendAddress(a, b, ptr_base)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                    }
+                    // reg, imm
+                    else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Cannot use {op} with an imm"); return false; }
+                }
+                // mem, *
+                else if (args[0][0] == '[')
+                {
+                    if (!TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as an address\n-> {res.ErrorMsg}"); return false; }
+
+                    // mem, reg
+                    if (args[1][0] == RegisterPrefix)
+                    {
+                        if (!TryParseRegister(args[1], out UInt64 reg)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as a register\n-> {res.ErrorMsg}"); return false; }
+
+                        AppendVal(1, (reg << 4) | (sizecode << 2) | 1);
+                        if (!TryAppendAddress(a, b, ptr_base)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                    }
+                    // mem, mem
+                    else if (args[1][0] == '[') { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Cannot use {op} with two memory values"); return false; }
+                    // mem, imm
+                    else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Cannot use {op} with an imm"); return false; }
+                }
+                // imm, *
+                else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Cannot use {op} with an imm"); return false; }
+
+                return true;
+            }
+            public bool TryProcessExtend(OPCode op, UInt64 sizemask = 15)
+            {
+                if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 2 args"); return false; }
+                if ((Size(sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
+
+                if (!TryParseRegister(args[0], out UInt64 reg)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} expected register parameter as first arg\n-> {res.ErrorMsg}"); return false; }
+                if (!TryParseSizecode(args[1], out UInt64 from_size)) { res = new AssembleResult(AssembleError.MissingSize, $"line {line}: {op} expected size parameter as second arg\n-> {res.ErrorMsg}"); return false; }
+
+                if ((Size(from_size) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified original size code"); return false; }
+
+                AppendVal(1, (UInt64)op);
+                AppendVal(1, (reg << 4) | (from_size << 2) | sizecode);
+
+                return true;
+            }
+            public bool TryProcessLEA(OPCode op)
+            {
+                if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 2 args"); return false; }
+
+                if (!TryParseRegister(args[0], out UInt64 dest)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} expecetd register as first arg\n-> {res.ErrorMsg}"); return false; }
+                if (!TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} expected address as second arg\n-> {res.ErrorMsg}"); return false; }
+
+                AppendVal(1, (UInt64)op);
+                AppendVal(1, dest);
+                if (!TryAppendAddress(a, b, ptr_base)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+
+                return true;
+            }
+            public bool TryProcessPUSH(OPCode op)
+            {
+                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 1 arg"); return false; }
+
+                AppendVal(1, (UInt64)op);
+
+                // reg
+                if (args[0][0] == RegisterPrefix)
+                {
+                    if (!TryParseRegister(args[0], out UInt64 reg)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to parse \"{args[0]}\" as a register\n-> {res.ErrorMsg}"); return false; }
+
+                    AppendVal(1, (reg << 4) | (sizecode << 2) | 1);
+                }
+                // mem
+                else if (args[0][0] == '[') { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} cannot be used with a memory value"); return false; }
+                // imm
+                else
+                {
+                    if (!TryParseImm(args[0], out Expr imm)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to parse \"{args[0]}\" as an imm\n-> {res.ErrorMsg}"); return false; }
+
+                    AppendVal(1, (sizecode << 2) | 0);
+                    if (!TryAppendExpr(Size(sizecode), imm)) return false;
+                }
+
+                return true;
+            }
+            public bool TryProcessPOP(OPCode op)
+            {
+                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 1 arg"); return false; }
+
+                if (!TryParseRegister(args[0], out UInt64 reg)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} expected register as second arg\n-> {res.ErrorMsg}"); return false; }
+
+                AppendVal(1, (UInt64)op);
+                AppendVal(1, (reg << 4) | (sizecode << 2));
 
                 return true;
             }
@@ -2297,8 +2474,7 @@ namespace CSX64
             int pos = 0, end = 0; // position in code
 
             // potential parsing args for an instruction
-            UInt64 a = 0, b = 0, c = 0, d = 0;
-            Expr hole;
+            UInt64 a = 0;
             bool floating;
 
             string err = null; // error location for evaluation
@@ -2349,86 +2525,18 @@ namespace CSX64
                 {
                     switch (args.op.ToUpper())
                     {
-                        case "GLOBAL":
-                            if (args.args.Length == 0) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: GLOBAL expected at least one symbol to export");
+                        // -- directive routing -- //
 
-                            foreach (string symbol in args.args)
-                            {
-                                // special error message for using global on local labels
-                                if (symbol[0] == '.') return new AssembleResult(AssembleError.ArgError, $"line {args.line}: Cannot export local symbols");
-
-                                // test name for legality
-                                if (!AssembleArgs.IsValidName(symbol)) return new AssembleResult(AssembleError.InvalidLabel, $"line {args.line}: Invalid symbol name \"{symbol}\"");
-
-                                // don't add to global list twice
-                                if (file.GlobalSymbols.Contains(symbol)) return new AssembleResult(AssembleError.SymbolRedefinition, $"line {args.line}: Attempt to global symbol \"{symbol}\" multiple times");
-                                // ensure we don't global an external
-                                if (file.ExternalSymbols.Contains(symbol)) return new AssembleResult(AssembleError.SymbolRedefinition, $"line {args.line}: Cannot define external symbol \"{symbol}\" as global");
-
-                                // add it to the globals list
-                                file.GlobalSymbols.Add(symbol);
-                            }
-
-                            break;
-                        case "EXTERN":
-                            if (args.args.Length == 0) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: EXTERN expected at least one symbol to import");
-
-                            foreach (string symbol in args.args)
-                            {
-                                // special error message for using extern on local labels
-                                if (symbol[0] == '.') return new AssembleResult(AssembleError.ArgError, $"line {args.line}: Cannot import local symbols");
-
-                                // test name for legality
-                                if (!AssembleArgs.IsValidName(symbol)) return new AssembleResult(AssembleError.InvalidLabel, $"line {args.line}: Invalid symbol name \"{symbol}\"");
-
-                                // don't add to external list twice
-                                if (file.ExternalSymbols.Contains(symbol)) return new AssembleResult(AssembleError.SymbolRedefinition, $"line {args.line}: Attempt to import symbol \"{symbol}\" multiple times");
-                                // ensure we don't extern a global
-                                if (file.GlobalSymbols.Contains(symbol)) return new AssembleResult(AssembleError.SymbolRedefinition, $"line {args.line}: Cannot define global symbol \"{symbol}\" as external");
-
-                                // add it to the external list
-                                file.ExternalSymbols.Add(symbol);
-                            }
-
-                            break;
-                        case "DEF":
-                            if (args.args.Length != 2) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: DEF expected 2 args");
-
-                            // mutate and test result for legality
-                            if (!args.MutateName(ref args.args[0])) return args.res;
-                            if (!AssembleArgs.IsValidName(args.args[0])) return new AssembleResult(AssembleError.InvalidLabel, $"line {args.line}: Invalid label name \"{args.args[0]}\"");
-
-                            // get the expression
-                            if (!args.TryParseImm(args.args[1], out hole)) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: DEF expected an expression as second arg\n-> {args.res.ErrorMsg}");
-
-                            // don't redefine a symbol
-                            if (file.Symbols.ContainsKey(args.args[0])) return new AssembleResult(AssembleError.SymbolRedefinition, $"line {args.line}: Symbol \"{args.args[0]}\" was already defined");
-                            // ensure we don't define an external
-                            if (file.ExternalSymbols.Contains(args.args[0])) return new AssembleResult(AssembleError.SymbolRedefinition, $"line {args.line}: Cannot define external symbol \"{args.args[0]}\" internally");
-
-                            // add it to the dictionary
-                            file.Symbols.Add(args.args[0], hole);
-                            break;
-
+                        case "GLOBAL": if (!args.TryProcessGlobal()) return args.res; break;
+                        case "EXTERN": if(!args.TryProcessExtern()) return args.res; break;
+                        case "DEF": if (!args.TryProcessDef()) return args.res; break;
                         case "EMIT": if (!args.TryProcessEmission()) return args.res; break;
 
-                        // --------------------------
-                        // -- OPCode assembly impl --
-                        // --------------------------
+                        // -- instruction routing -- //
 
-                        // [8: op]
-                        case "NOP":
-                            if (args.args.Length != 0) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: NOP expected 0 args");
-                            args.AppendVal(1, (UInt64)OPCode.NOP);
-                            break;
-                        case "STOP":
-                            if (args.args.Length != 0) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: STOP expected 0 args");
-                            args.AppendVal(1, (UInt64)OPCode.STOP);
-                            break;
-                        case "SYSCALL":
-                            if (args.args.Length != 0) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: SYSCALL expected 0 args");
-                            args.AppendVal(1, (UInt64)OPCode.SYSCALL);
-                            break;
+                        case "NOP": if (!args.TryProcessNoArgOp(OPCode.NOP)) return args.res; break;
+                        case "STOP": if (!args.TryProcessNoArgOp(OPCode.STOP)) return args.res; break;
+                        case "SYSCALL": if (!args.TryProcessNoArgOp(OPCode.SYSCALL)) return args.res; break;
 
                         case "MOV": if (!args.TryProcessBinaryOp(OPCode.MOV)) return args.res; break;
 
@@ -2453,71 +2561,10 @@ namespace CSX64
                         case "MOVC": if (!args.TryProcessBinaryOp(OPCode.MOVc)) return args.res; break;
                         case "MOVNC": if (!args.TryProcessBinaryOp(OPCode.MOVnc)) return args.res; break;
 
-                        case "SWAP":
-                            if (args.args.Length != 2) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: SWAP expected 2 args");
+                        case "SWAP": if (!args.TryProcessSWAP(OPCode.SWAP)) return args.res; break;
 
-                            args.AppendVal(1, (UInt64)OPCode.SWAP);
-
-                            // reg, *
-                            if (args.args[0][0] == RegisterPrefix)
-                            {
-                                if (!args.TryParseRegister(args.args[0], out a)) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[0]}\" as a register\n-> {args.res.ErrorMsg}");
-
-                                // reg, reg
-                                if (args.args[1][0] == RegisterPrefix)
-                                {
-                                    if (!args.TryParseRegister(args.args[1], out b)) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[1]}\" as a register\n-> {args.res.ErrorMsg}");
-
-                                    args.AppendVal(1, (a << 4) | (args.sizecode << 2) | 0);
-                                    args.AppendVal(1, b);
-                                }
-                                // reg, mem
-                                else if (args.args[1][0] == '[')
-                                {
-                                    if (!args.TryParseAddress(args.args[1], out b, out c, out hole)) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[1]}\" as an address\n-> {args.res.ErrorMsg}");
-
-                                    args.AppendVal(1, (a << 4) | (args.sizecode << 2) | 1);
-                                    if (!args.TryAppendAddress(b, c, hole)) return new AssembleResult(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.res.ErrorMsg}");
-                                }
-                                // reg, imm
-                                else return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Cannot use SWAP with an imm");
-                            }
-                            // mem, *
-                            else if (args.args[0][0] == '[')
-                            {
-                                if (!args.TryParseAddress(args.args[0], out a, out b, out hole)) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[0]}\" as an address\n-> {args.res.ErrorMsg}");
-
-                                // mem, reg
-                                if (args.args[1][0] == RegisterPrefix)
-                                {
-                                    if (!args.TryParseRegister(args.args[1], out c)) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Failed to parse \"{args.args[1]}\" as a register\n-> {args.res.ErrorMsg}");
-
-                                    args.AppendVal(1, (c << 4) | (args.sizecode << 2) | 1);
-                                    if (!args.TryAppendAddress(a, b, hole)) return new AssembleResult(AssembleError.ArgError, $"line {args.line}: Failed to append value");
-                                }
-                                // mem, mem
-                                else if (args.args[1][0] == '[') return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Cannot use SWAP with two memory values");
-                                // mem, imm
-                                else return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Cannot use SWAP with an imm");
-                            }
-                            // imm, *
-                            else return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Cannot use SWAP with an imm");
-
-                            break;
-
-                        case "UX": a = (UInt64)OPCode.UX; goto XEXTEND;
-                        case "SX":
-                            a = (UInt64)OPCode.SX;
-                            XEXTEND:
-                            if (args.args.Length != 2) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: XEXTEND expected 2 args");
-
-                            if (!args.TryParseSizecode(args.args[0], out b)) return new AssembleResult(AssembleError.MissingSize, $"line {args.line}: UEXTEND expected size parameter as second arg\n-> {args.res.ErrorMsg}");
-                            if (!args.TryParseRegister(args.args[1], out c)) return new AssembleResult(AssembleError.ArgError, $"line {args.line}: UEXTEND expected register parameter as third arg\n-> {args.res.ErrorMsg}");
-
-                            args.AppendVal(1, a);
-                            args.AppendVal(1, (c << 4) | (b << 2) | args.sizecode);
-
-                            break;
+                        case "ZX": if (!args.TryProcessExtend(OPCode.ZX)) return args.res; break;
+                        case "SX": if (!args.TryProcessExtend(OPCode.SX)) return args.res; break;
 
                         case "UMUL": if (!args.TryProcessIMMRM(OPCode.UMUL)) return args.res; break;
                         case "SMUL": if (!args.TryProcessIMMRM(OPCode.SMUL)) return args.res; break;
@@ -2532,12 +2579,12 @@ namespace CSX64
                         case "BSDIV": if (!args.TryProcessBinaryOp(OPCode.BSDIV)) return args.res; break;
                         case "BSMOD": if (!args.TryProcessBinaryOp(OPCode.BSMOD)) return args.res; break;
 
-                        case "SL": if (!args.TryProcessBinaryOp(OPCode.SL, 0)) return args.res; break;
-                        case "SR": if (!args.TryProcessBinaryOp(OPCode.SR, 0)) return args.res; break;
+                        case "SHL": if (!args.TryProcessBinaryOp(OPCode.SHL, 0)) return args.res; break;
+                        case "SHR": if (!args.TryProcessBinaryOp(OPCode.SHR, 0)) return args.res; break;
                         case "SAL": if (!args.TryProcessBinaryOp(OPCode.SAL, 0)) return args.res; break;
                         case "SAR": if (!args.TryProcessBinaryOp(OPCode.SAR, 0)) return args.res; break;
-                        case "RL": if (!args.TryProcessBinaryOp(OPCode.RL, 0)) return args.res; break;
-                        case "RR": if (!args.TryProcessBinaryOp(OPCode.RR, 0)) return args.res; break;
+                        case "ROL": if (!args.TryProcessBinaryOp(OPCode.ROL, 0)) return args.res; break;
+                        case "ROR": if (!args.TryProcessBinaryOp(OPCode.ROR, 0)) return args.res; break;
 
                         case "AND": if (!args.TryProcessBinaryOp(OPCode.AND)) return args.res; break;
                         case "OR": if (!args.TryProcessBinaryOp(OPCode.OR)) return args.res; break;
@@ -2546,7 +2593,6 @@ namespace CSX64
                         case "CMP": if (!args.TryProcessBinaryOp(OPCode.CMP)) return args.res; break;
                         case "TEST": if (!args.TryProcessBinaryOp(OPCode.TEST)) return args.res; break;
 
-                        // [8: unary op]   [4: dest][2:][2: size]
                         case "INC": if (!args.TryProcessUnaryOp(OPCode.INC)) return args.res; break;
                         case "DEC": if (!args.TryProcessUnaryOp(OPCode.DEC)) return args.res; break;
                         case "NEG": if (!args.TryProcessUnaryOp(OPCode.NEG)) return args.res; break;
@@ -2554,43 +2600,30 @@ namespace CSX64
                         case "ABS": if (!args.TryProcessUnaryOp(OPCode.ABS)) return args.res; break;
                         case "CMPZ": if (!args.TryProcessUnaryOp(OPCode.CMPZ)) return args.res; break;
 
-                        // [8: la]   [4:][4: dest]   [address]
-                        case "LA":
-                            if (args.args.Length != 2) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: LA expected 2 args");
-                            if (args.sizecode != 3) return new AssembleResult(AssembleError.UsageError, $"line {args.line}: LA does not support the specified size code");
+                        case "LEA": if (!args.TryProcessLEA(OPCode.LEA)) return args.res; break;
 
-                            if (!args.TryParseRegister(args.args[0], out a)) return new AssembleResult(AssembleError.ArgError, $"line {args.line}: LA expecetd register as first arg\n-> {args.res.ErrorMsg}");
-                            if (!args.TryParseAddress(args.args[1], out b, out c, out hole)) return new AssembleResult(AssembleError.ArgError, $"line {args.line}: LA expected address as second arg\n-> {args.res.ErrorMsg}");
+                        case "JMP": if (!args.TryProcessIMMRM(OPCode.JMP)) return args.res; break;
 
-                            args.AppendVal(1, (UInt64)OPCode.LA);
-                            args.AppendVal(1, a);
-                            if (!args.TryAppendAddress(b, c, hole)) return new AssembleResult(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.res.ErrorMsg}");
+                        case "JA": case "JNBE": if (!args.TryProcessIMMRM(OPCode.Ja)) return args.res; break;
+                        case "JAE": case "JNB": if (!args.TryProcessIMMRM(OPCode.Jae)) return args.res; break;
+                        case "JB": case "JNAE": if (!args.TryProcessIMMRM(OPCode.Jb)) return args.res; break;
+                        case "JBE": case "JNA": if (!args.TryProcessIMMRM(OPCode.Jbe)) return args.res; break;
 
-                            break;
+                        case "JG": case "JNLE": if (!args.TryProcessIMMRM(OPCode.Jg)) return args.res; break;
+                        case "JGE": case "JNL": if (!args.TryProcessIMMRM(OPCode.Jge)) return args.res; break;
+                        case "JL": case "JNGE": if (!args.TryProcessIMMRM(OPCode.Jl)) return args.res; break;
+                        case "JLE": case "JNG": if (!args.TryProcessIMMRM(OPCode.Jle)) return args.res; break;
 
-                        // [8: Jcc]   [address]
-                        case "JMP": if (!args.TryProcessJump(OPCode.JMP)) return args.res; break;
-
-                        case "JA": case "JNBE": if (!args.TryProcessJump(OPCode.Ja)) return args.res; break;
-                        case "JAE": case "JNB": if (!args.TryProcessJump(OPCode.Jae)) return args.res; break;
-                        case "JB": case "JNAE": if (!args.TryProcessJump(OPCode.Jb)) return args.res; break;
-                        case "JBE": case "JNA": if (!args.TryProcessJump(OPCode.Jbe)) return args.res; break;
-
-                        case "JG": case "JNLE": if (!args.TryProcessJump(OPCode.Jg)) return args.res; break;
-                        case "JGE": case "JNL": if (!args.TryProcessJump(OPCode.Jge)) return args.res; break;
-                        case "JL": case "JNGE": if (!args.TryProcessJump(OPCode.Jl)) return args.res; break;
-                        case "JLE": case "JNG": if (!args.TryProcessJump(OPCode.Jle)) return args.res; break;
-
-                        case "JZ": case "JE": if (!args.TryProcessJump(OPCode.Jz)) return args.res; break;
-                        case "JNZ": case "JNE": if (!args.TryProcessJump(OPCode.Jnz)) return args.res; break;
-                        case "JS": if (!args.TryProcessJump(OPCode.Js)) return args.res; break;
-                        case "JNS": if (!args.TryProcessJump(OPCode.Jns)) return args.res; break;
-                        case "JP": case "JPE": if (!args.TryProcessJump(OPCode.Jp)) return args.res; break;
-                        case "JNP": case "JPO": if (!args.TryProcessJump(OPCode.Jnp)) return args.res; break;
-                        case "JO": if (!args.TryProcessJump(OPCode.Jo)) return args.res; break;
-                        case "JNO": if (!args.TryProcessJump(OPCode.Jno)) return args.res; break;
-                        case "JC": if (!args.TryProcessJump(OPCode.Jc)) return args.res; break;
-                        case "JNC": if (!args.TryProcessJump(OPCode.Jnc)) return args.res; break;
+                        case "JZ": case "JE": if (!args.TryProcessIMMRM(OPCode.Jz)) return args.res; break;
+                        case "JNZ": case "JNE": if (!args.TryProcessIMMRM(OPCode.Jnz)) return args.res; break;
+                        case "JS": if (!args.TryProcessIMMRM(OPCode.Js)) return args.res; break;
+                        case "JNS": if (!args.TryProcessIMMRM(OPCode.Jns)) return args.res; break;
+                        case "JP": case "JPE": if (!args.TryProcessIMMRM(OPCode.Jp)) return args.res; break;
+                        case "JNP": case "JPO": if (!args.TryProcessIMMRM(OPCode.Jnp)) return args.res; break;
+                        case "JO": if (!args.TryProcessIMMRM(OPCode.Jo)) return args.res; break;
+                        case "JNO": if (!args.TryProcessIMMRM(OPCode.Jno)) return args.res; break;
+                        case "JC": if (!args.TryProcessIMMRM(OPCode.Jc)) return args.res; break;
+                        case "JNC": if (!args.TryProcessIMMRM(OPCode.Jnc)) return args.res; break;
 
                         case "FADD": if (!args.TryProcessBinaryOp(OPCode.FADD, -1, 12)) return args.res; break;
                         case "FSUB": if (!args.TryProcessBinaryOp(OPCode.FSUB, -1, 12)) return args.res; break;
@@ -2629,46 +2662,11 @@ namespace CSX64
                         case "FTOI": if (!args.TryProcessUnaryOp(OPCode.FTOI, 12)) return args.res; break;
                         case "ITOF": if (!args.TryProcessUnaryOp(OPCode.ITOF, 12)) return args.res; break;
 
-                        case "PUSH":
-                            if (args.args.Length != 1) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: PUSH expected 1 arg");
+                        case "PUSH": if (!args.TryProcessPUSH(OPCode.PUSH)) return args.res; break;
+                        case "POP": if (!args.TryProcessPOP(OPCode.POP)) return args.res; break;
 
-                            args.AppendVal(1, (UInt64)OPCode.PUSH);
-
-                            if (args.TryParseImm(args.args[0], out hole))
-                            {
-                                args.AppendVal(1, (args.sizecode << 2) | 0);
-                                if (!args.TryAppendExpr(Size(args.sizecode), hole)) return new AssembleResult(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.res.ErrorMsg}");
-                            }
-                            else if (args.TryParseRegister(args.args[0], out a))
-                            {
-                                args.AppendVal(1, (a << 4) | (args.sizecode << 2) | 1);
-                            }
-                            else return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Couldn't parse \"{args.args[0]}\" as an imm or register");
-
-                            break;
-                        case "POP":
-                            if (args.args.Length != 1) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: POP expected 1 arg");
-
-                            if (!args.TryParseRegister(args.args[0], out a)) return new AssembleResult(AssembleError.ArgError, $"line {args.line}: POP expected register as second arg\n-> {args.res.ErrorMsg}");
-
-                            args.AppendVal(1, (UInt64)OPCode.POP);
-                            args.AppendVal(1, (a << 4) | (args.sizecode << 2));
-
-                            break;
-                        case "CALL":
-                            if (args.args.Length != 1) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: CALL expected 1 arg");
-                            if (!args.TryParseAddress(args.args[0], out a, out b, out hole)) return new AssembleResult(AssembleError.ArgError, $"line {args.line}: CALL expected address as first arg\n-> {args.res.ErrorMsg}");
-
-                            args.AppendVal(1, (UInt64)OPCode.CALL);
-                            if (!args.TryAppendAddress(a, b, hole)) return new AssembleResult(AssembleError.ArgError, $"line {args.line}: Failed to append value\n-> {args.res.ErrorMsg}");
-
-                            break;
-                        case "RET":
-                            if (args.args.Length != 0) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: CALL expected 0 args");
-
-                            args.AppendVal(1, (UInt64)OPCode.RET);
-
-                            break;
+                        case "CALL": if (!args.TryProcessIMMRM(OPCode.CALL)) return args.res; break;
+                        case "RET": if (!args.TryProcessNoArgOp(OPCode.RET)) return args.res; break;
 
                         case "BSWAP": if (!args.TryProcessUnaryOp(OPCode.BSWAP)) return args.res; break;
                         case "BEXTR": if (!args.TryProcessBinaryOp(OPCode.BEXTR, 1)) return args.res; break;
@@ -2677,60 +2675,12 @@ namespace CSX64
                         case "BLSR": if (!args.TryProcessUnaryOp(OPCode.BLSR)) return args.res; break;
                         case "ANDN": if (!args.TryProcessBinaryOp(OPCode.ANDN)) return args.res; break;
 
-                        case "GETF": a = (UInt64)OPCode.GETF; goto GETSETF;
-                        case "SETF":
-                            a = (UInt64)OPCode.SETF;
-                            GETSETF:
-                            if (args.args.Length != 1) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: GETF expected one arg");
-                            if (!args.TryParseRegister(args.args[0], out b)) return new AssembleResult(AssembleError.UsageError, $"line {args.line}: GETF expected arg one to be a register");
-                            if (args.sizecode != 3) return new AssembleResult(AssembleError.UsageError, $"line {args.line}: GETF does not support the specified size code");
+                        case "GETF": if (!args.TryProcessUnaryOp(OPCode.GETF)) return args.res; break;
+                        case "SETF": if (!args.TryProcessIMMRM(OPCode.SETF)) return args.res; break;
 
-                            args.AppendVal(1, a);
-                            args.AppendVal(1, b);
+                        case "LOOP": if (!args.TryProcessIMMRM(OPCode.LOOP)) return args.res; break;
 
-                            break;
-
-                        case "LOOP": // loop reg, address, (step = 1)
-                            // 2 args default step
-                            if (args.args.Length == 2) a = 0;
-                            // 3 args explicit step
-                            else if (args.args.Length == 3)
-                            {
-                                if (!args.TryParseInstantImm(args.args[2], out a, out floating))
-                                    return new AssembleResult(AssembleError.ArgError, $"line {args.line}: LOOP third argument (explicit step) expected an instant imm");
-                                if (floating) return new AssembleResult(AssembleError.ArgError, $"line {args.line}: LOOP third argument (explicit step) may not be floating-point");
-
-                                switch (a)
-                                {
-                                    case 1: a = 0; break;
-                                    case 2: a = 1; break;
-                                    case 4: a = 2; break;
-                                    case 8: a = 3; break;
-
-                                    default: return new AssembleResult(AssembleError.ArgError, $"line {args.line}: LOOP third argument (explicit step) must be 1, 2, 4, or 8");
-                                }
-                            }
-                            else return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: LOOP expected two args (3 for explicit step)");
-
-                            if (!args.TryParseRegister(args.args[0], out b)) return new AssembleResult(AssembleError.UsageError, $"line {args.line}: LOOP expected register as first arg");
-                            if (!args.TryParseAddress(args.args[1], out c, out d, out hole)) return new AssembleResult(AssembleError.UsageError, $"line {args.line}: LOOP expected an address as second arg");
-
-                            args.AppendVal(1, (UInt64)OPCode.LOOP);
-                            args.AppendVal(1, (b << 4) | (args.sizecode << 2) | a);
-                            if (!args.TryAppendAddress(c, d, hole)) return args.res;
-
-                            break;
-
-                        case "FX":
-                            if (args.args.Length != 2) return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: XEXTEND expected 2 args");
-
-                            if (!args.TryParseSizecode(args.args[0], out a)) return new AssembleResult(AssembleError.MissingSize, $"line {args.line}: UEXTEND expected size parameter as second arg\n-> {args.res.ErrorMsg}");
-                            if (!args.TryParseRegister(args.args[1], out b)) return new AssembleResult(AssembleError.ArgError, $"line {args.line}: UEXTEND expected register parameter as third arg\n-> {args.res.ErrorMsg}");
-
-                            args.AppendVal(1, (UInt64)OPCode.FX);
-                            args.AppendVal(1, (b << 4) | (a << 2) | args.sizecode);
-
-                            break;
+                        case "FX": if (!args.TryProcessExtend(OPCode.FX, 12)) return args.res; break;
 
                         case "SLP": if (!args.TryProcessIMMRM(OPCode.SLP)) return args.res; break;
 

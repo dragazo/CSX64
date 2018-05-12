@@ -20,19 +20,19 @@ namespace CSX64
 
         SWAP,
 
-        UX, SX,
+        ZX, SX,
 
         UMUL, SMUL, UDIV, SDIV,
 
         ADD, SUB, BMUL, BUDIV, BUMOD, BSDIV, BSMOD,
-        SL, SR, SAL, SAR, RL, RR,
+        SHL, SHR, SAL, SAR, ROL, ROR,
         AND, OR, XOR,
 
         CMP, TEST,
 
         INC, DEC, NEG, NOT, ABS, CMPZ,
 
-        LA,
+        LEA,
 
         JMP,
         Ja, Jae, Jb, Jbe, Jg, Jge, Jl, Jle,

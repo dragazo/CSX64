@@ -1534,5 +1534,102 @@ namespace CSX64
 
             return StoreUnaryOpFormat(s, m, res);
         }
+
+        private bool ProcessLEA()
+        {
+            if (!GetMemAdv(1, out UInt64 s) || !GetAddressAdv(out UInt64 address)) return false;
+
+            Registers[s >> 4].Set((s >> 2) & 3, address);
+            return true;
+        }
+
+        private bool ProcessJMP(bool apply, ref UInt64 aft)
+        {
+            if (!GetMemAdv(1, out UInt64 s)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
+
+            UInt64 val = 0;
+            switch (s & 3)
+            {
+                case 0: if (!GetMemAdv(Size(sizecode), out val)) return false; break;
+                case 1: val = Registers[s >> 4].Get(sizecode); break;
+                case 2: if (!GetAddressAdv(out val) || !GetMemRaw(val, Size(sizecode), out val)) return false; break;
+                case 3:
+                    UInt64 tempPos = Pos - 2; // hold initial pos (-2 to account for op code and settings bytes that were already read)
+                    if (!GetMemAdv(Size(sizecode), out val)) return false;
+                    val = tempPos + SignExtend(val, sizecode); // offset from temp pos
+                    break;
+            }
+
+            aft = Pos; // record point immediately after reading (for CALL return address)
+
+            if (apply) Pos = val; // jump
+
+            return true;
+        }
+
+        private bool ProcessPUSH()
+        {
+            if (!GetMemAdv(1, out UInt64 s)) return false;
+
+            UInt64 b = 0;
+            switch (s & 1)
+            {
+                case 0: if (!GetMemAdv(Size((s >> 2) & 3), out b)) return false; break;
+                case 1: b = Registers[s >> 4].x64; break;
+            }
+
+            return PushRaw(Size((s >> 2) & 3), b);
+        }
+        private bool ProcessPOP()
+        {
+            if (!GetMemAdv(1, out UInt64 s) || !PopRaw(Size((s >> 2) & 3), out UInt64 val)) return false;
+
+            Registers[s >> 4].Set((s >> 2) & 3, val);
+            return true;
+        }
+
+        private bool ProcessGETF()
+        {
+            UInt64 s = 0, m = 0, a = 0;
+            if (!FetchUnaryOpFormat(ref s, ref m, ref a)) return false;
+
+            return StoreUnaryOpFormat(s, m, Flags.Flags);
+        }
+        private bool ProcessSETF()
+        {
+            if (!FetchIMMRMFormat(out UInt64 s, out UInt64 a)) return false;
+
+            Flags.SetPublicFlags(a);
+            return true;
+        }
+
+        private bool ProcessFX()
+        {
+            if (!GetMemAdv(1, out UInt64 a)) return false;
+
+            switch ((a >> 2) & 3)
+            {
+                case 2:
+                    switch (a & 3)
+                    {
+                        case 2: return true;
+                        case 3: Registers[a >> 4].x64 = DoubleAsUInt64((double)AsFloat(Registers[a >> 4].x32)); return true;
+
+                        default: Terminate(ErrorCode.UndefinedBehavior); return false;
+                    }
+
+                case 3:
+                    switch (a & 3)
+                    {
+                        case 2: Registers[a >> 4].x32 = FloatAsUInt64((float)AsDouble(Registers[a >> 4].x64)); return true;
+                        case 3: return true;
+
+                        default: Terminate(ErrorCode.UndefinedBehavior); return false;
+                    }
+
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
+            }
+        }
     }
 }

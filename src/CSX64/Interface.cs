@@ -291,7 +291,7 @@ namespace CSX64
             switch ((OPCode)a)
             {
                 case OPCode.NOP: return true;
-                case OPCode.STOP: Terminate(); return true;
+                case OPCode.STOP: Terminate(ErrorCode.Abort); return true;
                 case OPCode.SYSCALL: if (Syscall()) return true; Terminate(ErrorCode.UnhandledSyscall); return false;
 
                 case OPCode.MOV: return ProcessMOV();
@@ -319,7 +319,7 @@ namespace CSX64
 
                 case OPCode.SWAP: return ProcessSWAP();
 
-                case OPCode.UX: if (!GetMemAdv(1, out a)) return false; Registers[a >> 4].Set(a & 3, Registers[a >> 4].Get((a >> 2) & 3)); return true;
+                case OPCode.ZX: if (!GetMemAdv(1, out a)) return false; Registers[a >> 4].Set(a & 3, Registers[a >> 4].Get((a >> 2) & 3)); return true;
                 case OPCode.SX: if (!GetMemAdv(1, out a)) return false; Registers[a >> 4].Set(a & 3, SignExtend(Registers[a >> 4].Get((a >> 2) & 3), (a >> 2) & 3)); return true;
 
                 case OPCode.UMUL: return ProcessUMUL();
@@ -335,12 +335,12 @@ namespace CSX64
                 case OPCode.BSDIV: return ProcessBSDIV();
                 case OPCode.BSMOD: return ProcessBSMOD();
 
-                case OPCode.SL: return ProcessSL();
-                case OPCode.SR: return ProcessSR();
+                case OPCode.SHL: return ProcessSL();
+                case OPCode.SHR: return ProcessSR();
                 case OPCode.SAL: return ProcessSAL();
                 case OPCode.SAR: return ProcessSAR();
-                case OPCode.RL: return ProcessRL();
-                case OPCode.RR: return ProcessRR();
+                case OPCode.ROL: return ProcessRL();
+                case OPCode.ROR: return ProcessRR();
 
                 case OPCode.AND: return ProcessAND();
                 case OPCode.OR: return ProcessOR();
@@ -356,33 +356,30 @@ namespace CSX64
                 case OPCode.ABS: return ProcessABS();
                 case OPCode.CMPZ: return ProcessCMPZ();
 
-                case OPCode.LA:
-                    if (!GetMemAdv(1, out a) || !GetAddressAdv(out b)) return false;
-                    Registers[a & 15].x64 = b;
-                    return true;
+                case OPCode.LEA: return ProcessLEA();
 
-                case OPCode.JMP: if (!GetAddressAdv(out a)) return false; Pos = a; return true;
+                case OPCode.JMP: return ProcessJMP(true, ref a);
 
-                case OPCode.Ja: if (!GetAddressAdv(out a)) return false; if (Flags.a) Pos = a; return true;
-                case OPCode.Jae: if (!GetAddressAdv(out a)) return false; if (Flags.ae) Pos = a; return true;
-                case OPCode.Jb: if (!GetAddressAdv(out a)) return false; if (Flags.b) Pos = a; return true;
-                case OPCode.Jbe: if (!GetAddressAdv(out a)) return false; if (Flags.be) Pos = a; return true;
+                case OPCode.Ja: return ProcessJMP(Flags.a, ref a);
+                case OPCode.Jae: return ProcessJMP(Flags.ae, ref a);
+                case OPCode.Jb: return ProcessJMP(Flags.b, ref a);
+                case OPCode.Jbe: return ProcessJMP(Flags.be, ref a);
 
-                case OPCode.Jg: if (!GetAddressAdv(out a)) return false; if (Flags.g) Pos = a; return true;
-                case OPCode.Jge: if (!GetAddressAdv(out a)) return false; if (Flags.ge) Pos = a; return true;
-                case OPCode.Jl: if (!GetAddressAdv(out a)) return false; if (Flags.l) Pos = a; return true;
-                case OPCode.Jle: if (!GetAddressAdv(out a)) return false; if (Flags.le) Pos = a; return true;
+                case OPCode.Jg: return ProcessJMP(Flags.g, ref a);
+                case OPCode.Jge: return ProcessJMP(Flags.ge, ref a);
+                case OPCode.Jl: return ProcessJMP(Flags.l, ref a);
+                case OPCode.Jle: return ProcessJMP(Flags.le, ref a);
 
-                case OPCode.Jz: if (!GetAddressAdv(out a)) return false; if (Flags.Z) Pos = a; return true;
-                case OPCode.Jnz: if (!GetAddressAdv(out a)) return false; if (!Flags.Z) Pos = a; return true;
-                case OPCode.Js: if (!GetAddressAdv(out a)) return false; if (Flags.S) Pos = a; return true;
-                case OPCode.Jns: if (!GetAddressAdv(out a)) return false; if (!Flags.S) Pos = a; return true;
-                case OPCode.Jp: if (!GetAddressAdv(out a)) return false; if (Flags.P) Pos = a; return true;
-                case OPCode.Jnp: if (!GetAddressAdv(out a)) return false; if (!Flags.P) Pos = a; return true;
-                case OPCode.Jo: if (!GetAddressAdv(out a)) return false; if (Flags.O) Pos = a; return true;
-                case OPCode.Jno: if (!GetAddressAdv(out a)) return false; if (!Flags.O) Pos = a; return true;
-                case OPCode.Jc: if (!GetAddressAdv(out a)) return false; if (Flags.C) Pos = a; return true;
-                case OPCode.Jnc: if (!GetAddressAdv(out a)) return false; if (!Flags.C) Pos = a; return true;
+                case OPCode.Jz: return ProcessJMP(Flags.Z, ref a);
+                case OPCode.Jnz: return ProcessJMP(!Flags.Z, ref a);
+                case OPCode.Js: return ProcessJMP(Flags.S, ref a);
+                case OPCode.Jns: return ProcessJMP(!Flags.S, ref a);
+                case OPCode.Jp: return ProcessJMP(Flags.P, ref a);
+                case OPCode.Jnp: return ProcessJMP(!Flags.P, ref a);
+                case OPCode.Jo: return ProcessJMP(Flags.O, ref a);
+                case OPCode.Jno: return ProcessJMP(!Flags.O, ref a);
+                case OPCode.Jc: return ProcessJMP(Flags.C, ref a);
+                case OPCode.Jnc: return ProcessJMP(!Flags.C, ref a);
 
                 case OPCode.FADD: return ProcessFADD();
                 case OPCode.FSUB: return ProcessFSUB();
@@ -421,24 +418,11 @@ namespace CSX64
                 case OPCode.FTOI: return ProcessFTOI();
                 case OPCode.ITOF: return ProcessITOF();
 
-                case OPCode.PUSH:
-                    if (!GetMemAdv(1, out a)) return false;
-                    switch (a & 1)
-                    {
-                        case 0: if (!GetMemAdv(Size((a >> 2) & 3), out b)) return false; break;
-                        case 1: b = Registers[a >> 4].x64; break;
-                    }
-                    return PushRaw(Size((a >> 2) & 3), b);
-                case OPCode.POP:
-                    if (!GetMemAdv(1, out a) || !PopRaw(Size((a >> 2) & 3), out b)) return false;
-                    Registers[a >> 4].Set((a >> 2) & 3, b);
-                    return true;
-                case OPCode.CALL:
-                    if (!GetAddressAdv(out a) || !PushRaw(8, Pos)) return false;
-                    Pos = a; return true;
-                case OPCode.RET:
-                    if (!PopRaw(8, out a)) return false;
-                    Pos = a; return true;
+                case OPCode.PUSH: return ProcessPUSH();
+                case OPCode.POP: return ProcessPOP();
+
+                case OPCode.CALL: return ProcessJMP(true, ref a) && PushRaw(8, a);
+                case OPCode.RET: if (!PopRaw(8, out a)) return false; Pos = a; return true;
 
                 case OPCode.BSWAP: return ProcessBSWAP();
                 case OPCode.BEXTR: return ProcessBEXTR();
@@ -447,41 +431,12 @@ namespace CSX64
                 case OPCode.BLSR: return ProcessBLSR();
                 case OPCode.ANDN: return ProcessANDN();
 
-                case OPCode.GETF: if (!GetMemAdv(1, out a)) return false; Registers[a & 15].x64 = Flags.Flags; return true;
-                case OPCode.SETF: if (!GetMemAdv(1, out a)) return false; Flags.Flags = (Registers[a & 15].x64 & PublicFlags) | (Flags.Flags & ~PublicFlags); return true;
+                case OPCode.GETF: return ProcessGETF();
+                case OPCode.SETF: return ProcessSETF();
 
-                case OPCode.LOOP:
-                    if (!GetMemAdv(1, out a) || !GetAddressAdv(out b)) return false;
-                    c = Registers[a >> 4].Get((a >> 2) & 3);
-                    c -= Size(a & 3);
-                    Registers[a >> 4].Set((a >> 2) & 3, c);
-                    if (c != 0) Pos = b;
-                    return true;
+                case OPCode.LOOP: return ProcessJMP(--Registers[0].x64 != 0, ref a);
 
-                case OPCode.FX:
-                    if (!GetMemAdv(1, out a)) return false;
-                    switch ((a >> 2) & 3)
-                    {
-                        case 2:
-                            switch (a & 3)
-                            {
-                                case 2: return true;
-                                case 3: Registers[a >> 4].x64 = DoubleAsUInt64((double)AsFloat(Registers[a >> 4].x32)); return true;
-
-                                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-                            }
-
-                        case 3:
-                            switch (a & 3)
-                            {
-                                case 2: Registers[a >> 4].x32 = FloatAsUInt64((float)AsDouble(Registers[a >> 4].x64)); return true;
-                                case 3: return true;
-
-                                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-                            }
-
-                        default: Terminate(ErrorCode.UndefinedBehavior); return false;
-                    }
+                case OPCode.FX: return ProcessFX();
 
                 case OPCode.SLP: if (!FetchIMMRMFormat(out a, out b)) return false; Sleep = b; return true;
 
