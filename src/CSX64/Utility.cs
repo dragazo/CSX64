@@ -92,6 +92,41 @@ namespace CSX64
             flags.Flags = (flags.Flags & Computer.PublicFlags) | (privateFlags & ~Computer.PublicFlags);
         }
 
+        /// <summary>
+        /// Attempts to extract the specified <see cref="ccOPCode"/> status flag. Returns true on success.
+        /// </summary>
+        /// <param name="flags">the flags object to examine</param>
+        /// <param name="code">the code to extract</param>
+        public static bool TryGet_cc(this FlagsRegister flags, ccOPCode code, out bool res)
+        {
+            switch (code)
+            {
+                case ccOPCode.z: res = flags.Z; return true;
+                case ccOPCode.nz: res = !flags.Z; return true;
+                case ccOPCode.s: res = flags.S; return true;
+                case ccOPCode.ns: res = !flags.S; return true;
+                case ccOPCode.p: res = flags.P; return true;
+                case ccOPCode.np: res = !flags.P; return true;
+                case ccOPCode.o: res = flags.O; return true;
+                case ccOPCode.no: res = !flags.O; return true;
+                case ccOPCode.c: res = flags.C; return true;
+                case ccOPCode.nc: res = !flags.C; return true;
+
+                case ccOPCode.a: res = flags.a; return true;
+                case ccOPCode.ae: res = flags.ae; return true;
+                case ccOPCode.b: res = flags.b; return true;
+                case ccOPCode.be: res = flags.be; return true;
+
+                case ccOPCode.g: res = flags.g; return true;
+                case ccOPCode.ge: res = flags.ge; return true;
+                case ccOPCode.l: res = flags.l; return true;
+                case ccOPCode.le: res = flags.le; return true;
+                
+                // otherwise code unknown
+                default: return res = false;
+            }
+        }
+
         // -----------------------------
 
         /// <summary>

@@ -15,7 +15,7 @@ namespace CSX64
 {
     public enum AssembleError
     {
-        None, ArgCount, MissingSize, ArgError, FormatError, UsageError, UnknownOp, EmptyFile, InvalidLabel, SymbolRedefinition, UnknownSymbol
+        None, ArgCount, MissingSize, ArgError, FormatError, UsageError, UnknownOp, EmptyFile, InvalidLabel, SymbolRedefinition, UnknownSymbol, NotImplemented
     }
     public enum LinkError
     {
@@ -2107,12 +2107,13 @@ namespace CSX64
 
             // -- op formats -- //
 
-            public bool TryProcessBinaryOp(OPCode op, int _b_sizecode = -1, UInt64 sizemask = 15)
+            public bool TryProcessBinaryOp(OPCode op, bool has_ext_op = false, UInt64 ext_op = 0, int _b_sizecode = -1, UInt64 sizemask = 15)
             {
                 if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 2 args"); return false; }
                 if ((Size(sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
 
                 AppendVal(1, (UInt64)op);
+                if (has_ext_op) AppendVal(1, ext_op);
 
                 UInt64 b_sizecode = _b_sizecode == -1 ? sizecode : (UInt64)_b_sizecode;
 
@@ -2176,12 +2177,13 @@ namespace CSX64
 
                 return true;
             }
-            public bool TryProcessUnaryOp(OPCode op, UInt64 sizemask = 15)
+            public bool TryProcessUnaryOp(OPCode op, bool has_ext_op = false, UInt64 ext_op = 0, UInt64 sizemask = 15)
             {
                 if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 1 arg"); return false; }
                 if ((Size(sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
 
                 AppendVal(1, (UInt64)op);
+                if (has_ext_op) AppendVal(1, ext_op);
 
                 // reg
                 if (args[0][0] == RegisterPrefix)
@@ -2203,11 +2205,12 @@ namespace CSX64
 
                 return true;
             }
-            public bool TryProcessIMMRM(OPCode op)
+            public bool TryProcessIMMRM(OPCode op, bool has_ext_op = false, UInt64 ext_op = 0)
             {
                 if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 1 arg"); return false; }
 
                 AppendVal(1, (UInt64)op);
+                if (has_ext_op) AppendVal(1, ext_op);
 
                 // reg
                 if (args[0][0] == RegisterPrefix)
@@ -2535,155 +2538,203 @@ namespace CSX64
                         // -- instruction routing -- //
 
                         case "NOP": if (!args.TryProcessNoArgOp(OPCode.NOP)) return args.res; break;
-                        case "STOP": if (!args.TryProcessNoArgOp(OPCode.STOP)) return args.res; break;
+
+                        case "HLT": if (!args.TryProcessNoArgOp(OPCode.HLT)) return args.res; break;
                         case "SYSCALL": if (!args.TryProcessNoArgOp(OPCode.SYSCALL)) return args.res; break;
+
+                        case "GETF": if (!args.TryProcessUnaryOp(OPCode.GETF)) return args.res; break;
+                        case "SETF": if (!args.TryProcessIMMRM(OPCode.SETF)) return args.res; break;
+
+                        case "SETZ": case "SETE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, (UInt64)ccOPCode.z)) return args.res; break;
+                        case "SETNZ": case "SETNE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, (UInt64)ccOPCode.nz)) return args.res; break;
+                        case "SETS": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, (UInt64)ccOPCode.s)) return args.res; break;
+                        case "SETNS": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, (UInt64)ccOPCode.ns)) return args.res; break;
+                        case "SETP": case "SETPE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, (UInt64)ccOPCode.p)) return args.res; break;
+                        case "SETNP": case "SETPO": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, (UInt64)ccOPCode.np)) return args.res; break;
+                        case "SETO": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, (UInt64)ccOPCode.o)) return args.res; break;
+                        case "SETNO": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, (UInt64)ccOPCode.no)) return args.res; break;
+                        case "SETC": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, (UInt64)ccOPCode.c)) return args.res; break;
+                        case "SETNC": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, (UInt64)ccOPCode.nc)) return args.res; break;
+
+                        case "SETA": case "SETNBE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, (UInt64)ccOPCode.a)) return args.res; break;
+                        case "SETAE": case "SETNB": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, (UInt64)ccOPCode.ae)) return args.res; break;
+                        case "SETB": case "SETNAE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, (UInt64)ccOPCode.b)) return args.res; break;
+                        case "SETBE": case "SETNA": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, (UInt64)ccOPCode.be)) return args.res; break;
+
+                        case "SETG": case "SETNLE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, (UInt64)ccOPCode.g)) return args.res; break;
+                        case "SETGE": case "SETNL": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, (UInt64)ccOPCode.ge)) return args.res; break;
+                        case "SETL": case "SETNGE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, (UInt64)ccOPCode.l)) return args.res; break;
+                        case "SETLE": case "SETNG": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, (UInt64)ccOPCode.le)) return args.res; break;
 
                         case "MOV": if (!args.TryProcessBinaryOp(OPCode.MOV)) return args.res; break;
 
-                        case "MOVA": case "MOVNBE": if (!args.TryProcessBinaryOp(OPCode.MOVa)) return args.res; break;
-                        case "MOVAE": case "MOVNB": if (!args.TryProcessBinaryOp(OPCode.MOVae)) return args.res; break;
-                        case "MOVB": case "MOVNAE": if (!args.TryProcessBinaryOp(OPCode.MOVb)) return args.res; break;
-                        case "MOVBE": case "MOVNA": if (!args.TryProcessBinaryOp(OPCode.MOVbe)) return args.res; break;
+                        case "MOVZ": case "MOVE": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, (UInt64)ccOPCode.z)) return args.res; break;
+                        case "MOVNZ": case "MOVNE": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, (UInt64)ccOPCode.nz)) return args.res; break;
+                        case "MOVS": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, (UInt64)ccOPCode.s)) return args.res; break;
+                        case "MOVNS": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, (UInt64)ccOPCode.ns)) return args.res; break;
+                        case "MOVP": case "MOVPE": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, (UInt64)ccOPCode.p)) return args.res; break;
+                        case "MOVNP": case "MOVPO": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, (UInt64)ccOPCode.np)) return args.res; break;
+                        case "MOVO": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, (UInt64)ccOPCode.o)) return args.res; break;
+                        case "MOVNO": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, (UInt64)ccOPCode.no)) return args.res; break;
+                        case "MOVC": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, (UInt64)ccOPCode.c)) return args.res; break;
+                        case "MOVNC": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, (UInt64)ccOPCode.nc)) return args.res; break;
 
-                        case "MOVG": case "MOVNLE": if (!args.TryProcessBinaryOp(OPCode.MOVg)) return args.res; break;
-                        case "MOVGE": case "MOVNL": if (!args.TryProcessBinaryOp(OPCode.MOVge)) return args.res; break;
-                        case "MOVL": case "MOVNGE": if (!args.TryProcessBinaryOp(OPCode.MOVl)) return args.res; break;
-                        case "MOVLE": case "MOVNG": if (!args.TryProcessBinaryOp(OPCode.MOVle)) return args.res; break;
+                        case "MOVA": case "MOVNBE": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, (UInt64)ccOPCode.a)) return args.res; break;
+                        case "MOVAE": case "MOVNB": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, (UInt64)ccOPCode.ae)) return args.res; break;
+                        case "MOVB": case "MOVNAE": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, (UInt64)ccOPCode.b)) return args.res; break;
+                        case "MOVBE": case "MOVNA": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, (UInt64)ccOPCode.be)) return args.res; break;
 
-                        case "MOVZ": case "MOVE": if (!args.TryProcessBinaryOp(OPCode.MOVz)) return args.res; break;
-                        case "MOVNZ": case "MOVNE": if (!args.TryProcessBinaryOp(OPCode.MOVnz)) return args.res; break;
-                        case "MOVS": if (!args.TryProcessBinaryOp(OPCode.MOVs)) return args.res; break;
-                        case "MOVNS": if (!args.TryProcessBinaryOp(OPCode.MOVns)) return args.res; break;
-                        case "MOVP": case "MOVPE": if (!args.TryProcessBinaryOp(OPCode.MOVp)) return args.res; break;
-                        case "MOVNP": case "MOVPO": if (!args.TryProcessBinaryOp(OPCode.MOVnp)) return args.res; break;
-                        case "MOVO": if (!args.TryProcessBinaryOp(OPCode.MOVo)) return args.res; break;
-                        case "MOVNO": if (!args.TryProcessBinaryOp(OPCode.MOVno)) return args.res; break;
-                        case "MOVC": if (!args.TryProcessBinaryOp(OPCode.MOVc)) return args.res; break;
-                        case "MOVNC": if (!args.TryProcessBinaryOp(OPCode.MOVnc)) return args.res; break;
+                        case "MOVG": case "MOVNLE": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, (UInt64)ccOPCode.g)) return args.res; break;
+                        case "MOVGE": case "MOVNL": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, (UInt64)ccOPCode.ge)) return args.res; break;
+                        case "MOVL": case "MOVNGE": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, (UInt64)ccOPCode.l)) return args.res; break;
+                        case "MOVLE": case "MOVNG": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, (UInt64)ccOPCode.le)) return args.res; break;
 
                         case "SWAP": if (!args.TryProcessSWAP(OPCode.SWAP)) return args.res; break;
 
+                        case "JMP": if (!args.TryProcessIMMRM(OPCode.JMP)) return args.res; break;
+
+                        case "JZ": case "JE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.z)) return args.res; break;
+                        case "JNZ": case "JNE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.nz)) return args.res; break;
+                        case "JS": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.s)) return args.res; break;
+                        case "JNS": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.ns)) return args.res; break;
+                        case "JP": case "JPE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.p)) return args.res; break;
+                        case "JNP": case "JPO": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.np)) return args.res; break;
+                        case "JO": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.o)) return args.res; break;
+                        case "JNO": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.no)) return args.res; break;
+                        case "JC": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.c)) return args.res; break;
+                        case "JNC": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.nc)) return args.res; break;
+
+                        case "JA": case "JNBE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.a)) return args.res; break;
+                        case "JAE": case "JNB": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.ae)) return args.res; break;
+                        case "JB": case "JNAE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.b)) return args.res; break;
+                        case "JBE": case "JNA": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.be)) return args.res; break;
+
+                        case "JG": case "JNLE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.g)) return args.res; break;
+                        case "JGE": case "JNL": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.ge)) return args.res; break;
+                        case "JL": case "JNGE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.l)) return args.res; break;
+                        case "JLE": case "JNG": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.le)) return args.res; break;
+
+                        case "LOOP": if (!args.TryProcessIMMRM(OPCode.LOOP)) return args.res; break;
+
+                        case "LOOPZ": case "LOOPE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.z)) return args.res; break;
+                        case "LOOPNZ": case "LOOPNE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.nz)) return args.res; break;
+                        case "LOOPS": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.s)) return args.res; break;
+                        case "LOOPNS": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.ns)) return args.res; break;
+                        case "LOOPP": case "LOOPPE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.p)) return args.res; break;
+                        case "LOOPNP": case "LOOPPO": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.np)) return args.res; break;
+                        case "LOOPO": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.o)) return args.res; break;
+                        case "LOOPNO": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.no)) return args.res; break;
+                        case "LOOPC": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.c)) return args.res; break;
+                        case "LOOPNC": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.nc)) return args.res; break;
+
+                        case "LOOPA": case "LOOPNBE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.a)) return args.res; break;
+                        case "LOOPAE": case "LOOPNB": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.ae)) return args.res; break;
+                        case "LOOPB": case "LOOPNAE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.b)) return args.res; break;
+                        case "LOOPBE": case "LOOPNA": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.be)) return args.res; break;
+
+                        case "LOOPG": case "LOOPNLE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.g)) return args.res; break;
+                        case "LOOPGE": case "LOOPNL": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.ge)) return args.res; break;
+                        case "LOOPL": case "LOOPNGE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.l)) return args.res; break;
+                        case "LOOPLE": case "LOOPNG": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.le)) return args.res; break;
+
+                        case "CALL": if (!args.TryProcessIMMRM(OPCode.CALL)) return args.res; break;
+                        case "RET": if (!args.TryProcessNoArgOp(OPCode.RET)) return args.res; break;
+
+                        case "PUSH": if (!args.TryProcessPUSH(OPCode.PUSH)) return args.res; break;
+                        case "POP": if (!args.TryProcessPOP(OPCode.POP)) return args.res; break;
+
+                        case "LEA": if (!args.TryProcessLEA(OPCode.LEA)) return args.res; break;
+
                         case "ZX": if (!args.TryProcessExtend(OPCode.ZX)) return args.res; break;
                         case "SX": if (!args.TryProcessExtend(OPCode.SX)) return args.res; break;
-
-                        case "UMUL": if (!args.TryProcessIMMRM(OPCode.UMUL)) return args.res; break;
-                        case "SMUL": if (!args.TryProcessIMMRM(OPCode.SMUL)) return args.res; break;
-                        case "UDIV": if (!args.TryProcessIMMRM(OPCode.UDIV)) return args.res; break;
-                        case "SDIV": if (!args.TryProcessIMMRM(OPCode.SDIV)) return args.res; break;
+                        case "FX": if (!args.TryProcessExtend(OPCode.FX, 12)) return args.res; break;
 
                         case "ADD": if (!args.TryProcessBinaryOp(OPCode.ADD)) return args.res; break;
                         case "SUB": if (!args.TryProcessBinaryOp(OPCode.SUB)) return args.res; break;
-                        case "BMUL": if (!args.TryProcessBinaryOp(OPCode.BMUL)) return args.res; break;
-                        case "BUDIV": if (!args.TryProcessBinaryOp(OPCode.BUDIV)) return args.res; break;
-                        case "BUMOD": if (!args.TryProcessBinaryOp(OPCode.BUMOD)) return args.res; break;
-                        case "BSDIV": if (!args.TryProcessBinaryOp(OPCode.BSDIV)) return args.res; break;
-                        case "BSMOD": if (!args.TryProcessBinaryOp(OPCode.BSMOD)) return args.res; break;
 
-                        case "SHL": if (!args.TryProcessBinaryOp(OPCode.SHL, 0)) return args.res; break;
-                        case "SHR": if (!args.TryProcessBinaryOp(OPCode.SHR, 0)) return args.res; break;
-                        case "SAL": if (!args.TryProcessBinaryOp(OPCode.SAL, 0)) return args.res; break;
-                        case "SAR": if (!args.TryProcessBinaryOp(OPCode.SAR, 0)) return args.res; break;
-                        case "ROL": if (!args.TryProcessBinaryOp(OPCode.ROL, 0)) return args.res; break;
-                        case "ROR": if (!args.TryProcessBinaryOp(OPCode.ROR, 0)) return args.res; break;
+                        case "MUL": if (!args.TryProcessIMMRM(OPCode.MUL)) return args.res; break;
+                        case "IMUL":
+                            switch (args.args.Length)
+                            {
+                                case 1:
+                                case 2:
+                                case 3:
+                                    if (!args.TryProcessBinaryOp(OPCode.IMUL, true, (UInt64)args.args.Length - 1)) return args.res; break;
+
+                                default: return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: IMUL expected 1, 2, or 3 args");
+                            }
+                            break;
+                        case "DIV": if (!args.TryProcessIMMRM(OPCode.DIV)) return args.res; break;
+                        case "IDIV": if (!args.TryProcessIMMRM(OPCode.IDIV)) return args.res; break;
+
+                        case "SHL": if (!args.TryProcessBinaryOp(OPCode.SHL, false, 0, 0)) return args.res; break;
+                        case "SHR": if (!args.TryProcessBinaryOp(OPCode.SHR, false, 0, 0)) return args.res; break;
+                        case "SAL": if (!args.TryProcessBinaryOp(OPCode.SAL, false, 0, 0)) return args.res; break;
+                        case "SAR": if (!args.TryProcessBinaryOp(OPCode.SAR, false, 0, 0)) return args.res; break;
+                        case "ROL": if (!args.TryProcessBinaryOp(OPCode.ROL, false, 0, 0)) return args.res; break;
+                        case "ROR": if (!args.TryProcessBinaryOp(OPCode.ROR, false, 0, 0)) return args.res; break;
 
                         case "AND": if (!args.TryProcessBinaryOp(OPCode.AND)) return args.res; break;
                         case "OR": if (!args.TryProcessBinaryOp(OPCode.OR)) return args.res; break;
                         case "XOR": if (!args.TryProcessBinaryOp(OPCode.XOR)) return args.res; break;
-
-                        case "CMP": if (!args.TryProcessBinaryOp(OPCode.CMP)) return args.res; break;
-                        case "TEST": if (!args.TryProcessBinaryOp(OPCode.TEST)) return args.res; break;
 
                         case "INC": if (!args.TryProcessUnaryOp(OPCode.INC)) return args.res; break;
                         case "DEC": if (!args.TryProcessUnaryOp(OPCode.DEC)) return args.res; break;
                         case "NEG": if (!args.TryProcessUnaryOp(OPCode.NEG)) return args.res; break;
                         case "NOT": if (!args.TryProcessUnaryOp(OPCode.NOT)) return args.res; break;
                         case "ABS": if (!args.TryProcessUnaryOp(OPCode.ABS)) return args.res; break;
+
+                        case "CMP": if (!args.TryProcessBinaryOp(OPCode.CMP)) return args.res; break;
+                        case "FCMP": if (!args.TryProcessBinaryOp(OPCode.FCMP, false, 0, -1, 12)) return args.res; break;
+                        case "TEST": if (!args.TryProcessBinaryOp(OPCode.TEST)) return args.res; break;
                         case "CMPZ": if (!args.TryProcessUnaryOp(OPCode.CMPZ)) return args.res; break;
+                        case "FCMPZ": if (!args.TryProcessUnaryOp(OPCode.FCMPZ, false, 0, 12)) return args.res; break;
 
-                        case "LEA": if (!args.TryProcessLEA(OPCode.LEA)) return args.res; break;
+                        case "FADD": if (!args.TryProcessBinaryOp(OPCode.FADD, false, 0, -1, 12)) return args.res; break;
+                        case "FSUB": if (!args.TryProcessBinaryOp(OPCode.FSUB, false, 0, -1, 12)) return args.res; break;
+                        case "FSUBR": if (!args.TryProcessBinaryOp(OPCode.FSUBR, false, 0, -1, 12)) return args.res; break;
 
-                        case "JMP": if (!args.TryProcessIMMRM(OPCode.JMP)) return args.res; break;
+                        case "FMUL": if (!args.TryProcessBinaryOp(OPCode.FMUL, false, 0, -1, 12)) return args.res; break;
+                        case "FDIV": if (!args.TryProcessBinaryOp(OPCode.FDIV, false, 0, -1, 12)) return args.res; break;
+                        case "FDIVR": if (!args.TryProcessBinaryOp(OPCode.FDIVR, false, 0, -1, 12)) return args.res; break;
 
-                        case "JA": case "JNBE": if (!args.TryProcessIMMRM(OPCode.Ja)) return args.res; break;
-                        case "JAE": case "JNB": if (!args.TryProcessIMMRM(OPCode.Jae)) return args.res; break;
-                        case "JB": case "JNAE": if (!args.TryProcessIMMRM(OPCode.Jb)) return args.res; break;
-                        case "JBE": case "JNA": if (!args.TryProcessIMMRM(OPCode.Jbe)) return args.res; break;
+                        case "FPOW": if (!args.TryProcessBinaryOp(OPCode.FPOW, false, 0, 12)) return args.res; break;
+                        case "FPOWR": if (!args.TryProcessBinaryOp(OPCode.FPOWR, false, 0, 12)) return args.res; break;
+                        case "FLOG": if (!args.TryProcessBinaryOp(OPCode.FLOG, false, 0, 12)) return args.res; break;
+                        case "FLOGR": if (!args.TryProcessBinaryOp(OPCode.FLOGR, false, 0, 12)) return args.res; break;
 
-                        case "JG": case "JNLE": if (!args.TryProcessIMMRM(OPCode.Jg)) return args.res; break;
-                        case "JGE": case "JNL": if (!args.TryProcessIMMRM(OPCode.Jge)) return args.res; break;
-                        case "JL": case "JNGE": if (!args.TryProcessIMMRM(OPCode.Jl)) return args.res; break;
-                        case "JLE": case "JNG": if (!args.TryProcessIMMRM(OPCode.Jle)) return args.res; break;
+                        case "FSQRT": if (!args.TryProcessUnaryOp(OPCode.FSQRT, false, 0, 12)) return args.res; break;
+                        case "FNEG": if (!args.TryProcessUnaryOp(OPCode.FNEG, false, 0, 12)) return args.res; break;
+                        case "FABS": if (!args.TryProcessUnaryOp(OPCode.FABS, false, 0, 12)) return args.res; break;
 
-                        case "JZ": case "JE": if (!args.TryProcessIMMRM(OPCode.Jz)) return args.res; break;
-                        case "JNZ": case "JNE": if (!args.TryProcessIMMRM(OPCode.Jnz)) return args.res; break;
-                        case "JS": if (!args.TryProcessIMMRM(OPCode.Js)) return args.res; break;
-                        case "JNS": if (!args.TryProcessIMMRM(OPCode.Jns)) return args.res; break;
-                        case "JP": case "JPE": if (!args.TryProcessIMMRM(OPCode.Jp)) return args.res; break;
-                        case "JNP": case "JPO": if (!args.TryProcessIMMRM(OPCode.Jnp)) return args.res; break;
-                        case "JO": if (!args.TryProcessIMMRM(OPCode.Jo)) return args.res; break;
-                        case "JNO": if (!args.TryProcessIMMRM(OPCode.Jno)) return args.res; break;
-                        case "JC": if (!args.TryProcessIMMRM(OPCode.Jc)) return args.res; break;
-                        case "JNC": if (!args.TryProcessIMMRM(OPCode.Jnc)) return args.res; break;
+                        case "FFLOOR": if (!args.TryProcessUnaryOp(OPCode.FFLOOR, false, 0, 12)) return args.res; break;
+                        case "FCEIL": if (!args.TryProcessUnaryOp(OPCode.FCEIL, false, 0, 12)) return args.res; break;
+                        case "FROUND": if (!args.TryProcessUnaryOp(OPCode.FROUND, false, 0, 12)) return args.res; break;
+                        case "FTRUNC": if (!args.TryProcessUnaryOp(OPCode.FTRUNC, false, 0, 12)) return args.res; break;
 
-                        case "FADD": if (!args.TryProcessBinaryOp(OPCode.FADD, -1, 12)) return args.res; break;
-                        case "FSUB": if (!args.TryProcessBinaryOp(OPCode.FSUB, -1, 12)) return args.res; break;
-                        case "FMUL": if (!args.TryProcessBinaryOp(OPCode.FMUL, -1, 12)) return args.res; break;
-                        case "FDIV": if (!args.TryProcessBinaryOp(OPCode.FDIV, -1, 12)) return args.res; break;
-                        case "FMOD": if (!args.TryProcessBinaryOp(OPCode.FMOD, -1, 12)) return args.res; break;
+                        case "FSIN": if (!args.TryProcessUnaryOp(OPCode.FSIN, false, 0, 12)) return args.res; break;
+                        case "FCOS": if (!args.TryProcessUnaryOp(OPCode.FCOS, false, 0, 12)) return args.res; break;
+                        case "FTAN": if (!args.TryProcessUnaryOp(OPCode.FTAN, false, 0, 12)) return args.res; break;
 
-                        case "FPOW": if (!args.TryProcessBinaryOp(OPCode.FPOW, -1, 12)) return args.res; break;
-                        case "FSQRT": if (!args.TryProcessUnaryOp(OPCode.FSQRT, 12)) return args.res; break;
-                        case "FEXP": if (!args.TryProcessUnaryOp(OPCode.FEXP, 12)) return args.res; break;
-                        case "FLN": if (!args.TryProcessUnaryOp(OPCode.FLN, 12)) return args.res; break;
-                        case "FNEG": if (!args.TryProcessUnaryOp(OPCode.FNEG, 12)) return args.res; break;
-                        case "FABS": if (!args.TryProcessUnaryOp(OPCode.FABS, 12)) return args.res; break;
-                        case "FCMPZ": if (!args.TryProcessUnaryOp(OPCode.FCMPZ, 12)) return args.res; break;
+                        case "FSINH": if (!args.TryProcessUnaryOp(OPCode.FSINH, false, 0, 12)) return args.res; break;
+                        case "FCOSH": if (!args.TryProcessUnaryOp(OPCode.FCOSH, false, 0, 12)) return args.res; break;
+                        case "FTANH": if (!args.TryProcessUnaryOp(OPCode.FTANH, false, 0, 12)) return args.res; break;
 
-                        case "FSIN": if (!args.TryProcessUnaryOp(OPCode.FSIN, 12)) return args.res; break;
-                        case "FCOS": if (!args.TryProcessUnaryOp(OPCode.FCOS, 12)) return args.res; break;
-                        case "FTAN": if (!args.TryProcessUnaryOp(OPCode.FTAN, 12)) return args.res; break;
+                        case "FASIN": if (!args.TryProcessUnaryOp(OPCode.FASIN, false, 0, 12)) return args.res; break;
+                        case "FACOS": if (!args.TryProcessUnaryOp(OPCode.FACOS, false, 0, 12)) return args.res; break;
+                        case "FATAN": if (!args.TryProcessUnaryOp(OPCode.FATAN, false, 0, 12)) return args.res; break;
+                        case "FATAN2": if (!args.TryProcessBinaryOp(OPCode.FATAN2, false, 0, -1, 12)) return args.res; break;
 
-                        case "FSINH": if (!args.TryProcessUnaryOp(OPCode.FSINH, 12)) return args.res; break;
-                        case "FCOSH": if (!args.TryProcessUnaryOp(OPCode.FCOSH, 12)) return args.res; break;
-                        case "FTANH": if (!args.TryProcessUnaryOp(OPCode.FTANH, 12)) return args.res; break;
-
-                        case "FASIN": if (!args.TryProcessUnaryOp(OPCode.FASIN, 12)) return args.res; break;
-                        case "FACOS": if (!args.TryProcessUnaryOp(OPCode.FACOS, 12)) return args.res; break;
-                        case "FATAN": if (!args.TryProcessUnaryOp(OPCode.FATAN, 12)) return args.res; break;
-                        case "FATAN2": if (!args.TryProcessBinaryOp(OPCode.FATAN2, -1, 12)) return args.res; break;
-
-                        case "FLOOR": if (!args.TryProcessUnaryOp(OPCode.FLOOR, 12)) return args.res; break;
-                        case "CEIL": if (!args.TryProcessUnaryOp(OPCode.CEIL, 12)) return args.res; break;
-                        case "ROUND": if (!args.TryProcessUnaryOp(OPCode.ROUND, 12)) return args.res; break;
-                        case "TRUNC": if (!args.TryProcessUnaryOp(OPCode.TRUNC, 12)) return args.res; break;
-
-                        case "FCMP": if (!args.TryProcessBinaryOp(OPCode.FCMP, -1, 12)) return args.res; break;
-
-                        case "FTOI": if (!args.TryProcessUnaryOp(OPCode.FTOI, 12)) return args.res; break;
-                        case "ITOF": if (!args.TryProcessUnaryOp(OPCode.ITOF, 12)) return args.res; break;
-
-                        case "PUSH": if (!args.TryProcessPUSH(OPCode.PUSH)) return args.res; break;
-                        case "POP": if (!args.TryProcessPOP(OPCode.POP)) return args.res; break;
-
-                        case "CALL": if (!args.TryProcessIMMRM(OPCode.CALL)) return args.res; break;
-                        case "RET": if (!args.TryProcessNoArgOp(OPCode.RET)) return args.res; break;
+                        case "FTOI": if (!args.TryProcessUnaryOp(OPCode.FTOI, false, 0, 12)) return args.res; break;
+                        case "ITOF": if (!args.TryProcessUnaryOp(OPCode.ITOF, false, 0, 12)) return args.res; break;
 
                         case "BSWAP": if (!args.TryProcessUnaryOp(OPCode.BSWAP)) return args.res; break;
-                        case "BEXTR": if (!args.TryProcessBinaryOp(OPCode.BEXTR, 1)) return args.res; break;
+                        case "BEXTR": if (!args.TryProcessBinaryOp(OPCode.BEXTR, false, 0, 1)) return args.res; break;
                         case "BLSI": if (!args.TryProcessUnaryOp(OPCode.BLSI)) return args.res; break;
                         case "BLSMSK": if (!args.TryProcessUnaryOp(OPCode.BLSMSK)) return args.res; break;
                         case "BLSR": if (!args.TryProcessUnaryOp(OPCode.BLSR)) return args.res; break;
                         case "ANDN": if (!args.TryProcessBinaryOp(OPCode.ANDN)) return args.res; break;
-
-                        case "GETF": if (!args.TryProcessUnaryOp(OPCode.GETF)) return args.res; break;
-                        case "SETF": if (!args.TryProcessIMMRM(OPCode.SETF)) return args.res; break;
-
-                        case "LOOP": if (!args.TryProcessIMMRM(OPCode.LOOP)) return args.res; break;
-
-                        case "FX": if (!args.TryProcessExtend(OPCode.FX, 12)) return args.res; break;
-
-                        case "SLP": if (!args.TryProcessIMMRM(OPCode.SLP)) return args.res; break;
-
+                        
                         default: return new AssembleResult(AssembleError.UnknownOp, $"line {args.line}: Unknown operation \"{args.op}\"");
                     }
                 }
@@ -2763,7 +2814,7 @@ namespace CSX64
             // resulting binary (we don't know how large the resulting file will be, so it needs to be expandable) (sets aside space for header)
             List<byte> data = new List<byte>()
             {
-                (byte)OPCode.CALL, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, // call    [main]       ; call main function
+                (byte)OPCode.CALL, 0x0c, 0, 0, 0, 0, 0, 0, 0, 0, // call    main         ; call main function
                 (byte)OPCode.MOV, 0x1e, 0x00,                    // mov     $1, $0       ; mov ret value to $1 for sys_exit
                 (byte)OPCode.XOR, 0x0e, 0x00,                    // xor     $0, $0       ; clear $0
                 (byte)OPCode.MOV, 0x00, (byte)SyscallCode.Exit,  // mov:8   $0, sys_exit ; load sys_exit (bypasses endianness by only using low byte)

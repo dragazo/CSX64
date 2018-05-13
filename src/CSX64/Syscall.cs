@@ -27,7 +27,7 @@ namespace CSX64
             try
             {
                 // read from the file
-                int n = fd.__Stream.Read(Memory, (int)Registers[2].x64, (int)Registers[3].x64);
+                int n = fd.BaseStream.Read(Memory, (int)Registers[2].x64, (int)Registers[3].x64);
 
                 // if we got nothing but it's interactive
                 if (n == 0 && fd.Interactive)
@@ -59,7 +59,7 @@ namespace CSX64
             if (!fd.InUse) { Terminate(ErrorCode.FDNotInUse); return false; }
 
             // attempt to write from memory to the file
-            try { fd.__Stream.Write(Memory, (int)Registers[2].x64, (int)Registers[3].x64); return true; }
+            try { fd.BaseStream.Write(Memory, (int)Registers[2].x64, (int)Registers[3].x64); return true; }
             catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
         }
 
@@ -128,7 +128,7 @@ namespace CSX64
             if (!fd.InUse) { Terminate(ErrorCode.FDNotInUse); return false; }
 
             // attempt to flush buffer
-            try { fd.__Stream.Flush(); return true; }
+            try { fd.BaseStream.Flush(); return true; }
             catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
         }
 
@@ -149,7 +149,7 @@ namespace CSX64
             if (!fd.InUse) { Terminate(ErrorCode.FDNotInUse); return false; }
 
             // attempt to seek in the file
-            try { fd.__Stream.Seek((long)Registers[2].x64, (SeekOrigin)Registers[3].x64); return true; }
+            try { fd.BaseStream.Seek((long)Registers[2].x64, (SeekOrigin)Registers[3].x64); return true; }
             catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
         }
         /// <summary>
@@ -168,7 +168,7 @@ namespace CSX64
             if (!fd.InUse) { Terminate(ErrorCode.FDNotInUse); return false; }
 
             // attempt to read from memory to the file
-            try { Registers[0].x64 = (UInt64)fd.__Stream.Position; return true; }
+            try { Registers[0].x64 = (UInt64)fd.BaseStream.Position; return true; }
             catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
         }
 

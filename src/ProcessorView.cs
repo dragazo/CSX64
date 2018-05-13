@@ -118,7 +118,6 @@ namespace CSX64
             g.DrawString("State", DebuggingFont, DebuggingBrush, x, y); y += h;
             g.DrawString($"Pos: {Computer.Pos:x16}", DebuggingFont, DebuggingBrush, x, y += h);
             g.DrawString($"Exe: {(Computer.Running ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
-            g.DrawString($"Slp: {Computer.Sleep:x16}", DebuggingFont, DebuggingBrush, x, y += h);
             g.DrawString($"Err: {Computer.Error}", DebuggingFont, DebuggingBrush, x, y += h);
             g.DrawString($"T  : {Ticks:x16}", DebuggingFont, DebuggingBrush, x, y += h);
         }

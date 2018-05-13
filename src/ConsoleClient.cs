@@ -427,7 +427,7 @@ namespace CSX64
                         InputLine.Clear();
                         CursorPosition = 0;
                         // resume execution
-                        C.SuspendedRead = false;
+                        C.ResumeSuspendedRead();
                         break;
 
                     default:

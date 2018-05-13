@@ -43,18 +43,13 @@ namespace CSX64
         /// </summary>
         public UInt64 Pos { get; protected set; }
         /// <summary>
-        /// Flag marking if the program is still executing
+        /// Flag marking if the program is still executing (still true even in halted state)
         /// </summary>
         public bool Running { get; protected set; }
         /// <summary>
-        /// Returns if we're currently suspended pending data from an interactive unmanaged input stream. Execution will resume when this is false
+        /// Gets if the processor is awaiting data from an interactive stream
         /// </summary>
-        public bool SuspendedRead { get; set; }
-        /// <summary>
-        /// The number of ticks the processor is currently sleeping for
-        /// </summary>
-        public UInt64 Sleep { get; protected set; }
-
+        public bool SuspendedRead { get; protected set; }
         /// <summary>
         /// Gets the current error code
         /// </summary>
@@ -107,20 +102,19 @@ namespace CSX64
             data.CopyTo(Memory, 0);
 
             // randomize registers
-            for (int i = 0; i < Registers.Length; ++i)
+            foreach(Register reg in Registers)
             {
-                Registers[i].x32 = (UInt64)Rand.Next();
-                Registers[i].x64 <<= 32;
-                Registers[i].x32 = (UInt64)Rand.Next();
+                reg.x32 = (UInt64)Rand.Next();
+                reg.x64 <<= 32;
+                reg.x32 = (UInt64)Rand.Next();
             }
             // randomize public flags
-            Flags.Flags = (Flags.Flags & ~PublicFlags) | ((UInt64)Rand.Next() & PublicFlags);
+            Flags.SetPublicFlags((UInt64)Rand.Next());
 
             // set execution state
             Pos = 0;
             Running = true;
             SuspendedRead = false;
-            Sleep = 0;
             Error = ErrorCode.None;
 
             // get the stack pointer
@@ -180,17 +174,25 @@ namespace CSX64
         /// Causes the machine to end execution with a return value and release various system resources (e.g. file handles).
         /// </summary>
         /// <param name="ret">the program return value to emit</param>
-        public void Exit(int ret = 0)
+        protected void Exit(int ret = 0)
         {
-            // only do this if we're currently running (so we don't override what error caused the initial termination)
+            // only do this if we're currently running
             if (Running)
             {
-                // set error and stop execution
+                // set return value and stop execution
                 ReturnValue = ret;
                 Running = false;
 
                 CloseFiles(); // close all the file descriptors
             }
+        }
+
+        /// <summary>
+        /// Unsets the suspended read state
+        /// </summary>
+        public void ResumeSuspendedRead()
+        {
+            if (Running) SuspendedRead = false;
         }
 
         /// <summary>
@@ -259,7 +261,7 @@ namespace CSX64
                 case (UInt64)SyscallCode.Remove: return Sys_Remove();
                 case (UInt64)SyscallCode.Mkdir: return Sys_Mkdir();
                 case (UInt64)SyscallCode.Rmdir: return Sys_Rmdir();
-                
+
                 case (UInt64)SyscallCode.Exit: Exit((int)Registers[1].x64); return true;
 
                 // ----------------------------------
@@ -270,130 +272,106 @@ namespace CSX64
         }
 
         /// <summary>
-        /// Performs a single operation. Returns true if successful
+        /// Performs a single operation. Returns true if an instruction is successfully interpreted.
         /// </summary>
         public bool Tick()
         {
-            // fail to execute ins if terminated
-            if (!Running) return false;
+            // fail if terminated or awaiting data
+            if (!Running || SuspendedRead) return false;
 
-            // if we're suspended, no-op
-            if (SuspendedRead) return true;
-            // if we're sleeping, no-op
-            if (Sleep > 0) { --Sleep; return true; }
-
-            UInt64 a = 0, b = 0, c = 0, d = 0; // the potential args (initialized for compiler)
+            // parsing locations
+            UInt64 op;
+            bool flag;
 
             // fetch the instruction
-            if (!GetMemAdv(1, out a)) return false;
+            if (!GetMemAdv(1, out op)) return false;
 
             // switch through the opcodes
-            switch ((OPCode)a)
+            switch ((OPCode)op)
             {
                 case OPCode.NOP: return true;
-                case OPCode.STOP: Terminate(ErrorCode.Abort); return true;
+
+                case OPCode.HLT: Terminate(ErrorCode.Abort); return true;
                 case OPCode.SYSCALL: if (Syscall()) return true; Terminate(ErrorCode.UnhandledSyscall); return false;
 
+                case OPCode.GETF: return ProcessGETF();
+                case OPCode.SETF: return ProcessSETF();
+
+                case OPCode.SETcc: return ProcessSETcc();
+
                 case OPCode.MOV: return ProcessMOV();
-
-                case OPCode.MOVa: return ProcessMOV(Flags.a);
-                case OPCode.MOVae: return ProcessMOV(Flags.ae);
-                case OPCode.MOVb: return ProcessMOV(Flags.b);
-                case OPCode.MOVbe: return ProcessMOV(Flags.be);
-
-                case OPCode.MOVg: return ProcessMOV(Flags.g);
-                case OPCode.MOVge: return ProcessMOV(Flags.ge);
-                case OPCode.MOVl: return ProcessMOV(Flags.l);
-                case OPCode.MOVle: return ProcessMOV(Flags.le);
-
-                case OPCode.MOVz: return ProcessMOV(Flags.Z);
-                case OPCode.MOVnz: return ProcessMOV(!Flags.Z);
-                case OPCode.MOVs: return ProcessMOV(Flags.S);
-                case OPCode.MOVns: return ProcessMOV(!Flags.S);
-                case OPCode.MOVp: return ProcessMOV(Flags.P);
-                case OPCode.MOVnp: return ProcessMOV(!Flags.P);
-                case OPCode.MOVo: return ProcessMOV(Flags.O);
-                case OPCode.MOVno: return ProcessMOV(!Flags.O);
-                case OPCode.MOVc: return ProcessMOV(Flags.C);
-                case OPCode.MOVnc: return ProcessMOV(!Flags.C);
+                case OPCode.MOVcc: if (!GetMemAdv(1, out op) || !Flags.TryGet_cc((ccOPCode)op, out flag)) { Terminate(ErrorCode.UndefinedBehavior); return false; } return ProcessMOV(flag);
 
                 case OPCode.SWAP: return ProcessSWAP();
 
-                case OPCode.ZX: if (!GetMemAdv(1, out a)) return false; Registers[a >> 4].Set(a & 3, Registers[a >> 4].Get((a >> 2) & 3)); return true;
-                case OPCode.SX: if (!GetMemAdv(1, out a)) return false; Registers[a >> 4].Set(a & 3, SignExtend(Registers[a >> 4].Get((a >> 2) & 3), (a >> 2) & 3)); return true;
+                case OPCode.JMP: return ProcessJMP(true, ref op);
+                case OPCode.Jcc: if (!GetMemAdv(1, out op) || !Flags.TryGet_cc((ccOPCode)op, out flag)) { Terminate(ErrorCode.UndefinedBehavior); return false; } return ProcessJMP(flag, ref op);
+                case OPCode.LOOP: return ProcessJMP(--Registers[0].x64 != 0, ref op);
+                case OPCode.LOOPcc: if (!GetMemAdv(1, out op) || !Flags.TryGet_cc((ccOPCode)op, out flag)) { Terminate(ErrorCode.UndefinedBehavior); return false; } return ProcessJMP(--Registers[0].x64 != 0 && flag, ref op);
+                case OPCode.CALL: return ProcessJMP(true, ref op) && PushRaw(8, op);
+                case OPCode.RET: if (!PopRaw(8, out op)) return false; Pos = op; return true;
 
-                case OPCode.UMUL: return ProcessUMUL();
-                case OPCode.SMUL: return ProcessSMUL();
-                case OPCode.UDIV: return ProcessUDIV();
-                case OPCode.SDIV: return ProcessSDIV();
+                case OPCode.PUSH: return ProcessPUSH();
+                case OPCode.POP: return ProcessPOP();
+
+                case OPCode.LEA: return ProcessLEA();
+
+                case OPCode.ZX: if (!GetMemAdv(1, out op)) return false; Registers[op >> 4].Set(op & 3, Registers[op >> 4].Get((op >> 2) & 3)); return true;
+                case OPCode.SX: if (!GetMemAdv(1, out op)) return false; Registers[op >> 4].Set(op & 3, SignExtend(Registers[op >> 4].Get((op >> 2) & 3), (op >> 2) & 3)); return true;
+                case OPCode.FX: return ProcessFX();
 
                 case OPCode.ADD: return ProcessADD();
                 case OPCode.SUB: return ProcessSUB();
-                case OPCode.BMUL: return ProcessBMUL();
-                case OPCode.BUDIV: return ProcessBUDIV();
-                case OPCode.BUMOD: return ProcessBUMOD();
-                case OPCode.BSDIV: return ProcessBSDIV();
-                case OPCode.BSMOD: return ProcessBSMOD();
 
-                case OPCode.SHL: return ProcessSL();
-                case OPCode.SHR: return ProcessSR();
+                case OPCode.MUL: return ProcessMUL();
+                case OPCode.IMUL: return ProcessIMUL();
+                case OPCode.DIV: return ProcessDIV();
+                case OPCode.IDIV: return ProcessIDIV();
+
+                case OPCode.SHL: return ProcessSHL();
+                case OPCode.SHR: return ProcessSHR();
                 case OPCode.SAL: return ProcessSAL();
                 case OPCode.SAR: return ProcessSAR();
-                case OPCode.ROL: return ProcessRL();
-                case OPCode.ROR: return ProcessRR();
+                case OPCode.ROL: return ProcessROL();
+                case OPCode.ROR: return ProcessROR();
 
                 case OPCode.AND: return ProcessAND();
                 case OPCode.OR: return ProcessOR();
                 case OPCode.XOR: return ProcessXOR();
-
-                case OPCode.CMP: return ProcessSUB(false);
-                case OPCode.TEST: return ProcessAND(false);
 
                 case OPCode.INC: return ProcessINC();
                 case OPCode.DEC: return ProcessDEC();
                 case OPCode.NEG: return ProcessNEG();
                 case OPCode.NOT: return ProcessNOT();
                 case OPCode.ABS: return ProcessABS();
+
+                case OPCode.CMP: return ProcessSUB(false);
+                case OPCode.FCMP: return ProcessFSUB(false);
+                case OPCode.TEST: return ProcessAND(false);
                 case OPCode.CMPZ: return ProcessCMPZ();
-
-                case OPCode.LEA: return ProcessLEA();
-
-                case OPCode.JMP: return ProcessJMP(true, ref a);
-
-                case OPCode.Ja: return ProcessJMP(Flags.a, ref a);
-                case OPCode.Jae: return ProcessJMP(Flags.ae, ref a);
-                case OPCode.Jb: return ProcessJMP(Flags.b, ref a);
-                case OPCode.Jbe: return ProcessJMP(Flags.be, ref a);
-
-                case OPCode.Jg: return ProcessJMP(Flags.g, ref a);
-                case OPCode.Jge: return ProcessJMP(Flags.ge, ref a);
-                case OPCode.Jl: return ProcessJMP(Flags.l, ref a);
-                case OPCode.Jle: return ProcessJMP(Flags.le, ref a);
-
-                case OPCode.Jz: return ProcessJMP(Flags.Z, ref a);
-                case OPCode.Jnz: return ProcessJMP(!Flags.Z, ref a);
-                case OPCode.Js: return ProcessJMP(Flags.S, ref a);
-                case OPCode.Jns: return ProcessJMP(!Flags.S, ref a);
-                case OPCode.Jp: return ProcessJMP(Flags.P, ref a);
-                case OPCode.Jnp: return ProcessJMP(!Flags.P, ref a);
-                case OPCode.Jo: return ProcessJMP(Flags.O, ref a);
-                case OPCode.Jno: return ProcessJMP(!Flags.O, ref a);
-                case OPCode.Jc: return ProcessJMP(Flags.C, ref a);
-                case OPCode.Jnc: return ProcessJMP(!Flags.C, ref a);
+                case OPCode.FCMPZ: return ProcessFCMPZ();
 
                 case OPCode.FADD: return ProcessFADD();
                 case OPCode.FSUB: return ProcessFSUB();
+                case OPCode.FSUBR: return ProcessFSUBR();
+
                 case OPCode.FMUL: return ProcessFMUL();
                 case OPCode.FDIV: return ProcessFDIV();
-                case OPCode.FMOD: return ProcessFMOD();
+                case OPCode.FDIVR: return ProcessFDIVR();
 
                 case OPCode.FPOW: return ProcessFPOW();
+                case OPCode.FPOWR: return ProcessFPOWR();
+                case OPCode.FLOG: return ProcessFLOG();
+                case OPCode.FLOGR: return ProcessFLOGR();
+
                 case OPCode.FSQRT: return ProcessFSQRT();
-                case OPCode.FEXP: return ProcessFEXP();
-                case OPCode.FLN: return ProcessFLN();
                 case OPCode.FNEG: return ProcessFNEG();
                 case OPCode.FABS: return ProcessFABS();
-                case OPCode.FCMPZ: return ProcessFCMPZ();
+
+                case OPCode.FFLOOR: return ProcessFFLOOR();
+                case OPCode.FCEIL: return ProcessFCEIL();
+                case OPCode.FROUND: return ProcessFROUND();
+                case OPCode.FTRUNC: return ProcessFTRUNC();
 
                 case OPCode.FSIN: return ProcessFSIN();
                 case OPCode.FCOS: return ProcessFCOS();
@@ -406,23 +384,10 @@ namespace CSX64
                 case OPCode.FASIN: return ProcessFASIN();
                 case OPCode.FACOS: return ProcessFACOS();
                 case OPCode.FATAN: return ProcessFATAN();
-                case OPCode.FATAN2: return ProcessFATAN2();
-
-                case OPCode.FLOOR: return ProcessFLOOR();
-                case OPCode.CEIL: return ProcessCEIL();
-                case OPCode.ROUND: return ProcessROUND();
-                case OPCode.TRUNC: return ProcessTRUNC();
-
-                case OPCode.FCMP: return ProcessFSUB(false);
+                case OPCode.FATAN2: return ProcessFATAN2();                
 
                 case OPCode.FTOI: return ProcessFTOI();
                 case OPCode.ITOF: return ProcessITOF();
-
-                case OPCode.PUSH: return ProcessPUSH();
-                case OPCode.POP: return ProcessPOP();
-
-                case OPCode.CALL: return ProcessJMP(true, ref a) && PushRaw(8, a);
-                case OPCode.RET: if (!PopRaw(8, out a)) return false; Pos = a; return true;
 
                 case OPCode.BSWAP: return ProcessBSWAP();
                 case OPCode.BEXTR: return ProcessBEXTR();
@@ -430,15 +395,6 @@ namespace CSX64
                 case OPCode.BLSMSK: return ProcessBLSMSK();
                 case OPCode.BLSR: return ProcessBLSR();
                 case OPCode.ANDN: return ProcessANDN();
-
-                case OPCode.GETF: return ProcessGETF();
-                case OPCode.SETF: return ProcessSETF();
-
-                case OPCode.LOOP: return ProcessJMP(--Registers[0].x64 != 0, ref a);
-
-                case OPCode.FX: return ProcessFX();
-
-                case OPCode.SLP: if (!FetchIMMRMFormat(out a, out b)) return false; Sleep = b; return true;
 
                 // otherwise, unknown opcode
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;

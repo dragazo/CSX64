@@ -8,60 +8,44 @@ namespace CSX64
     public enum ErrorCode
     {
         None, OutOfBounds, UnhandledSyscall, UndefinedBehavior, ArithmeticError, Abort,
-        IOFailure, FSDisabled, AccessViolation, InsufficientFDs, FDNotInUse
+        IOFailure, FSDisabled, AccessViolation, InsufficientFDs, FDNotInUse, NotImplemented
     }
     public enum OPCode
     {
-        NOP, STOP, SYSCALL,
+        NOP,
+        HLT, SYSCALL,
+        GETF, SETF,
+        SETcc,
 
-        MOV,
-        MOVa, MOVae, MOVb, MOVbe, MOVg, MOVge, MOVl, MOVle,
-        MOVz, MOVnz, MOVs, MOVns, MOVp, MOVnp, MOVo, MOVno, MOVc, MOVnc,
-
+        MOV, MOVcc,
         SWAP,
 
-        ZX, SX,
-
-        UMUL, SMUL, UDIV, SDIV,
-
-        ADD, SUB, BMUL, BUDIV, BUMOD, BSDIV, BSMOD,
-        SHL, SHR, SAL, SAR, ROL, ROR,
-        AND, OR, XOR,
-
-        CMP, TEST,
-
-        INC, DEC, NEG, NOT, ABS, CMPZ,
-
+        JMP, Jcc, LOOP, LOOPcc, CALL, RET,
+        PUSH, POP,
         LEA,
 
-        JMP,
-        Ja, Jae, Jb, Jbe, Jg, Jge, Jl, Jle,
-        Jz, Jnz, Js, Jns, Jp, Jnp, Jo, Jno, Jc, Jnc,
+        ZX, SX, FX,
 
-        FADD, FSUB, FMUL, FDIV, FMOD,
-        FPOW, FSQRT, FEXP, FLN, FNEG, FABS, FCMPZ,
+        ADD, SUB,
+        MUL, IMUL, DIV, IDIV,
+        SHL, SHR, SAL, SAR, ROL, ROR,
+        AND, OR, XOR,
+        INC, DEC, NEG, NOT, ABS,
 
+        CMP, FCMP, TEST, CMPZ, FCMPZ,
+
+        FADD, FSUB, FSUBR,
+        FMUL, FDIV, FDIVR,
+        FPOW, FPOWR, FLOG, FLOGR,
+        FSQRT, FNEG, FABS,
+        FFLOOR, FCEIL, FROUND, FTRUNC,
         FSIN, FCOS, FTAN,
         FSINH, FCOSH, FTANH,
         FASIN, FACOS, FATAN, FATAN2,
 
-        FLOOR, CEIL, ROUND, TRUNC,
-
-        FCMP,
-
         FTOI, ITOF,
 
-        PUSH, POP, CALL, RET,
-
-        BSWAP, BEXTR, BLSI, BLSMSK, BLSR, ANDN,
-
-        GETF, SETF,
-
-        LOOP,
-
-        FX,
-
-        SLP
+        BSWAP, BEXTR, BLSI, BLSMSK, BLSR, ANDN
     }
     public enum SyscallCode
     {
@@ -74,6 +58,12 @@ namespace CSX64
         Mkdir, Rmdir,
 
         Exit
+    }
+
+    public enum ccOPCode
+    {
+        z, nz, s, ns, p, np, o, no, c, nc,
+        a, ae, b, be, g, ge, l, le
     }
 
     /// <summary>
@@ -194,22 +184,23 @@ namespace CSX64
         /// Marks that this stream is managed by the processor.
         /// Managed files can be opened and closed by the processor, and are closed upon client program termination
         /// </summary>
-        public bool Managed = false;
+        public bool Managed { get; private set; }
         /// <summary>
         /// Marks that the stream has an associated interactive input from external code (i.e. not client code).
         /// Reading past EOF on an interactive stream sets the SuspendedRead flag of the associated <see cref="CSX64"/>
         /// </summary>
-        public bool Interactive = false;
+        public bool Interactive { get; private set; }
+
+        /// <summary>
+        /// The underlying stream associated with this file descriptor.
+        /// If you close this, you should also null it, or - preferably - call <see cref="Close"/> instead of closing it yourself.
+        /// </summary>
+        public Stream BaseStream = null;
 
         /// <summary>
         /// Returns true iff the file descriptor is currently in use
         /// </summary>
-        public bool InUse => __Stream != null;
-
-        /// <summary>
-        /// The underlying stream associated with this file descriptor
-        /// </summary>
-        internal Stream __Stream = null;
+        public bool InUse => BaseStream != null;
 
         // ---------------------
 
@@ -224,7 +215,7 @@ namespace CSX64
         {
             if (InUse) throw new AccessViolationException("Attempt to assign to a FileDescriptor that was currently in use");
 
-            __Stream = stream;
+            BaseStream = stream;
             Managed = managed;
             Interactive = interactive;
         }
@@ -235,15 +226,17 @@ namespace CSX64
         {
             if (InUse)
             {
+                // only close managed streams
                 if (Managed)
                 {
                     // close the stream
-                    try { __Stream.Close(); }
+                    try { BaseStream.Close(); }
                     catch (Exception) { }
                     // ensure stream is nulled even if close() throws
-                    finally { __Stream = null; }
+                    finally { BaseStream = null; }
                 }
-                else __Stream = null;
+                // just unlink unmanaged streams
+                else BaseStream = null;
             }
         }
     }
