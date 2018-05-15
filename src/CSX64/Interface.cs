@@ -67,7 +67,7 @@ namespace CSX64
         /// <summary>
         /// Gets the current time as used by the assembler
         /// </summary>
-        public static UInt64 Time => DateTime.UtcNow.Ticks.MakeUnsigned();
+        public static UInt64 Time => (UInt64)DateTime.UtcNow.Ticks;
 
         // ----------------------------------------
 

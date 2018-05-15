@@ -251,16 +251,9 @@ namespace CSX64
 
         private bool ProcessPUSH()
         {
-            if (!GetMemAdv(1, out UInt64 s)) return false;
+            if (!FetchIMMRMFormat(out UInt64 s, out UInt64 a)) return false;
 
-            UInt64 b = 0;
-            switch (s & 1)
-            {
-                case 0: if (!GetMemAdv(Size((s >> 2) & 3), out b)) return false; break;
-                case 1: b = Registers[s >> 4].x64; break;
-            }
-
-            return PushRaw(Size((s >> 2) & 3), b);
+            return PushRaw(Size((s >> 2) & 3), a);
         }
         private bool ProcessPOP()
         {
@@ -386,17 +379,17 @@ namespace CSX64
             switch ((s >> 2) & 3)
             {
                 case 0:
-                    Registers[0].x16 = (SignExtend(Registers[0].x8, 0).MakeSigned() * SignExtend(a, 0).MakeSigned()).MakeUnsigned();
+                    Registers[0].x16 = (UInt64)((Int64)SignExtend(Registers[0].x8, 0) * (Int64)SignExtend(a, 0));
                     Flags.C = Flags.O = (Registers[0].x16 >> 8) == 0 && Positive(Registers[0].x8, 0) || (Registers[0].x16 >> 8) == 0xff && Negative(Registers[0].x8, 0);
                     Flags.S = Negative(Registers[0].x16, 1);
                     break;
                 case 1:
-                    Registers[0].x32 = (SignExtend(Registers[0].x16, 1).MakeSigned() * SignExtend(a, 1).MakeSigned()).MakeUnsigned();
+                    Registers[0].x32 = (UInt64)((Int64)SignExtend(Registers[0].x16, 1) * (Int64)SignExtend(a, 1));
                     Flags.C = Flags.O = (Registers[0].x32 >> 16) == 0 && Positive(Registers[0].x16, 1) || (Registers[0].x32 >> 16) == 0xffff && Negative(Registers[0].x16, 1);
                     Flags.S = Negative(Registers[0].x32, 2);
                     break;
                 case 2:
-                    Registers[0].x64 = (SignExtend(Registers[0].x32, 2).MakeSigned() * SignExtend(a, 2).MakeSigned()).MakeUnsigned();
+                    Registers[0].x64 = (UInt64)((Int64)SignExtend(Registers[0].x32, 2) * (Int64)SignExtend(a, 2));
                     Flags.C = Flags.O = (Registers[0].x64 >> 32) == 0 && Positive(Registers[0].x32, 2) || (Registers[0].x64 >> 32) == 0xffffffff && Negative(Registers[0].x32, 2);
                     Flags.S = Negative(Registers[0].x64, 3);
                     break;
@@ -440,8 +433,25 @@ namespace CSX64
         }
         private bool ProcessTernary_IMUL()
         {
-            Terminate(ErrorCode.NotImplemented);
-            return false;
+            if (!GetMemAdv(1, out UInt64 s)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
+
+            UInt64 a;
+            if ((s & 1) == 0)
+            {
+                if (!GetMemAdv(1, out a)) return false;
+                a = Registers[s & 15].Get(sizecode);
+            }
+            else if (!GetAddressAdv(out a) || !GetMemRaw(a, Size(sizecode), out a)) return false;
+
+            if (!GetMemAdv(Size(sizecode), out UInt64 b)) return false;
+
+            UInt64 res = (UInt64)((Int64)a * (Int64)b);
+
+            UpdateFlagsInt(res, sizecode);
+
+            Registers[s >> 4].Set(sizecode, res);
+            return true;
         }
 
         private bool ProcessDIV()
@@ -505,50 +515,50 @@ namespace CSX64
             switch ((s >> 2) & 3)
             {
                 case 0:
-                    _a = SignExtend(Registers[0].x16, 1).MakeSigned();
-                    _b = SignExtend(a, 0).MakeSigned();
+                    _a = (Int64)SignExtend(Registers[0].x16, 1);
+                    _b = (Int64)SignExtend(a, 0);
                     full = _a / _b;
 
                     if (full != (sbyte)full) { Terminate(ErrorCode.ArithmeticError); return false; }
 
-                    Registers[0].x8 = full.MakeUnsigned();
-                    Registers[1].x8 = (_a % _b).MakeUnsigned();
+                    Registers[0].x8 = (UInt64)full;
+                    Registers[1].x8 = (UInt64)(_a % _b);
                     Flags.C = Registers[1].x8 != 0;
                     Flags.S = Negative(Registers[0].x8, 0);
                     break;
                 case 1:
-                    _a = SignExtend(Registers[0].x32, 2).MakeSigned();
-                    _b = SignExtend(a, 1).MakeSigned();
+                    _a = (Int64)SignExtend(Registers[0].x32, 2);
+                    _b = (Int64)SignExtend(a, 1);
                     full = _a / _b;
 
                     if (full != (Int16)full) { Terminate(ErrorCode.ArithmeticError); return false; }
 
-                    Registers[0].x16 = full.MakeUnsigned();
-                    Registers[1].x16 = (_a % _b).MakeUnsigned();
+                    Registers[0].x16 = (UInt64)full;
+                    Registers[1].x16 = (UInt64)(_a % _b);
                     Flags.C = Registers[1].x16 != 0;
                     Flags.S = Negative(Registers[0].x16, 1);
                     break;
                 case 2:
-                    _a = Registers[0].x64.MakeSigned();
-                    _b = SignExtend(a, 2).MakeSigned();
+                    _a = (Int64)Registers[0].x64;
+                    _b = (Int64)SignExtend(a, 2);
                     full = _a / _b;
 
                     if (full != (Int32)full) { Terminate(ErrorCode.ArithmeticError); return false; }
 
-                    Registers[0].x32 = full.MakeUnsigned();
-                    Registers[1].x32 = (_a % _b).MakeUnsigned();
+                    Registers[0].x32 = (UInt64)full;
+                    Registers[1].x32 = (UInt64)(_a % _b);
                     Flags.C = Registers[1].x32 != 0;
                     Flags.S = Negative(Registers[0].x32, 2);
                     break;
                 case 3: // 64 bits requires extra logic
-                    _b = a.MakeSigned();
-                    bigraw = (new BigInteger(Registers[1].x64.MakeSigned()) << 64) + new BigInteger(Registers[0].x64.MakeSigned());
+                    _b = (Int64)a;
+                    bigraw = (new BigInteger((Int64)Registers[1].x64) << 64) + new BigInteger((Int64)Registers[0].x64);
                     bigfull = bigraw / _b;
 
                     if (bigfull != (Int64)bigfull) { Terminate(ErrorCode.ArithmeticError); return false; }
 
-                    Registers[1].x64 = ((Int64)(bigraw % _b)).MakeUnsigned();
-                    Registers[0].x64 = ((Int64)bigfull).MakeUnsigned();
+                    Registers[1].x64 = (UInt64)(Int64)(bigraw % _b);
+                    Registers[0].x64 = (UInt64)(Int64)bigfull;
                     Flags.C = Registers[1].x64 != 0;
                     break;
             }
@@ -587,7 +597,7 @@ namespace CSX64
             UInt64 sizecode = (s >> 2) & 3;
 
             UInt16 sh = (UInt16)(b % SizeBits(sizecode));
-            UInt64 res = Truncate((SignExtend(a, sizecode).MakeSigned() << sh).MakeUnsigned(), sizecode);
+            UInt64 res = Truncate((UInt64)((Int64)SignExtend(a, sizecode) << sh), sizecode);
 
             UpdateFlagsInt(res, sizecode);
 
@@ -599,7 +609,7 @@ namespace CSX64
             UInt64 sizecode = (s >> 2) & 3;
 
             UInt16 sh = (UInt16)(b % SizeBits(sizecode));
-            UInt64 res = Truncate((SignExtend(a, sizecode).MakeSigned() >> sh).MakeUnsigned(), sizecode);
+            UInt64 res = Truncate((UInt64)((Int64)SignExtend(a, sizecode) >> sh), sizecode);
 
             UpdateFlagsInt(res, sizecode);
 
@@ -1479,8 +1489,8 @@ namespace CSX64
 
             switch ((s >> 2) & 3)
             {
-                case 3: return StoreUnaryOpFormat(s, m, ((Int64)AsDouble(a)).MakeUnsigned());
-                case 2: return StoreUnaryOpFormat(s, m, ((Int64)AsFloat(a)).MakeUnsigned());
+                case 3: return StoreUnaryOpFormat(s, m, (UInt64)(Int64)AsDouble(a));
+                case 2: return StoreUnaryOpFormat(s, m, (UInt64)(Int64)AsFloat(a));
 
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
@@ -1491,8 +1501,8 @@ namespace CSX64
 
             switch ((s >> 2) & 3)
             {
-                case 3: return StoreUnaryOpFormat(s, m, DoubleAsUInt64(a.MakeSigned()));
-                case 2: return StoreUnaryOpFormat(s, m, FloatAsUInt64(SignExtend(a, 2).MakeSigned()));
+                case 3: return StoreUnaryOpFormat(s, m, DoubleAsUInt64((Int64)a));
+                case 2: return StoreUnaryOpFormat(s, m, FloatAsUInt64((Int64)SignExtend(a, 2)));
 
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }

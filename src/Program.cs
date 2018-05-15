@@ -75,6 +75,8 @@ namespace CSX64
         [STAThread]
         private static int Main(string[] args)
         {
+            if (!BitConverter.IsLittleEndian) { Print("ERROR: This platform is not little-endian"); return 1; }
+
             // set up initilization thingys
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
@@ -87,6 +89,26 @@ namespace CSX64
             ProgramAction action = ProgramAction.ExecuteConsole; // requested action
             bool accepting_options = true;                       // marks that we're still accepting options
             FlagsRegister flags = new FlagsRegister();           // the flags register to provide (only supplies private flags)
+
+            /*
+            // performance testing stuff
+
+            Random rand = new Random();
+            byte[] data = new byte[1024];
+            rand.NextBytes(data);
+            Console.WriteLine("starting");
+            UInt64 temp;
+            DateTime start = DateTime.Now;
+            
+            for (int i = 0; i < 100000000; ++i)
+            {
+                data.Read((UInt64)rand.Next(900), 1ul << rand.Next(4), out temp);
+            }
+
+            TimeSpan ts = DateTime.Now - start;
+            Console.WriteLine($"t: {ts.TotalMilliseconds}ms");
+            Console.ReadLine();
+            */
 
             // process the terminal args
             for (int i = 0; i < args.Length; ++i)

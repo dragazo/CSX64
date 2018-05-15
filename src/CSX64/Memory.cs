@@ -19,12 +19,9 @@ namespace CSX64
         public bool GetCString(UInt64 pos, out string str)
         {
             // refer to utility function
-            if (Memory.ReadCString(pos, out str)) return true;
-            else
-            {
-                Terminate(ErrorCode.OutOfBounds);
-                return false;
-            }
+            if (!Memory.ReadCString(pos, out str)) { Terminate(ErrorCode.OutOfBounds); return false; }
+
+            return true;
         }
         /// <summary>
         /// Writes a C-style string to memory. Returns true if successful, otherwise fails with OutOfBounds and returns false
@@ -36,12 +33,9 @@ namespace CSX64
         public bool SetCString(UInt64 pos, string str)
         {
             // refer to utility function
-            if (Memory.WriteCString(pos, str)) return true;
-            else
-            {
-                Terminate(ErrorCode.OutOfBounds);
-                return false;
-            }
+            if (!Memory.WriteCString(pos, str)) { Terminate(ErrorCode.OutOfBounds); return false; }
+
+            return true;
         }
 
         // -- unsigned memory access -- //
@@ -514,6 +508,7 @@ namespace CSX64
         private bool PopRaw(UInt64 size, out UInt64 val)
         {
             if (!GetMemRaw(Registers[15].x64, size, out val)) return false;
+
             Registers[15].x64 += size;
             return true;
         }
@@ -528,12 +523,9 @@ namespace CSX64
         private bool GetMemRaw(UInt64 pos, UInt64 size, out UInt64 res)
         {
             // refer to utility function
-            if (Memory.Read(pos, size, out res)) return true;
-            else
-            {
-                Terminate(ErrorCode.OutOfBounds);
-                return false;
-            }
+            if (!Memory.Read(pos, size, out res)) { Terminate(ErrorCode.OutOfBounds); return false; }
+
+            return true;
         }
         /// <summary>
         /// Writes a value to memory (fails with OutOfBounds if invalid)
@@ -545,12 +537,9 @@ namespace CSX64
         private bool SetMemRaw(UInt64 pos, UInt64 size, UInt64 val)
         {
             // refer to utility function
-            if (Memory.Write(pos, size, val)) return true;
-            else
-            {
-                Terminate(ErrorCode.OutOfBounds);
-                return false;
-            }
+            if (!Memory.Write(pos, size, val)) { Terminate(ErrorCode.OutOfBounds); return false; }
+
+            return true;
         }
 
         /// <summary>
@@ -560,10 +549,11 @@ namespace CSX64
         /// <param name="res">The result</param>
         private bool GetMemAdv(UInt64 size, out UInt64 res)
         {
-            bool r = GetMemRaw(Pos, size, out res);
-            Pos += size;
+            // make sure we can get the memory
+            if (!GetMemRaw(Pos, size, out res)) return false;
 
-            return r;
+            Pos += size;
+            return true;
         }
         /// <summary>
         /// Gets an address and advances the execution pointer

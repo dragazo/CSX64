@@ -28,7 +28,7 @@ namespace CSX64
             {
                 // read from the file
                 int n = fd.BaseStream.Read(Memory, (int)Registers[2].x64, (int)Registers[3].x64);
-
+                
                 // if we got nothing but it's interactive
                 if (n == 0 && fd.Interactive)
                 {
@@ -57,7 +57,7 @@ namespace CSX64
             // get fd
             FileDescriptor fd = FileDescriptors[fd_index];
             if (!fd.InUse) { Terminate(ErrorCode.FDNotInUse); return false; }
-
+            
             // attempt to write from memory to the file
             try { fd.BaseStream.Write(Memory, (int)Registers[2].x64, (int)Registers[3].x64); return true; }
             catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }

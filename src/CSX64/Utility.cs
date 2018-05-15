@@ -9,18 +9,7 @@ namespace CSX64
 {
     public static class Utility
     {
-        // -- memory utilities -- //
-
-        public static Int64 MakeSigned(this UInt64 val)
-        {
-            //return (val & 0x8000000000000000) != 0 ? -(Int64)(~val + 1) : (Int64)val;
-            return (Int64)val;
-        }
-        public static UInt64 MakeUnsigned(this Int64 val)
-        {
-            //return val < 0 ? ~(UInt64)(-val) + 1 : (UInt64)val;
-            return (UInt64)val;
-        }
+        // -- register access utilities -- //
 
         /// <summary>
         /// Gets the register partition with the specified size code
@@ -28,15 +17,7 @@ namespace CSX64
         /// <param name="code">The size code</param>
         public static UInt64 Get(this Register reg, UInt64 code)
         {
-            switch (code)
-            {
-                case 0: return reg.x8;
-                case 1: return reg.x16;
-                case 2: return reg.x32;
-                case 3: return reg.x64;
-
-                default: throw new ArgumentOutOfRangeException("Register code out of range");
-            }
+            return (((1ul << (8 << (ushort)code)) & ~1ul) - 1) & reg.x64;
         }
         /// <summary>
         /// Sets the register partition with the specified size code
@@ -45,15 +26,7 @@ namespace CSX64
         /// <param name="value">The value to set</param>
         public static void Set(this Register reg, UInt64 code, UInt64 value)
         {
-            switch (code)
-            {
-                case 0: reg.x8 = value; return;
-                case 1: reg.x16 = value; return;
-                case 2: reg.x32 = value; return;
-                case 3: reg.x64 = value; return;
-
-                default: throw new ArgumentOutOfRangeException("Register code out of range");
-            }
+            reg.x64 = ~(((1ul << (8 << (ushort)code)) & ~1ul) - 1) & reg.x64 | (((1ul << (8 << (ushort)code)) & ~1ul) - 1) & value;
         }
 
         /// <summary>
@@ -71,7 +44,7 @@ namespace CSX64
         /// <param name="publicFlags">the values to use for public flags</param>
         public static void SetPublicFlags(this FlagsRegister flags, UInt64 publicFlags)
         {
-            flags.Flags = (flags.Flags & ~Computer.PublicFlags) | (publicFlags & Computer.PublicFlags);
+            flags.Flags = flags.Flags & ~Computer.PublicFlags | publicFlags & Computer.PublicFlags;
         }
 
         /// <summary>
@@ -89,7 +62,7 @@ namespace CSX64
         /// <param name="privateFlags">the values to use for private flags</param>
         public static void SetPrivateFlags(this FlagsRegister flags, UInt64 privateFlags)
         {
-            flags.Flags = (flags.Flags & Computer.PublicFlags) | (privateFlags & ~Computer.PublicFlags);
+            flags.Flags = flags.Flags & Computer.PublicFlags | privateFlags & ~Computer.PublicFlags;
         }
 
         /// <summary>
@@ -127,7 +100,7 @@ namespace CSX64
             }
         }
 
-        // -----------------------------
+        // -- misc utilities -- //
 
         /// <summary>
         /// Swaps the contents of the specified l-values
@@ -152,6 +125,8 @@ namespace CSX64
             return res.ToString();
         }
 
+        // -- memory utilities -- //
+
         /// <summary>
         /// Writes a value to the array
         /// </summary>
@@ -165,21 +140,26 @@ namespace CSX64
             // make sure we're not exceeding memory bounds
             if (pos >= (UInt64)arr.Count || pos + size > (UInt64)arr.Count) return false;
 
-            byte[] bytes; // destination for raw bytes
-
-            switch (size)
+            // write the value (little-endian)
+            for (int i = 0; i < (int)size; ++i)
             {
-                case 1: arr[(int)pos] = (byte)val; return true;
-                case 2: bytes = BitConverter.GetBytes((UInt16)val); break;
-                case 4: bytes = BitConverter.GetBytes((UInt32)val); break;
-                case 8: bytes = BitConverter.GetBytes(val); break;
-
-                default: throw new ArgumentException("Specified data size is non-standard");
+                arr[(int)pos + i] = (byte)val;
+                val >>= 8;
             }
 
-            // write the value
-            for (int i = 0; i < bytes.Length; ++i)
-                arr[(int)pos + i] = bytes[i];
+            return true;
+        }
+        public static bool Write(this byte[] arr, UInt64 pos, UInt64 size, UInt64 val)
+        {
+            // make sure we're not exceeding memory bounds
+            if (pos >= (UInt64)arr.Length || pos + size > (UInt64)arr.Length) return false;
+
+            // write the value (little-endian)
+            for (int i = 0; i < (int)size; ++i)
+            {
+                arr[(int)pos + i] = (byte)val;
+                val >>= 8;
+            }
 
             return true;
         }
@@ -195,19 +175,32 @@ namespace CSX64
             // make sure we're not exceeding memory bounds
             if (pos >= (UInt64)arr.Length || pos + size > (UInt64)arr.Length) { res = 0; return false; }
 
-            switch (size)
-            {
-                case 1: res = arr[(int)pos]; return true;
-                case 2: res = BitConverter.ToUInt16(arr, (int)pos); return true;
-                case 4: res = BitConverter.ToUInt32(arr, (int)pos); return true;
-                case 8: res = BitConverter.ToUInt64(arr, (int)pos); return true;
+            // read the value (little-endian)
+            res = 0;
+            for (int i = (int)size - 1; i >= 0; --i)
+                res = (res << 8) | arr[(int)pos + i];
 
-                default: throw new ArgumentException("Specified data size is non-standard");
+            return true;
+        }
+
+        /// <summary>
+        /// Appends a value to an array of bytes in a list
+        /// </summary>
+        /// <param name="data">the byte array</param>
+        /// <param name="size">the size in bytes of the value to write</param>
+        /// <param name="val">the value to write</param>
+        public static void Append(this List<byte> arr, UInt64 size, UInt64 val)
+        {
+            // write the value (little-endian)
+            for (int i = 0; i < (int)size; ++i)
+            {
+                arr.Add((byte)val);
+                val >>= 8;
             }
         }
 
         /// <summary>
-        /// Writes a C-style string to memory. Returns true on success
+        /// Writes an ASCII C-style string to memory. Returns true on success
         /// </summary>
         /// <param name="arr">the data array to write to</param>
         /// <param name="pos">the position in the array to begin writing</param>
@@ -216,7 +209,7 @@ namespace CSX64
         {
             // make sure we're not exceeding memory bounds
             if (pos >= (UInt64)arr.Length || pos + (UInt64)(str.Length + 1) > (UInt64)arr.Length) return false;
-
+            
             // write each character
             for (int i = 0; i < str.Length; ++i) arr[pos + (UInt64)i] = (byte)str[i];
             // write a null terminator
@@ -225,7 +218,7 @@ namespace CSX64
             return true;
         }
         /// <summary>
-        /// Reads a C-style string from memory. Returns true on success
+        /// Reads an ASCII C-style string from memory. Returns true on success
         /// </summary>
         /// <param name="arr">the data array to read from</param>
         /// <param name="pos">the position in the array to begin reading</param>
@@ -250,31 +243,8 @@ namespace CSX64
             str = b.ToString();
             return true;
         }
-
-        /// <summary>
-        /// Appends a value to an array of bytes in a list
-        /// </summary>
-        /// <param name="data">the byte array</param>
-        /// <param name="size">the size in bytes of the value to write</param>
-        /// <param name="val">the value to write</param>
-        public static void Append(this List<byte> arr, UInt64 size, UInt64 val)
-        {
-            byte[] bytes; // destination for raw bytes
-
-            switch (size)
-            {
-                case 1: arr.Add((byte)val); return;
-                case 2: bytes = BitConverter.GetBytes((UInt16)val); break;
-                case 4: bytes = BitConverter.GetBytes((UInt32)val); break;
-                case 8: bytes = BitConverter.GetBytes(val); break;
-
-                default: throw new ArgumentException("Specified data size is non-standard");
-            }
-
-            // write the value
-            for (int i = 0; i < bytes.Length; ++i)
-                arr.Add(bytes[i]);
-        }
+        
+        // -- misc utilities -- //
 
         /// <summary>
         /// Attempts to parse the string into an unsigned integer. Returns true on success.
@@ -312,46 +282,6 @@ namespace CSX64
             }
 
             return true;
-        }
-
-        /// <summary>
-        /// Converts a byte array representation into a unicode string, obeying current system endianness
-        /// </summary>
-        /// <param name="bytes">the byte array to decode</param>
-        /// <param name="index">the index of the first byte in the array</param>
-        /// <param name="count">the number of bytes to decode</param>
-        public static string ConvertToString(this byte[] bytes, int index, int count)
-        {
-            if (BitConverter.IsLittleEndian) return Encoding.Unicode.GetString(bytes, index, count);
-            else return Encoding.BigEndianUnicode.GetString(bytes, index, count);
-        }
-        /// <summary>
-        /// Converts a string into its byte representation, obeying current system endianness
-        /// </summary>
-        /// <param name="str">the string to convert</param>
-        public static byte[] ConvertToBytes(this string str)
-        {
-            if (BitConverter.IsLittleEndian) return Encoding.Unicode.GetBytes(str);
-            else return Encoding.BigEndianUnicode.GetBytes(str);
-        }
-
-        /// <summary>
-        /// Converts a string into a stream onject
-        /// </summary>
-        /// <param name="str">the string source</param>
-        public static Stream ToStream(this string str)
-        {
-            // create the stream
-            Stream stream = new MemoryStream();
-
-            // write the string contents
-            using (StreamWriter writer = new StreamWriter(stream))
-                writer.Write(str);
-
-            // reposition to beginning
-            stream.Position = 0;
-
-            return stream;
         }
 
         /// <summary>
@@ -410,7 +340,7 @@ namespace CSX64
         /// <param name="sizecode">the current size code of the value</param>
         public static bool Positive(UInt64 val, UInt64 sizecode)
         {
-            return ((val >> (8 * (ushort)Size(sizecode) - 1)) & 1) == 0;
+            return ((val >> ((8 << (ushort)sizecode) - 1)) & 1) == 0;
         }
         /// <summary>
         /// Returns if the value with specified size code is negative
@@ -419,7 +349,7 @@ namespace CSX64
         /// <param name="sizecode">the current size code of the value</param>
         public static bool Negative(UInt64 val, UInt64 sizecode)
         {
-            return ((val >> (8 * (ushort)Size(sizecode) - 1)) & 1) != 0;
+            return ((val >> ((8 << (ushort)sizecode) - 1)) & 1) != 0;
         }
 
         /// <summary>
@@ -429,18 +359,7 @@ namespace CSX64
         /// <param name="sizecode">the current size code</param>
         public static UInt64 SignExtend(UInt64 val, UInt64 sizecode)
         {
-            // if val is positive, do nothing
-            if (Positive(val, sizecode)) return val;
-
-            // otherwise, pad with 1's
-            switch (sizecode)
-            {
-                case 0: return 0xffffffffffffff00 | val;
-                case 1: return 0xffffffffffff0000 | val;
-                case 2: return 0xffffffff00000000 | val;
-
-                default: return val; // can't extend 64-bit value any further
-            }
+            return Positive(val, sizecode) ? val : ~(((1ul << (8 << (ushort)sizecode)) & ~1ul) - 1) | val;
         }
         /// <summary>
         /// Truncates the value to the specified size code (can also be used to zero extend a value)
@@ -449,14 +368,7 @@ namespace CSX64
         /// <param name="sizecode">the size code to truncate to</param>
         public static UInt64 Truncate(UInt64 val, UInt64 sizecode)
         {
-            switch (sizecode)
-            {
-                case 0: return 0x00000000000000ff & val;
-                case 1: return 0x000000000000ffff & val;
-                case 2: return 0x00000000ffffffff & val;
-
-                default: return val; // can't truncate 64-bit value
-            }
+            return (((1ul << (8 << (ushort)sizecode)) & ~1ul) - 1) & val;
         }
 
         /// <summary>

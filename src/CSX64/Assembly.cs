@@ -382,7 +382,7 @@ namespace CSX64
                     if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
                     if (ret == false) return false;
 
-                    if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : L.MakeSigned()) * (RF ? AsDouble(R) : R.MakeSigned())); floating = true; }
+                    if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : (Int64)L) * (RF ? AsDouble(R) : (Int64)R)); floating = true; }
                     else res = L * R;
                     break;
                 case OPs.Div:
@@ -390,23 +390,23 @@ namespace CSX64
                     if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
                     if (ret == false) return false;
 
-                    if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : L.MakeSigned()) / (RF ? AsDouble(R) : R.MakeSigned())); floating = true; }
-                    else res = (L.MakeSigned() / R.MakeSigned()).MakeUnsigned();
+                    if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : (Int64)L) / (RF ? AsDouble(R) : (Int64)R)); floating = true; }
+                    else res = (UInt64)((Int64)L / (Int64)R);
                     break;
                 case OPs.Mod:
                     if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
                     if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
                     if (ret == false) return false;
 
-                    if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : L.MakeSigned()) % (RF ? AsDouble(R) : R.MakeSigned())); floating = true; }
-                    else res = (L.MakeSigned() % R.MakeSigned()).MakeUnsigned();
+                    if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : (Int64)L) % (RF ? AsDouble(R) : (Int64)R)); floating = true; }
+                    else res = (UInt64)((Int64)L % (Int64)R);
                     break;
                 case OPs.Add:
                     if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
                     if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
                     if (ret == false) return false;
 
-                    if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : L.MakeSigned()) + (RF ? AsDouble(R) : R.MakeSigned())); floating = true; }
+                    if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : (Int64)L) + (RF ? AsDouble(R) : (Int64)R)); floating = true; }
                     else res = L + R;
                     break;
                 case OPs.Sub:
@@ -414,7 +414,7 @@ namespace CSX64
                     if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
                     if (ret == false) return false;
 
-                    if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : L.MakeSigned()) - (RF ? AsDouble(R) : R.MakeSigned())); floating = true; }
+                    if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : (Int64)L) - (RF ? AsDouble(R) : (Int64)R)); floating = true; }
                     else res = L - R;
                     break;
 
@@ -438,32 +438,32 @@ namespace CSX64
                     if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
                     if (ret == false) return false;
 
-                    if (LF || RF) res = (LF ? AsDouble(L) : L.MakeSigned()) < (RF ? AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
-                    else res = L.MakeSigned() < R.MakeSigned() ? 1 : 0ul;
+                    if (LF || RF) res = (LF ? AsDouble(L) : (Int64)L) < (RF ? AsDouble(R) : (Int64)R) ? 1 : 0ul;
+                    else res = (Int64)L < (Int64)R ? 1 : 0ul;
                     break;
                 case OPs.LessE:
                     if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
                     if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
                     if (ret == false) return false;
 
-                    if (LF || RF) res = (LF ? AsDouble(L) : L.MakeSigned()) <= (RF ? AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
-                    else res = L.MakeSigned() <= R.MakeSigned() ? 1 : 0ul;
+                    if (LF || RF) res = (LF ? AsDouble(L) : (Int64)L) <= (RF ? AsDouble(R) : (Int64)R) ? 1 : 0ul;
+                    else res = (Int64)L <= (Int64)R ? 1 : 0ul;
                     break;
                 case OPs.Great:
                     if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
                     if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
                     if (ret == false) return false;
 
-                    if (LF || RF) res = (LF ? AsDouble(L) : L.MakeSigned()) > (RF ? AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
-                    else res = L.MakeSigned() > R.MakeSigned() ? 1 : 0ul;
+                    if (LF || RF) res = (LF ? AsDouble(L) : (Int64)L) > (RF ? AsDouble(R) : (Int64)R) ? 1 : 0ul;
+                    else res = (Int64)L > (Int64)R ? 1 : 0ul;
                     break;
                 case OPs.GreatE:
                     if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
                     if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
                     if (ret == false) return false;
 
-                    if (LF || RF) res = (LF ? AsDouble(L) : L.MakeSigned()) >= (RF ? AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
-                    else res = L.MakeSigned() >= R.MakeSigned() ? 1 : 0ul;
+                    if (LF || RF) res = (LF ? AsDouble(L) : (Int64)L) >= (RF ? AsDouble(R) : (Int64)R) ? 1 : 0ul;
+                    else res = (Int64)L >= (Int64)R ? 1 : 0ul;
                     break;
 
                 case OPs.Eq:
@@ -471,7 +471,7 @@ namespace CSX64
                     if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
                     if (ret == false) return false;
 
-                    if (LF || RF) res = (LF ? AsDouble(L) : L.MakeSigned()) == (RF ? AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
+                    if (LF || RF) res = (LF ? AsDouble(L) : (Int64)L) == (RF ? AsDouble(R) : (Int64)R) ? 1 : 0ul;
                     else res = L == R ? 1 : 0ul;
                     break;
                 case OPs.Neq:
@@ -479,7 +479,7 @@ namespace CSX64
                     if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
                     if (ret == false) return false;
 
-                    if (LF || RF) res = (LF ? AsDouble(L) : L.MakeSigned()) != (RF ? AsDouble(R) : R.MakeSigned()) ? 1 : 0ul;
+                    if (LF || RF) res = (LF ? AsDouble(L) : (Int64)L) != (RF ? AsDouble(R) : (Int64)R) ? 1 : 0ul;
                     else res = L != R ? 1 : 0ul;
                     break;
 
@@ -540,12 +540,12 @@ namespace CSX64
                 case OPs.Int:
                     if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
 
-                    res = LF ? ((Int64)AsDouble(L)).MakeUnsigned() : L;
+                    res = LF ? (UInt64)(Int64)AsDouble(L) : L;
                     break;
                 case OPs.Float:
                     if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
 
-                    res = LF ? L : DoubleAsUInt64((double)L.MakeSigned());
+                    res = LF ? L : DoubleAsUInt64((double)(Int64)L);
                     floating = true;
                     break;
 
@@ -754,7 +754,7 @@ namespace CSX64
         {
             if (OP == OPs.None)
             {
-                b.Append(Token == null ? _Floating ? AsDouble(_Result).ToString("e17") : _Result.MakeSigned().ToString() : Token);
+                b.Append(Token == null ? _Floating ? AsDouble(_Result).ToString("e17") : ((Int64)_Result).ToString() : Token);
             }
             else
             {
@@ -1830,7 +1830,7 @@ namespace CSX64
                     case 32: m = 6; break;
                     case 64: m = 7; break;
 
-                    default: res = new AssembleResult(AssembleError.ArgError, $"line {line}: Invalid register multiplier encountered ({m.MakeSigned()})"); return false;
+                    default: res = new AssembleResult(AssembleError.ArgError, $"line {line}: Invalid register multiplier encountered ({(Int64)m})"); return false;
                 }
 
                 // register successfully parsed
@@ -2107,6 +2107,39 @@ namespace CSX64
 
             // -- op formats -- //
 
+            public bool TryProcessTernaryOp(OPCode op, bool has_ext_op = false, UInt64 ext_op = 0)
+            {
+                if (args.Length != 3) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 3 args"); return false; }
+
+                AppendVal(1, (UInt64)op);
+                if (has_ext_op) AppendVal(1, ext_op);
+
+                if (!TryParseRegister(args[0], out UInt64 dest)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} expected a register as the first argument"); return false; }
+                if (!TryParseImm(args[2], out Expr imm)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} expected an imm as the third argument"); return false; }
+
+                // reg
+                if (args[1][0] == RegisterPrefix)
+                {
+                    if (!TryParseRegister(args[1], out UInt64 reg)) return false;
+
+                    AppendVal(1, (dest << 4) | (sizecode << 2) | 0);
+                    AppendVal(1, reg);
+                    if (!TryAppendExpr(Size(sizecode), imm)) return false;
+                }
+                // mem
+                else if (args[1][0] == '[')
+                {
+                    if (!TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base)) return false;
+
+                    AppendVal(1, (dest << 4) | (sizecode << 2) | 1);
+                    if (!TryAppendAddress(a, b, ptr_base)) return false;
+                    if (!TryAppendExpr(Size(sizecode), imm)) return false;
+                }
+                // imm
+                else { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} does not support an imm as the second argument"); return false; }
+
+                return true;
+            }
             public bool TryProcessBinaryOp(OPCode op, bool has_ext_op = false, UInt64 ext_op = 0, int _b_sizecode = -1, UInt64 sizemask = 15)
             {
                 if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 2 args"); return false; }
@@ -2328,33 +2361,7 @@ namespace CSX64
 
                 return true;
             }
-            public bool TryProcessPUSH(OPCode op)
-            {
-                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 1 arg"); return false; }
-
-                AppendVal(1, (UInt64)op);
-
-                // reg
-                if (args[0][0] == RegisterPrefix)
-                {
-                    if (!TryParseRegister(args[0], out UInt64 reg)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to parse \"{args[0]}\" as a register\n-> {res.ErrorMsg}"); return false; }
-
-                    AppendVal(1, (reg << 4) | (sizecode << 2) | 1);
-                }
-                // mem
-                else if (args[0][0] == '[') { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} cannot be used with a memory value"); return false; }
-                // imm
-                else
-                {
-                    if (!TryParseImm(args[0], out Expr imm)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to parse \"{args[0]}\" as an imm\n-> {res.ErrorMsg}"); return false; }
-
-                    AppendVal(1, (sizecode << 2) | 0);
-                    if (!TryAppendExpr(Size(sizecode), imm)) return false;
-                }
-
-                return true;
-            }
-            public bool TryProcessPOP(OPCode op)
+            public bool TryProcessReg(OPCode op)
             {
                 if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 1 arg"); return false; }
 
@@ -2640,8 +2647,8 @@ namespace CSX64
                         case "CALL": if (!args.TryProcessIMMRM(OPCode.CALL)) return args.res; break;
                         case "RET": if (!args.TryProcessNoArgOp(OPCode.RET)) return args.res; break;
 
-                        case "PUSH": if (!args.TryProcessPUSH(OPCode.PUSH)) return args.res; break;
-                        case "POP": if (!args.TryProcessPOP(OPCode.POP)) return args.res; break;
+                        case "PUSH": if (!args.TryProcessIMMRM(OPCode.PUSH)) return args.res; break;
+                        case "POP": if (!args.TryProcessReg(OPCode.POP)) return args.res; break;
 
                         case "LEA": if (!args.TryProcessLEA(OPCode.LEA)) return args.res; break;
 
@@ -2656,10 +2663,9 @@ namespace CSX64
                         case "IMUL":
                             switch (args.args.Length)
                             {
-                                case 1:
-                                case 2:
-                                case 3:
-                                    if (!args.TryProcessBinaryOp(OPCode.IMUL, true, (UInt64)args.args.Length - 1)) return args.res; break;
+                                case 1: if (!args.TryProcessIMMRM(OPCode.IMUL, true, 0)) return args.res; break;
+                                case 2: if (!args.TryProcessBinaryOp(OPCode.IMUL, true, 1)) return args.res; break;
+                                case 3: if (!args.TryProcessTernaryOp(OPCode.IMUL, true, 2)) return args.res; break;
 
                                 default: return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: IMUL expected 1, 2, or 3 args");
                             }
@@ -2684,11 +2690,31 @@ namespace CSX64
                         case "NOT": if (!args.TryProcessUnaryOp(OPCode.NOT)) return args.res; break;
                         case "ABS": if (!args.TryProcessUnaryOp(OPCode.ABS)) return args.res; break;
 
-                        case "CMP": if (!args.TryProcessBinaryOp(OPCode.CMP)) return args.res; break;
-                        case "FCMP": if (!args.TryProcessBinaryOp(OPCode.FCMP, false, 0, -1, 12)) return args.res; break;
+                        case "CMP":
+                            // if there are 2 args and the second one is an instant 0, we can make this a CMPZ instruction
+                            if (args.args.Length == 2 && args.TryParseInstantImm(args.args[1], out a, out floating) && a == 0)
+                            {
+                                // set new args for the unary version
+                                args.args = new string[] { args.args[0] };
+                                if (!args.TryProcessUnaryOp(OPCode.CMPZ)) return args.res;
+
+                                Console.WriteLine($"line {args.line}: took unary route");
+                            }
+                            // otherwise normal binary
+                            else if (!args.TryProcessBinaryOp(OPCode.CMP)) return args.res;
+                            break;
+                        case "FCMP":
+                            // if there are 2 args and the second one is an instant 0, we can make this an FCMPZ instruction
+                            if (args.args.Length == 2 && args.TryParseInstantImm(args.args[1], out a, out floating) && a == 0)
+                            {
+                                // set new args for the unary version
+                                args.args = new string[] { args.args[0] };
+                                if (!args.TryProcessUnaryOp(OPCode.FCMPZ, false, 0, 12)) return args.res;
+                            }
+                            // otherwise normal binary
+                            else if (!args.TryProcessBinaryOp(OPCode.FCMP, false, 0, -1, 12)) return args.res;
+                            break;
                         case "TEST": if (!args.TryProcessBinaryOp(OPCode.TEST)) return args.res; break;
-                        case "CMPZ": if (!args.TryProcessUnaryOp(OPCode.CMPZ)) return args.res; break;
-                        case "FCMPZ": if (!args.TryProcessUnaryOp(OPCode.FCMPZ, false, 0, 12)) return args.res; break;
 
                         case "FADD": if (!args.TryProcessBinaryOp(OPCode.FADD, false, 0, -1, 12)) return args.res; break;
                         case "FSUB": if (!args.TryProcessBinaryOp(OPCode.FSUB, false, 0, -1, 12)) return args.res; break;

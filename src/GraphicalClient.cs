@@ -255,7 +255,7 @@ namespace CSX64
                     GetRegister(2).x32 = (UInt64)MousePos.Y;
                     break;
                 case (UInt64)GraphicalSyscallCodes.GetMouseDelta:
-                    GetFlags().Z = (GetRegister(1).x64 = ((Int64)MouseDelta).MakeUnsigned()) == 0;
+                    GetFlags().Z = (GetRegister(1).x64 = (UInt64)MouseDelta) == 0;
                     MouseDelta = 0;
                     break;
 

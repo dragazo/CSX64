@@ -177,7 +177,7 @@ namespace CSX64
                 do
                 {
                     count = stderr.Read(Buffer, 0, Buffer.Length);
-                    Put(Buffer.ConvertToString(0, count));
+                    Put(Encoding.ASCII.GetString(Buffer, 0, count));
                 }
                 while (count == Buffer.Length);
 
@@ -237,7 +237,7 @@ namespace CSX64
             stdin.Seek(0, SeekOrigin.End);
 
             // write the data
-            byte[] data = str.ConvertToBytes();
+            byte[] data = Encoding.ASCII.GetBytes(str);
             stdin.Write(data, 0, data.Length);
 
             // go back to where we were
