@@ -991,8 +991,8 @@ namespace CSX64
 
         private const char RegisterPrefix = '$';
 
-        private const string CurrentLineMacro = "@";
-        private const string StartOfSegMacro = "@@";
+        private const string CurrentLineMacro = "$";
+        private const string StartOfSegMacro = "$$";
 
         private const string EmissionMultPrefix = "#";
         private const UInt64 EmissionMaxMultiplier = 1000000;
@@ -1029,7 +1029,12 @@ namespace CSX64
             };
         private static readonly List<char> UnaryOps = new List<char>() { '+', '-', '~', '!', '*', '/' };
 
-        private static readonly List<string> VerifyLegalExpressionIgnores = new List<string>() { "#TEXT", "#DATA", "#BSS", "__prog_end__" };
+        private static readonly List<string> VerifyLegalExpressionIgnores = new List<string>()
+        {
+            "#TEXT", "#DATA", "#BSS",
+            "##TEXT", "##DATA", "##BSS",
+            "__prog_end__"
+        };
 
         /// <summary>
         /// Holds all the variables used during assembly
@@ -1423,7 +1428,7 @@ namespace CSX64
                             // must be in a segment
                             if (current_seg == AsmSegment.INVALID) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to take an address outside of a segment"); return false; }
 
-                            temp = new Expr() { Token = $"#{current_seg}" };
+                            temp = new Expr() { Token = $"##{current_seg}" };
                         }
                         // otherwise it's a normal value/symbol
                         else
@@ -1757,6 +1762,15 @@ namespace CSX64
                 }
             }
 
+            /// <summary>
+            /// Returns true if the token should be parsed as a register (to differentiate between $reg syntax and $/$$ macros)
+            /// </summary>
+            /// <param name="token">the token to test</param>
+            public bool ShouldBeRegister(string token)
+            {
+                return token[0] == RegisterPrefix && token.Length > 1 && token[1] != '$';
+            }
+
             public bool TryParseAddressReg(string label, ref Expr hole, out UInt64 m, out bool neg)
             {
                 m = 0; neg = false; // initialize out params
@@ -1926,7 +1940,7 @@ namespace CSX64
                 // must be of [*] format
                 if (token.Length < 3 || token[0] != '[' || token[token.Length - 1] != ']') { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Invalid address format encountered \"{token}\""); return false; }
 
-                int pos, end; // parsing positions
+                int pos = 1, end; // parsing positions
 
                 UInt64 temp = 0; // parsing temporaries
                 bool btemp = false;
@@ -1944,7 +1958,7 @@ namespace CSX64
                 while (true)
                 {
                     // find the next register marker
-                    for (pos = 1; pos < token.Length && token[pos] != RegisterPrefix; ++pos) ;
+                    for (; pos < token.Length && token[pos] != RegisterPrefix; ++pos) ;
                     // if this starts parenthetical region
                     if (pos + 1 < token.Length && token[pos + 1] == '(')
                     {
@@ -1963,21 +1977,31 @@ namespace CSX64
                     // otherwise normal symbol
                     else
                     {
-                        // take all legal chars
-                        for (end = pos + 1; end < token.Length && (char.IsLetterOrDigit(token[end]) || token[end] == '_'); ++end) ;
+                        // take all legal chars ($ is for handling $$ macro)
+                        for (end = pos + 1; end < token.Length && (char.IsLetterOrDigit(token[end]) || token[end] == '_' || token[end] == '$'); ++end) ;
                     }
 
                     // break out if we've reached the end
                     if (pos >= token.Length) break;
 
-                    // parse this as a register
-                    if (!TryParseRegister(token.Substring(pos, end - pos), out temp)) return false;
+                    // extract subtoken
+                    string reg = token.Substring(pos, end - pos);
 
-                    // put it in a register slot
-                    if (!regs.Contains(temp)) regs.Add(temp);
+                    // if this is a register token
+                    if (ShouldBeRegister(reg))
+                    {
+                        // parse this as a register
+                        if (!TryParseRegister(reg, out temp)) return false;
 
-                    // modify the register label in the expression to be a legal symbol name
-                    token = $"{token.Substring(0, pos)}{preface}_{temp}{token.Substring(end)}";
+                        // put it in a register slot
+                        if (!regs.Contains(temp)) regs.Add(temp);
+
+                        // modify the register label in the expression to be a legal symbol name
+                        token = $"{token.Substring(0, pos)}{preface}_{temp}{token.Substring(end)}";
+                    }
+
+                    // set start of next search after end
+                    pos = end;
                 }
 
                 // turn into an expression
@@ -2108,28 +2132,8 @@ namespace CSX64
 
                 return true;
             }
-            public bool TryProcessDef()
-            {
-                if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: DEF expected 2 args"); return false; }
 
-                // mutate and test result for legality
-                if (!MutateName(ref args[0])) return false;
-                if (!IsValidName(args[0])) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: Invalid label name \"{args[0]}\""); return false; }
-
-                // get the expression
-                if (!TryParseImm(args[1], out Expr expr)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: DEF expected an expression as second arg\n-> {res.ErrorMsg}"); return false; }
-
-                // don't redefine a symbol
-                if (file.Symbols.ContainsKey(args[0])) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Symbol \"{args[0]}\" was already defined"); return false; }
-                // ensure we don't define an external
-                if (file.ExternalSymbols.Contains(args[0])) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Cannot define external symbol \"{args[0]}\" internally"); return false; }
-
-                // add it to the dictionary
-                file.Symbols.Add(args[0], expr);
-
-                return true;
-            }
-            public bool TryProcessEmission()
+            public bool TryProcessDeclare(UInt64 size)
             {
                 if (args.Length == 0) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Emission expected at least one value"); return false; }
 
@@ -2159,7 +2163,7 @@ namespace CSX64
 
                         // already wrote 1 copy, now write the others
                         for (UInt64 j = 1; j < mult; ++j)
-                            if (!TryAppendExpr(Size(sizecode), hole)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                            if (!TryAppendExpr(size, hole)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
                     }
                     // if a string
                     else if (args[i][0] == '"')
@@ -2173,7 +2177,7 @@ namespace CSX64
                             // make sure there's no string splicing
                             if (args[i][j] == args[i][0]) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: String emission prematurely reached a terminating quote"); return false; }
 
-                            if (!TryAppendVal(Size(sizecode), args[i][j])) return false;
+                            if (!TryAppendVal(size, args[i][j])) return false;
                         }
                     }
                     // otherwise is a value
@@ -2183,9 +2187,43 @@ namespace CSX64
                         if (!TryParseImm(args[i], out hole)) return false;
 
                         // make one of them
-                        if (!TryAppendExpr(Size(sizecode), hole)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                        if (!TryAppendExpr(size, hole)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
                     }
                 }
+
+                return true;
+            }
+            public bool TryProcessReserve(UInt64 size)
+            {
+                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: RES expected one arg"); return false; }
+
+                // parse the number to reserve
+                if (!TryParseInstantImm(args[0], out UInt64 count, out bool floating)) return false;
+
+                // make sure it's not floating
+                if (floating) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: RES value cannot be floating-point"); return false; }
+
+                // make sure we're in the bss segment
+                if (current_seg != AsmSegment.BSS) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: RES cannot be used outside of the BSS segment"); return false; }
+
+                // add to bss len
+                file.BssLen += (UInt32)(count * size);
+
+                return true;
+            }
+
+            public bool TryProcessEQU()
+            {
+                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: EQU expected 1 arg"); return false; }
+
+                // get the expression
+                if (!TryParseImm(args[0], out Expr expr)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: DEF expected an expression as second arg\n-> {res.ErrorMsg}"); return false; }
+
+                // make sure we have a label
+                if (label_def == null) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: EQU requires a label"); return false; }
+
+                // redefine this line's label to expr
+                file.Symbols[label_def] = expr;
 
                 return true;
             }
@@ -2217,7 +2255,7 @@ namespace CSX64
                 if (!TryParseImm(args[2], out Expr imm)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} expected an imm as the third argument"); return false; }
 
                 // reg
-                if (args[1][0] == RegisterPrefix)
+                if (ShouldBeRegister(args[1]))
                 {
                     if (!TryParseRegister(args[1], out UInt64 reg)) return false;
 
@@ -2250,12 +2288,12 @@ namespace CSX64
                 UInt64 b_sizecode = _b_sizecode == -1 ? sizecode : (UInt64)_b_sizecode;
 
                 // reg, *
-                if (args[0][0] == RegisterPrefix)
+                if (ShouldBeRegister(args[0]))
                 {
                     if (!TryParseRegister(args[0], out UInt64 dest)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as a register\n-> {res.ErrorMsg}"); return false; }
 
                     // reg, reg
-                    if (args[1][0] == RegisterPrefix)
+                    if (ShouldBeRegister(args[1]))
                     {
                         if (!TryParseRegister(args[1], out UInt64 src)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as a register\n-> {res.ErrorMsg}"); return false; }
 
@@ -2285,7 +2323,7 @@ namespace CSX64
                     if (!TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as an address\n-> {res.ErrorMsg}"); return false; }
 
                     // mem, reg
-                    if (args[1][0] == RegisterPrefix)
+                    if (ShouldBeRegister(args[1]))
                     {
                         if (!TryParseRegister(args[1], out UInt64 src)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as a register\n-> {res.ErrorMsg}"); return false; }
 
@@ -2318,7 +2356,7 @@ namespace CSX64
                 if (has_ext_op) { if (!TryAppendVal(1, ext_op)) return false; }
 
                 // reg
-                if (args[0][0] == RegisterPrefix)
+                if (ShouldBeRegister(args[0]))
                 {
                     if (!TryParseRegister(args[0], out UInt64 reg)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as a register\n-> {res.ErrorMsg}"); return false; }
 
@@ -2345,7 +2383,7 @@ namespace CSX64
                 if (has_ext_op) { if (!TryAppendVal(1, ext_op)) return false; }
 
                 // reg
-                if (args[0][0] == RegisterPrefix)
+                if (ShouldBeRegister(args[0]))
                 {
                     if (!TryParseRegister(args[0], out UInt64 reg)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as a register\n-> {res.ErrorMsg}"); return false; }
 
@@ -2386,12 +2424,12 @@ namespace CSX64
                 if (!TryAppendVal(1, (UInt64)op)) return false;
 
                 // reg, *
-                if (args[0][0] == RegisterPrefix)
+                if (ShouldBeRegister(args[0]))
                 {
                     if (!TryParseRegister(args[0], out UInt64 reg)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as a register\n-> {res.ErrorMsg}"); return false; }
 
                     // reg, reg
-                    if (args[1][0] == RegisterPrefix)
+                    if (ShouldBeRegister(args[1]))
                     {
                         if (!TryParseRegister(args[1], out UInt64 src)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as a register\n-> {res.ErrorMsg}"); return false; }
 
@@ -2415,7 +2453,7 @@ namespace CSX64
                     if (!TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as an address\n-> {res.ErrorMsg}"); return false; }
 
                     // mem, reg
-                    if (args[1][0] == RegisterPrefix)
+                    if (ShouldBeRegister(args[1]))
                     {
                         if (!TryParseRegister(args[1], out UInt64 reg)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as a register\n-> {res.ErrorMsg}"); return false; }
 
@@ -2630,8 +2668,9 @@ namespace CSX64
                     // ensure we don't define an external
                     if (file.ExternalSymbols.Contains(args.label_def)) return new AssembleResult(AssembleError.SymbolRedefinition, $"line {args.line}: Cannot define external symbol \"{args.label_def}\" internally");
 
-                    // must be in a segment
-                    if (args.current_seg == AsmSegment.INVALID) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Attempt to take an address outside of a segment");
+                    // must be in a segment unless op is EQU
+                    if (args.current_seg == AsmSegment.INVALID && args.op.ToUpper() != "EQU")
+                        return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Attempt to take an address outside of a segment");
 
                     // add the symbol as an address (uses illegal symbol #base, which will be defined at link time)
                     file.Symbols.Add(args.label_def, new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Token = $"#{args.current_seg}" }, Right = new Expr() { IntResult = args.line_pos_in_seg } });
@@ -2646,8 +2685,21 @@ namespace CSX64
 
                         case "GLOBAL": if (!args.TryProcessGlobal()) return args.res; break;
                         case "EXTERN": if(!args.TryProcessExtern()) return args.res; break;
-                        case "DEF": if (!args.TryProcessDef()) return args.res; break;
-                        case "EMIT": if (!args.TryProcessEmission()) return args.res; break;
+
+                        case "DN": if (!args.TryProcessDeclare(Size(args.sizecode))) return args.res; break;
+                        case "DB": if (!args.TryProcessDeclare(1)) return args.res; break;
+                        case "DW": if (!args.TryProcessDeclare(2)) return args.res; break;
+                        case "DD": if (!args.TryProcessDeclare(4)) return args.res; break;
+                        case "DQ": if (!args.TryProcessDeclare(8)) return args.res; break;
+
+                        case "RESN": if (!args.TryProcessReserve(Size(args.sizecode))) return args.res; break;
+                        case "RESB": if (!args.TryProcessReserve(1)) return args.res; break;
+                        case "RESW": if (!args.TryProcessReserve(2)) return args.res; break;
+                        case "RESD": if (!args.TryProcessReserve(4)) return args.res; break;
+                        case "RESQ": if (!args.TryProcessReserve(8)) return args.res; break;
+                        case "REST": if (!args.TryProcessReserve(10)) return args.res; break;
+
+                        case "EQU": if (!args.TryProcessEQU()) return args.res; break;
 
                         case "SEGMENT": case "SECTION": if (!args.TryProcessSegment()) return args.res; break;
 
@@ -2984,9 +3036,6 @@ namespace CSX64
             bool _floating;
             string _err = string.Empty;
 
-            // expressions for pre-defined symbols
-            Expr __prog_end__ = new Expr();
-
             // -- populate things -- //
 
             // populate global_to_obj with ALL global symbols
@@ -3067,9 +3116,17 @@ namespace CSX64
                 ObjectFile obj = entry.Key;
 
                 // define the segment offsets
+                obj.Symbols.Add("##TEXT", new Expr() { IntResult = 0 });
+                obj.Symbols.Add("##DATA", new Expr() { IntResult = (UInt64)text.Count });
+                obj.Symbols.Add("##BSS", new Expr() { IntResult = (UInt64)text.Count + (UInt64)data.Count });
+
+                // and file-scope segment offsets
                 obj.Symbols.Add("#TEXT", new Expr() { IntResult = entry.Value.Item1 });
                 obj.Symbols.Add("#DATA", new Expr() { IntResult = (UInt64)text.Count + entry.Value.Item2 });
                 obj.Symbols.Add("#BSS", new Expr() { IntResult = (UInt64)text.Count + (UInt64)data.Count + entry.Value.Item3 });
+
+                // and everything else
+                obj.Symbols.Add("__prog_end__", new Expr() { IntResult = (UInt64)text.Count + (UInt64)data.Count + bsslen });
 
                 // offset holes
                 foreach (HoleData hole in obj.TextHoles) hole.Address += (UInt32)entry.Value.Item1;
@@ -3093,13 +3150,7 @@ namespace CSX64
                     // otherwise define it as a local in obj
                     else obj.Symbols.Add(external, global_to_obj[external].Symbols[external]);
                 }
-
-                // inject pre-defined linker symbols
-                obj.Symbols.Add("__prog_end__", __prog_end__);
             }
-
-            // now we can define __prog_end__
-            __prog_end__.IntResult = (UInt64)text.Count + (UInt64)data.Count + bsslen;
 
             // -- patch things -- //
 
