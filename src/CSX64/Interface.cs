@@ -63,6 +63,10 @@ namespace CSX64
         /// Gets the total amount of memory the processor currently has access to
         /// </summary>
         public UInt64 MemorySize => (UInt64)Memory.Length;
+        /// <summary>
+        /// Gets the barrier before which memory is read-only
+        /// </summary>
+        public UInt64 ReadonlyBarrier { get; protected set; }
 
         /// <summary>
         /// Gets the current time as used by the assembler
@@ -90,16 +94,24 @@ namespace CSX64
         /// <summary>
         /// Initializes the computer for execution
         /// </summary>
-        /// <param name="data">the memory to load before starting execution (memory beyond this range is undefined)</param>
+        /// <param name="exe">the memory to load before starting execution (memory beyond this range is undefined)</param>
         /// <param name="args">the command line arguments to provide to the computer. pass null or empty array for none</param>
         /// <param name="stacksize">the amount of additional space to allocate for the program's stack</param>
-        public void Initialize(byte[] data, string[] args, UInt64 stacksize = 2 * 1024 * 1024)
+        public bool Initialize(byte[] exe, string[] args, UInt64 stacksize = 2 * 1024 * 1024)
         {
+            // read header
+            if (!exe.Read(0, 8, out UInt64 text_seglen) || !exe.Read(8, 8, out UInt64 bss_seglen)) return false;
+
             // get new memory array
-            Memory = new byte[(UInt64)data.Length + stacksize];
-            
+            Memory = new byte[(UInt64)exe.Length + bss_seglen + stacksize];
+
             // copy over the data
-            data.CopyTo(Memory, 0);
+            for (int i = 0; i < exe.Length; ++i) Memory[i] = exe[i];
+            // zero the bss segment
+            for (int i = 0; i < (int)bss_seglen; ++i) Memory[i + exe.Length] = 0;
+            
+            // set up readonly barrier
+            ReadonlyBarrier = text_seglen;
 
             // randomize registers
             foreach(Register reg in Registers)
@@ -152,6 +164,8 @@ namespace CSX64
             // also push $0 and $1 onto the stack so it'll work with stack calling conventions
             Push(Registers[0].x64);
             Push(Registers[1].x64);
+
+            return true;
         }
 
         /// <summary>

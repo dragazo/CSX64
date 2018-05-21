@@ -330,6 +330,40 @@ namespace CSX64
         {
             return str.Length > 0 && str[0] == ch;
         }
+        /// <summary>
+        /// Returns true if the string contains at least one occurrence of the specified character
+        /// </summary>
+        /// <param name="str">the string to test</param>
+        /// <param name="ch">the character to look for</param>
+        public static bool Contains(this string str, char ch)
+        {
+            for (int i = 0; i < str.Length; ++i)
+                if (str[i] == ch) return true;
+
+            return true;
+        }
+
+        /// <summary>
+        /// Writes a binary dump representation of the data to the console
+        /// </summary>
+        /// <param name="data">the data to dump</param>
+        public static void Dump(this byte[] data)
+        {
+            // make a header
+            Console.Write("           ");
+            for (int i = 0; i < 16; ++i) Console.Write($" {i:x} ");
+
+            // write the data
+            for (int i = 0; i < data.Length; ++i)
+            {
+                if (i % 16 == 0) Console.Write($"\n{i:x8} - ");
+
+                Console.Write($"{data[i]:x2} ");
+            }
+
+            // end with a new line
+            Console.WriteLine();
+        }
 
         // -- CSX64 encoding utilities -- //
 
