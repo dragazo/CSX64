@@ -992,7 +992,7 @@ namespace CSX64
         private const char RegisterPrefix = '$';
 
         private const string CurrentLineMacro = "@";
-        private const string LastStaticLabelMacro = "@@";
+        private const string StartOfSegMacro = "@@";
 
         private const string EmissionMultPrefix = "#";
         private const UInt64 EmissionMaxMultiplier = 1000000;
@@ -1058,7 +1058,7 @@ namespace CSX64
                 }
             }
 
-            public UInt64 current_line_pos; // value used for the current line macro
+            public UInt64 line_pos_in_seg; // holds index IN CURRENT SEGMENT of the current line
 
             public AsmSegment current_seg = AsmSegment.INVALID; // current segment
 
@@ -1409,18 +1409,21 @@ namespace CSX64
                         // mutate it
                         if (!MutateName(ref val)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse imm \"{token}\"\n-> {res.ErrorMsg}"); return false; }
 
-                        // if it's the current line position macro
+                        // if it's the current line macro
                         if (val == CurrentLineMacro)
                         {
-                            temp = new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Token = $"#{current_seg}" }, Right = new Expr() { IntResult = current_line_pos } };
-                        }
-                        // if it's the last static label macro
-                        else if (val == LastStaticLabelMacro)
-                        {
-                            // can't use this before there's a static label
-                            if (last_static_label == null) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Cannot use the last static label macro {LastStaticLabelMacro} before the first static label"); return false; }
+                            // must be in a segment
+                            if (current_seg == AsmSegment.INVALID) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to take an address outside of a segment"); return false; }
 
-                            temp = new Expr() { Token = last_static_label };
+                            temp = new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Token = $"#{current_seg}" }, Right = new Expr() { IntResult = line_pos_in_seg } };
+                        }
+                        // if it's the start of segment
+                        else if (val == StartOfSegMacro)
+                        {
+                            // must be in a segment
+                            if (current_seg == AsmSegment.INVALID) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to take an address outside of a segment"); return false; }
+
+                            temp = new Expr() { Token = $"#{current_seg}" };
                         }
                         // otherwise it's a normal value/symbol
                         else
@@ -2590,7 +2593,14 @@ namespace CSX64
             while (pos < code.Length)
             {
                 // update current line pos
-                args.current_line_pos = (UInt64)args.file.Text.Count;
+                switch (args.current_seg)
+                {
+                    case AsmSegment.TEXT: args.line_pos_in_seg = (UInt64)args.file.Text.Count; break;
+                    case AsmSegment.DATA: args.line_pos_in_seg = (UInt64)args.file.Data.Count; break;
+                    case AsmSegment.BSS: args.line_pos_in_seg = args.file.BssLen; break;
+
+                    // default does nothing - it is ill-formed to make an address outside of any segment
+                }
 
                 // find the next separator
                 for (end = pos; end < code.Length && code[end] != '\n' && code[end] != CommentChar; ++end) ;
@@ -2608,9 +2618,6 @@ namespace CSX64
                     // ensure it's not empty
                     if (args.label_def.Length == 0) return new AssembleResult(AssembleError.InvalidLabel, $"line {args.line}: Empty label encountered");
 
-                    // make sure we're in a segment
-                    if (args.current_seg == AsmSegment.INVALID) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Cannot define a label outside of a segment");
-
                     // if it's not a local, mark as last static label
                     if (!args.label_def.Contains('.')) args.last_static_label = args.label_def;
 
@@ -2623,8 +2630,11 @@ namespace CSX64
                     // ensure we don't define an external
                     if (file.ExternalSymbols.Contains(args.label_def)) return new AssembleResult(AssembleError.SymbolRedefinition, $"line {args.line}: Cannot define external symbol \"{args.label_def}\" internally");
 
+                    // must be in a segment
+                    if (args.current_seg == AsmSegment.INVALID) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Attempt to take an address outside of a segment");
+
                     // add the symbol as an address (uses illegal symbol #base, which will be defined at link time)
-                    file.Symbols.Add(args.label_def, new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Token = $"#{args.current_seg}" }, Right = new Expr() { IntResult = args.current_line_pos } });
+                    file.Symbols.Add(args.label_def, new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Token = $"#{args.current_seg}" }, Right = new Expr() { IntResult = args.line_pos_in_seg } });
                 }
 
                 // empty lines are ignored
@@ -2950,8 +2960,6 @@ namespace CSX64
             // resulting text segment (we don't know how large the resulting file will be, so it needs to be expandable) (sets aside space for header)
             List<byte> text = new List<byte>()
             {
-                0, 0, 0, 0, 0, 0, 0, 0, // length of text segment
-                0, 0, 0, 0, 0, 0, 0, 0, // length of bss segment
                 (byte)OPCode.CALL, 0x0c, 0, 0, 0, 0, 0, 0, 0, 0, // call    main         ; call main function
                 (byte)OPCode.MOV, 0x1e, 0x00,                    // mov     $1, $0       ; mov ret value to $1 for sys_exit
                 (byte)OPCode.XOR, 0x0e, 0x00,                    // xor     $0, $0       ; clear $0
@@ -3012,7 +3020,7 @@ namespace CSX64
             include_queue.Enqueue(main_obj);
 
             // add a hole for the call location of the header
-            main_obj.TextHoles.Add(new HoleData() { Address = 16 + 2 - (UInt32)text.Count, Size = 8, Expr = new Expr() { Token = "main" }, Line = -1 });
+            main_obj.TextHoles.Add(new HoleData() { Address = 2 - (UInt32)text.Count, Size = 8, Expr = new Expr() { Token = "main" }, Line = -1 });
 
             // -- merge things -- //
 
@@ -3129,14 +3137,16 @@ namespace CSX64
 
             // -- finalize things -- //
             
-            // copy data into out parameter
-            exe = new byte[(UInt64)text.Count + (UInt64)data.Count];
-            text.CopyTo(0, exe, 0, text.Count);
-            data.CopyTo(0, exe, text.Count, data.Count);
+            // allocate executable space (header + text + data)
+            exe = new byte[16 + (UInt64)text.Count + (UInt64)data.Count];
 
-            // write data header
-            exe.Write(0, 8, (UInt64)text.Count);
-            exe.Write(8, 8, bsslen);
+            // write header
+            exe.Write(0, 8, (UInt64)text.Count); // text segment length
+            exe.Write(8, 8, bsslen);             // bss segment length
+
+            // copy text and data
+            text.CopyTo(0, exe, 16, text.Count);
+            data.CopyTo(0, exe, 16 + text.Count, data.Count);
 
             // linked successfully
             return new LinkResult(LinkError.None, string.Empty);

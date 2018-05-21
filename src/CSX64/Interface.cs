@@ -66,7 +66,7 @@ namespace CSX64
         /// <summary>
         /// Gets the barrier before which memory is read-only
         /// </summary>
-        public UInt64 ReadonlyBarrier { get; protected set; }
+        public UInt64 TextBarrier { get; protected set; }
 
         /// <summary>
         /// Gets the current time as used by the assembler
@@ -102,24 +102,25 @@ namespace CSX64
             // read header
             if (!exe.Read(0, 8, out UInt64 text_seglen) || !exe.Read(8, 8, out UInt64 bss_seglen)) return false;
 
-            // get new memory array
-            Memory = new byte[(UInt64)exe.Length + bss_seglen + stacksize];
+            // get size of memory and make sure it's doable (C# arrays use 32-bit signed integers as indexers)
+            UInt64 size = (UInt64)exe.Length - 16 + bss_seglen + stacksize;
+            if (size > Int32.MaxValue) return false;
 
-            // copy over the data
-            for (int i = 0; i < exe.Length; ++i) Memory[i] = exe[i];
-            // zero the bss segment
-            for (int i = 0; i < (int)bss_seglen; ++i) Memory[i + exe.Length] = 0;
+            // get new memory array (does not include header)
+            Memory = new byte[size];
             
+            // copy over the text/data segments (not including header)
+            for (int i = 16; i < exe.Length; ++i) Memory[i - 16] = exe[i];
+            // zero the bss segment (should already be done by C# but this makes it more clear and explicit)
+            for (int i = 0; i < (int)bss_seglen; ++i) Memory[i + exe.Length - 16] = 0;
+            // randomize the heap/stack segments (C# won't let us create an uninitialized array and bit-zero is too safe - more realistic danger)
+            for (int i = exe.Length - 16 + (int)bss_seglen; i < Memory.Length; ++i) Memory[i] = (byte)Rand.Next();
+
             // set up readonly barrier
-            ReadonlyBarrier = text_seglen;
+            TextBarrier = text_seglen;
 
             // randomize registers
-            foreach(Register reg in Registers)
-            {
-                reg.x32 = (UInt64)Rand.Next();
-                reg.x64 <<= 32;
-                reg.x32 = (UInt64)Rand.Next();
-            }
+            foreach (Register reg in Registers) reg.x64 = Rand.NextUInt64();
             // randomize public flags
             Flags.SetPublicFlags((UInt64)Rand.Next());
 
@@ -296,6 +297,9 @@ namespace CSX64
             // parsing locations
             UInt64 op;
             bool flag;
+
+            // make sure we're in in the text segment
+            if (Pos >= TextBarrier) { Console.WriteLine($"{Pos} : {TextBarrier}"); Terminate(ErrorCode.AccessViolation); return false; }
 
             // fetch the instruction
             if (!GetMemAdv(1, out op)) return false;

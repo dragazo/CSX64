@@ -347,22 +347,55 @@ namespace CSX64
         /// Writes a binary dump representation of the data to the console
         /// </summary>
         /// <param name="data">the data to dump</param>
-        public static void Dump(this byte[] data)
+        /// <param name="start">the index at which to begin dumping</param>
+        /// <param name="count">the number of bytes to write</param>
+        public static void Dump(this byte[] data, int start, int count)
         {
             // make a header
             Console.Write("           ");
             for (int i = 0; i < 16; ++i) Console.Write($" {i:x} ");
 
-            // write the data
-            for (int i = 0; i < data.Length; ++i)
+            // if it's not starting on a new row
+            if (start % 16 != 0)
             {
-                if (i % 16 == 0) Console.Write($"\n{i:x8} - ");
+                // we need to write a line header
+                Console.Write($"\n{start - start % 16:x8} - ");
 
-                Console.Write($"{data[i]:x2} ");
+                // and tack on some white space
+                for (int i = 0; i < start % 16; ++i) Console.Write("   ");
+            }
+
+            // write the data
+            for (int i = 0; i < count; ++i)
+            {
+                // start of new row gets a line header
+                if ((start + i) % 16 == 0) Console.Write($"\n{start + i:x8} - ");
+
+                Console.Write($"{data[start + i]:x2} ");
             }
 
             // end with a new line
             Console.WriteLine();
+        }
+        /// <summary>
+        /// Writes a binary dump representation of the data to the console
+        /// </summary>
+        /// <param name="data">the data to dump</param>
+        /// <param name="start">the index at which to begin dumping</param>
+        public static void Dump(this byte[] data, int start) => data.Dump(start, data.Length - start);
+        /// <summary>
+        /// Writes a binary dump representation of the data to the console
+        /// </summary>
+        /// <param name="data">the data to dump</param>
+        public static void Dump(this byte[] data) => data.Dump(0, data.Length);
+
+        /// <summary>
+        /// Gets a random UInt64 value
+        /// </summary>
+        /// <param name="rand">random object to use</param>
+        public static UInt64 NextUInt64(this Random rand)
+        {
+            return ((UInt64)(UInt32)rand.Next() << 32) | (UInt32)rand.Next();
         }
 
         // -- CSX64 encoding utilities -- //

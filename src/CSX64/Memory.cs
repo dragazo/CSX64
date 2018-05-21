@@ -32,6 +32,9 @@ namespace CSX64
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
         public bool SetCString(UInt64 pos, string str)
         {
+            // make sure we're not in the text segment
+            if (pos < TextBarrier) { Terminate(ErrorCode.AccessViolation); return false; }
+
             // refer to utility function
             if (!Memory.WriteCString(pos, str)) { Terminate(ErrorCode.OutOfBounds); return false; }
 
@@ -536,6 +539,9 @@ namespace CSX64
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
         private bool SetMemRaw(UInt64 pos, UInt64 size, UInt64 val)
         {
+            // make sure we're not in the text segment
+            if (pos < TextBarrier) { Terminate(ErrorCode.AccessViolation); return false; }
+
             // refer to utility function
             if (!Memory.Write(pos, size, val)) { Terminate(ErrorCode.OutOfBounds); return false; }
 
