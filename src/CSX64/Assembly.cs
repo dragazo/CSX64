@@ -701,6 +701,7 @@ namespace CSX64
             // refer to helper
             return _FindPath(value, path);
         }
+
         /// <summary>
         /// Finds the value in the specified expression tree. Returns it on success, otherwise null
         /// </summary>
@@ -1035,6 +1036,12 @@ namespace CSX64
             "##TEXT", "##DATA", "##BSS",
             "__prog_end__"
         };
+        private static readonly List<string> PtrdiffBases = new List<string>()
+        {
+            "#TEXT", "#DATA", "#BSS",
+            "##TEXT", "##DATA", "##BSS",
+            "__prog_end__"
+        };
 
         /// <summary>
         /// Holds all the variables used during assembly
@@ -1044,32 +1051,23 @@ namespace CSX64
             // -- data -- //
 
             public ObjectFile file;
+
+            public UInt64 time;
+
+            public AsmSegment current_seg;
+            public AsmSegment done_segs;
+
             public int line;
+            public UInt64 line_pos_in_seg;
+
+            public string last_nonlocal_label; // string value of last non-local label
 
             public string label_def;
             public string op;
             public UInt64 sizecode;
             public string[] args; // must be array for ref params
 
-            private int last_static_label_index = -1; // unique index for static labels
-            private string _last_static_label;
-            public string last_static_label // string value of last static label
-            {
-                get => _last_static_label;
-                set
-                {
-                    _last_static_label = value;
-                    ++last_static_label_index;
-                }
-            }
-
-            public UInt64 line_pos_in_seg; // holds index IN CURRENT SEGMENT of the current line
-
-            public AsmSegment current_seg = AsmSegment.INVALID; // current segment
-
             public AssembleResult res;
-
-            public UInt64 time;
 
             // -- Assembly Functions -- //
 
@@ -1182,9 +1180,9 @@ namespace CSX64
 
                 // first char is underscore or letter
                 if (token[0] != '_' && !char.IsLetter(token[0])) return false;
-                // all other chars may additionally be numbers
+                // all other chars may additionally be numbers or periods
                 for (int i = 1; i < token.Length; ++i)
-                    if (token[i] != '_' && !char.IsLetterOrDigit(token[i])) return false;
+                    if (token[i] != '_' && token[i] != '.' && !char.IsLetterOrDigit(token[i])) return false;
 
                 return true;
             }
@@ -1197,12 +1195,11 @@ namespace CSX64
 
                     // local name can't be empty
                     if (!IsValidName(sub)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: \"{label}\" is not a legal local symbol name"); return false; }
-                    // can't make a local label before any non-local ones exist
-                    if (last_static_label == null) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: Cannot define a local symbol before the first static label"); return false; }
+                    // can't make a local symbol before any non-local ones exist
+                    if (last_nonlocal_label == null) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: Cannot define a local symbol before the first non-local symbol in the segment"); return false; }
 
                     // mutate the label
-                    //label = $"__local_{time:x16}_{last_static_label}_{sub}";
-                    label = $"L{last_static_label_index:x}_{(time & 0xffff):x}_{sub}";
+                    label = $"{last_nonlocal_label}{label}";
                 }
 
                 return true;
@@ -1213,6 +1210,7 @@ namespace CSX64
                 // reserve only works in the bss segment
                 if (current_seg != AsmSegment.BSS) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to reserve space outside of the BSS segment"); return false; }
 
+                // reserve the space
                 file.BssLen += (UInt32)size;
                 return true;
             }
@@ -1591,19 +1589,17 @@ namespace CSX64
                 expr.PopulateAddSub(add, sub);
 
                 // perform ptrdiff reduction
-                foreach (string seg_name in Enum.GetNames(typeof(AsmSegment)))
+                foreach (string seg_name in PtrdiffBases)
                 {
-                    string _base = $"#{seg_name}";
-
                     for (int i = 0, j = 0; ; ++i, ++j)
                     {
                         // wind i up to next add label
-                        for (; i < add.Count && !TryExtractPtrVal(add[i], out a, _base); ++i) ;
+                        for (; i < add.Count && !TryExtractPtrVal(add[i], out a, seg_name); ++i) ;
                         // if this exceeds bounds, break
                         if (i == add.Count) break;
 
                         // wind j up to next sub label
-                        for (; j < sub.Count && !TryExtractPtrVal(sub[j], out b, _base); ++j) ;
+                        for (; j < sub.Count && !TryExtractPtrVal(sub[j], out b, seg_name); ++j) ;
                         // if this exceeds bounds, break
                         if (j == sub.Count) break;
 
@@ -1719,6 +1715,7 @@ namespace CSX64
 
                 return true;
             }
+
             public bool TryParseSizecode(string token, out UInt64 val)
             {
                 // size code must be instant imm
@@ -1791,7 +1788,7 @@ namespace CSX64
                     {
                         // add in a multiplier of 1
                         list[0].OP = Expr.OPs.Mul;
-                        list[0].Left = new Expr() { Token = "1" };
+                        list[0].Left = new Expr() { IntResult = 1 };
                         list[0].Right = new Expr() { Token = list[0].Token };
 
                         // insert new register location as beginning of path
@@ -1902,9 +1899,7 @@ namespace CSX64
                     }
 
                     // remove the register section from the expression (replace with integral 0)
-                    list[1].OP = Expr.OPs.None;
-                    list[1].Left = list[1].Right = null;
-                    list[1].Token = "0";
+                    list[1].IntResult = 0;
 
                     m += val; // add extracted mult to total mult
                     list.Clear(); // clear list for next pass
@@ -1912,7 +1907,7 @@ namespace CSX64
 
                 // -- final task: get mult code and negative flag -- //
 
-                // if m is pretty big, it's negative
+                // if m is pretty big (TM), it's negative
                 if (m > 64) { m = ~m + 1; neg = true; } else neg = false;
                 // only other thing is transforming the multiplier into a mult code
                 switch (m)
@@ -1949,7 +1944,7 @@ namespace CSX64
                 UInt64 r1 = 0, m1 = 0, r2 = 0, m2 = 0; // final register info
                 bool n1 = false, n2 = false;
 
-                string preface = $"__reg_{time:x16}"; // preface used for registers
+                string preface = $"__reg_{time:x16}_"; // preface used for registers (to make sure they probably won't be defined symbols)
                 string err = string.Empty; // evaluation error
 
                 List<UInt64> regs = new List<UInt64>(); // the registers found in the expression
@@ -1993,15 +1988,17 @@ namespace CSX64
                         // parse this as a register
                         if (!TryParseRegister(reg, out temp)) return false;
 
-                        // put it in a register slot
+                        // put it in a register slot if it doesn't already have an entry there
                         if (!regs.Contains(temp)) regs.Add(temp);
 
                         // modify the register label in the expression to be a legal symbol name
-                        token = $"{token.Substring(0, pos)}{preface}_{temp}{token.Substring(end)}";
-                    }
+                        token = $"{token.Substring(0, pos)}{preface}{temp:x}{token.Substring(end)}";
 
-                    // set start of next search after end
-                    pos = end;
+                        // start of next search is bumped up by length of inserted token replacement
+                        pos += preface.Length + 1;
+                    }
+                    // if it wasn't a register, set start of next search after end of token
+                    else pos = end;
                 }
 
                 // turn into an expression
@@ -2011,7 +2008,7 @@ namespace CSX64
                 foreach (UInt64 reg in regs)
                 {
                     // get the register data
-                    if (!TryParseAddressReg($"{preface}_{reg}", ref hole, out temp, out btemp)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to extract register data\n-> {res.ErrorMsg}"); return false; }
+                    if (!TryParseAddressReg($"{preface}{reg:x}", ref hole, out temp, out btemp)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to extract register data\n-> {res.ErrorMsg}"); return false; }
 
                     // if the multiplier was nonzero, the register is really being used
                     if (temp != 0)
@@ -2086,6 +2083,36 @@ namespace CSX64
 
             // -- misc -- //
 
+            public bool TryProcessLabel()
+            {
+                if (label_def != null)
+                {
+                    // ensure it's not empty
+                    if (label_def.Length == 0) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: Empty label encountered"); return false; }
+
+                    // if it's not a local, mark as last non-local label
+                    if (label_def[0] != '.') last_nonlocal_label = label_def;
+
+                    // mutate and test result for legality
+                    if (!MutateName(ref label_def)) return false;
+                    if (!IsValidName(label_def)) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: Symbol name \"{label_def}\" is invalid"); return false; }
+
+                    // ensure we don't redefine a symbol
+                    if (file.Symbols.ContainsKey(label_def)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Symbol \"{label_def}\" was already defined"); return false; }
+                    // ensure we don't define an external
+                    if (file.ExternalSymbols.Contains(label_def)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Cannot define external symbol \"{label_def}\" internally"); return false; }
+
+                    // must be in a segment unless op is EQU
+                    if (current_seg == AsmSegment.INVALID && op.ToUpper() != "EQU")
+                    { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to take an address outside of a segment"); return false; }
+
+                    // add the symbol as an address (uses illegal symbol #base, which will be defined at link time)
+                    file.Symbols.Add(label_def, new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Token = $"#{current_seg}" }, Right = new Expr() { IntResult = line_pos_in_seg } });
+                }
+
+                return true;
+            }
+
             public bool TryProcessGlobal()
             {
                 if (args.Length == 0) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: GLOBAL expected at least one symbol to export"); return false; }
@@ -2094,7 +2121,6 @@ namespace CSX64
                 {
                     // special error message for using global on local labels
                     if (symbol[0] == '.') { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Cannot export local symbols"); return false; }
-
                     // test name for legality
                     if (!IsValidName(symbol)) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: Invalid symbol name \"{symbol}\""); return false; }
 
@@ -2117,9 +2143,11 @@ namespace CSX64
                 {
                     // special error message for using extern on local labels
                     if (symbol[0] == '.') { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Cannot import local symbols"); return false; }
-
                     // test name for legality
                     if (!IsValidName(symbol)) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: Invalid symbol name \"{symbol}\""); return false; }
+
+                    // ensure we don't extern a symbol that already exists
+                    if (file.Symbols.ContainsKey(label_def)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Cannot define symbol \"{label_def}\" (defined internally) as external"); return false; }
 
                     // don't add to external list twice
                     if (file.ExternalSymbols.Contains(symbol)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Attempt to import symbol \"{symbol}\" multiple times"); return false; }
@@ -2203,11 +2231,8 @@ namespace CSX64
                 // make sure it's not floating
                 if (floating) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: RES value cannot be floating-point"); return false; }
 
-                // make sure we're in the bss segment
-                if (current_seg != AsmSegment.BSS) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: RES cannot be used outside of the BSS segment"); return false; }
-
-                // add to bss len
-                file.BssLen += (UInt32)(count * size);
+                // reserve the space
+                if (!TryReserve(count * size)) return false;
 
                 return true;
             }
@@ -2217,10 +2242,10 @@ namespace CSX64
                 if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: EQU expected 1 arg"); return false; }
 
                 // get the expression
-                if (!TryParseImm(args[0], out Expr expr)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: DEF expected an expression as second arg\n-> {res.ErrorMsg}"); return false; }
+                if (!TryParseImm(args[0], out Expr expr)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: EQU expected an expression\n-> {res.ErrorMsg}"); return false; }
 
                 // make sure we have a label
-                if (label_def == null) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: EQU requires a label"); return false; }
+                if (label_def == null) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: EQU requires a label to attach the expression to"); return false; }
 
                 // redefine this line's label to expr
                 file.Symbols[label_def] = expr;
@@ -2232,14 +2257,25 @@ namespace CSX64
             {
                 if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: SEGMENT directive expected 1 arg"); return false; }
 
+                // get the segment we're going to
                 switch (args[0].ToUpper())
                 {
-                    case ".TEXT": current_seg = AsmSegment.TEXT; return true;
-                    case ".DATA": current_seg = AsmSegment.DATA; return true;
-                    case ".BSS": current_seg = AsmSegment.BSS; return true;
+                    case ".TEXT": current_seg = AsmSegment.TEXT; break;
+                    case ".DATA": current_seg = AsmSegment.DATA; break;
+                    case ".BSS": current_seg = AsmSegment.BSS; break;
 
                     default: res = new AssembleResult(AssembleError.ArgError, $"line {line}: Unknown segment \"{args[0]}\""); return false;
                 }
+
+                // if this segment has already been done, fail
+                if ((done_segs & current_seg) != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to redeclare the {current_seg} segment"); return false; }
+                // add to list of completed segments
+                done_segs |= current_seg;
+
+                // we don't want to have cross-segment local symbols
+                last_nonlocal_label = null;
+
+                return true;
             }
 
             // -- op formats -- //
@@ -2493,7 +2529,7 @@ namespace CSX64
                 if (!TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} expected address as second arg\n-> {res.ErrorMsg}"); return false; }
 
                 if (!TryAppendVal(1, (UInt64)op)) return false;
-                if (!TryAppendVal(1, dest)) return false;
+                if (!TryAppendVal(1, (dest << 4) | (sizecode << 2))) return false;
                 if (!TryAppendAddress(a, b, ptr_base)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
 
                 return true;
@@ -2566,19 +2602,20 @@ namespace CSX64
                     // only 64-bit and 32-bit are supported
                     switch (data.Size)
                     {
-                        case 8: res.Write(data.Address, 8, val); break;
-                        case 4: res.Write(data.Address, 4, FloatAsUInt64((float)AsDouble(val))); break;
+                        case 8: if (!res.Write(data.Address, 8, val)) { err = $"line {data.Line}: Error writing value"; return PatchError.Error; } break;
+                        case 4: if (!res.Write(data.Address, 4, FloatAsUInt64((float)AsDouble(val)))) { err = $"line {data.Line}: Error writing value"; return PatchError.Error; } break;
 
                         default: err = $"line {data.Line}: Attempt to use unsupported floating-point size"; return PatchError.Error;
                     }
                 }
                 // otherwise it's integral
-                else res.Write(data.Address, data.Size, val);
-            }
-            else { err = $"line {data.Line}: Failed to evaluate expression\n-> {err}"; return PatchError.Unevaluated; }
+                else if (!res.Write(data.Address, data.Size, val)) { err = $"line {data.Line}: Error writing value"; return PatchError.Error; }
 
-            // successfully patched
-            return PatchError.None;
+                // successfully patched
+                return PatchError.None;
+            }
+            // otherwise it's unevaluated
+            else { err = $"line {data.Line}: Failed to evaluate expression\n-> {err}"; return PatchError.Unevaluated; }
         }
 
         /// <summary>
@@ -2588,16 +2625,21 @@ namespace CSX64
         /// <param name="file">the resulting object file if no errors occur</param>
         public static AssembleResult Assemble(string code, out ObjectFile file)
         {
-            file = new ObjectFile();
             AssembleArgs args = new AssembleArgs()
             {
-                file = file,
+                file = file = new ObjectFile(),
+
+                time = Computer.Time,
+
+                current_seg = AsmSegment.INVALID,
+                done_segs = AsmSegment.INVALID,
+
                 line = 0,
+                line_pos_in_seg = 0,
 
-                last_static_label = null,
+                last_nonlocal_label = null,
+
                 res = default(AssembleResult),
-
-                time = Computer.Time
             };
 
             // create the table of predefined symbols
@@ -2651,30 +2693,7 @@ namespace CSX64
                     for (; end < code.Length && code[end] != '\n'; ++end) ;
 
                 // process marked label
-                if (args.label_def != null)
-                {
-                    // ensure it's not empty
-                    if (args.label_def.Length == 0) return new AssembleResult(AssembleError.InvalidLabel, $"line {args.line}: Empty label encountered");
-
-                    // if it's not a local, mark as last static label
-                    if (!args.label_def.Contains('.')) args.last_static_label = args.label_def;
-
-                    // mutate and test result for legality
-                    if (!args.MutateName(ref args.label_def)) return args.res;
-                    if (!AssembleArgs.IsValidName(args.label_def)) return new AssembleResult(AssembleError.InvalidLabel, $"line {args.line}: Symbol name \"{args.label_def}\" is invalid");
-
-                    // ensure we don't redefine a symbol
-                    if (file.Symbols.ContainsKey(args.label_def)) return new AssembleResult(AssembleError.SymbolRedefinition, $"line {args.line}: Symbol \"{args.label_def}\" was already defined");
-                    // ensure we don't define an external
-                    if (file.ExternalSymbols.Contains(args.label_def)) return new AssembleResult(AssembleError.SymbolRedefinition, $"line {args.line}: Cannot define external symbol \"{args.label_def}\" internally");
-
-                    // must be in a segment unless op is EQU
-                    if (args.current_seg == AsmSegment.INVALID && args.op.ToUpper() != "EQU")
-                        return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Attempt to take an address outside of a segment");
-
-                    // add the symbol as an address (uses illegal symbol #base, which will be defined at link time)
-                    file.Symbols.Add(args.label_def, new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Token = $"#{args.current_seg}" }, Right = new Expr() { IntResult = args.line_pos_in_seg } });
-                }
+                if (!args.TryProcessLabel()) return args.res;
 
                 // empty lines are ignored
                 if (args.op != string.Empty)
@@ -2858,8 +2877,6 @@ namespace CSX64
                                 // set new args for the unary version
                                 args.args = new string[] { args.args[0] };
                                 if (!args.TryProcessUnaryOp(OPCode.CMPZ)) return args.res;
-
-                                Console.WriteLine($"line {args.line}: took unary route");
                             }
                             // otherwise normal binary
                             else if (!args.TryProcessBinaryOp(OPCode.CMP)) return args.res;
@@ -3084,11 +3101,13 @@ namespace CSX64
                 // add it to the set of included files
                 included.Add(obj, new Tuple<UInt64, UInt64, UInt64>((UInt64)text.Count, (UInt64)data.Count, bsslen));
 
-                // append text segment
+                // offset holes to be relative to the start of their total segment (not relative to resulting file)
+                foreach (HoleData hole in obj.TextHoles) hole.Address += (UInt32)text.Count;
+                foreach (HoleData hole in obj.DataHoles) hole.Address += (UInt32)data.Count;
+
+                // append segments
                 for (int i = 0; i < obj.Text.Count; ++i) text.Add(obj.Text[i]);
-                // append data segment
                 for (int i = 0; i < obj.Data.Count; ++i) data.Add(obj.Data[i]);
-                // append bss segment
                 bsslen += obj.BssLen;
 
                 // for each external symbol
@@ -3109,7 +3128,7 @@ namespace CSX64
                 }
             }
 
-            // now that we're done merging we need to define segment offsets
+            // now that we're done merging we need to define segment offsets in the result
             foreach (var entry in included)
             {
                 // alias the object file
@@ -3127,10 +3146,6 @@ namespace CSX64
 
                 // and everything else
                 obj.Symbols.Add("__prog_end__", new Expr() { IntResult = (UInt64)text.Count + (UInt64)data.Count + bsslen });
-
-                // offset holes
-                foreach (HoleData hole in obj.TextHoles) hole.Address += (UInt32)entry.Value.Item1;
-                foreach (HoleData hole in obj.DataHoles) hole.Address += (UInt32)text.Count + (UInt32)entry.Value.Item2;
 
                 // for each global symbol
                 foreach (string global in obj.GlobalSymbols)

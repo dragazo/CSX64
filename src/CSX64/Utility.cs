@@ -340,7 +340,7 @@ namespace CSX64
             for (int i = 0; i < str.Length; ++i)
                 if (str[i] == ch) return true;
 
-            return true;
+            return false;
         }
 
         /// <summary>

@@ -299,7 +299,7 @@ namespace CSX64
             bool flag;
 
             // make sure we're in in the text segment
-            if (Pos >= TextBarrier) { Console.WriteLine($"{Pos} : {TextBarrier}"); Terminate(ErrorCode.AccessViolation); return false; }
+            if (Pos >= TextBarrier) { Terminate(ErrorCode.AccessViolation); return false; }
 
             // fetch the instruction
             if (!GetMemAdv(1, out op)) return false;
