@@ -26,8 +26,8 @@ namespace CSX64
             // attempt to read from the file into memory
             try
             {
-                // make sure we're not in the text segment
-                if (Registers[2].x64 < TextBarrier) { Terminate(ErrorCode.AccessViolation); return false; }
+                // make sure we're not in the readonly segment
+                if (Registers[2].x64 < ReadonlyBarrier) { Terminate(ErrorCode.AccessViolation); return false; }
 
                 // read from the file
                 int n = fd.BaseStream.Read(Memory, (int)Registers[2].x64, (int)Registers[3].x64);

@@ -27,7 +27,7 @@ namespace CSX64
     }
     internal enum AsmSegment
     {
-        INVALID = 0, TEXT = 1, DATA = 2, BSS = 4
+        INVALID = 0, TEXT = 1, RODATA = 2, DATA = 4, BSS = 8
     }
 
     public struct AssembleResult
@@ -89,6 +89,10 @@ namespace CSX64
         /// </summary>
         internal List<HoleData> TextHoles = new List<HoleData>();
         /// <summary>
+        /// The holes in the rodata segment that need to be patched
+        /// </summary>
+        internal List<HoleData> RodataHoles = new List<HoleData>();
+        /// <summary>
         /// The holes in the data segment that need to be patched
         /// </summary>
         internal List<HoleData> DataHoles = new List<HoleData>();
@@ -97,6 +101,10 @@ namespace CSX64
         /// The contents of the text segment
         /// </summary>
         internal List<byte> Text = new List<byte>();
+        /// <summary>
+        /// The contents of the rodata segment
+        /// </summary>
+        internal List<byte> Rodata = new List<byte>();
         /// <summary>
         /// The contents of the data segment
         /// </summary>
@@ -149,6 +157,11 @@ namespace CSX64
             foreach (HoleData hole in obj.TextHoles)
                 HoleData.WriteTo(writer, hole);
 
+            // write the rodata holes (length-prefixed)
+            writer.Write(obj.RodataHoles.Count);
+            foreach (HoleData hole in obj.RodataHoles)
+                HoleData.WriteTo(writer, hole);
+
             // write the data holes (length-prefixed)
             writer.Write(obj.DataHoles.Count);
             foreach (HoleData hole in obj.DataHoles)
@@ -157,6 +170,10 @@ namespace CSX64
             // write the text segment (length-prefixed)
             writer.Write(obj.Text.Count);
             writer.Write(obj.Text.ToArray()); // ToArray() costs an O(n) copy, but still beats an equal number of function calls
+
+            // write the rodata segment (length-prefixed)
+            writer.Write(obj.Rodata.Count);
+            writer.Write(obj.Rodata.ToArray()); // ToArray() costs an O(n) copy, but still beats an equal number of function calls
 
             // write the data segment (length-prefixed)
             writer.Write(obj.Data.Count);
@@ -203,6 +220,14 @@ namespace CSX64
                 obj.TextHoles.Add(hole);
             }
 
+            // read the rodata holes (length-prefixed)
+            count = reader.ReadInt32();
+            for (int i = 0; i < count; ++i)
+            {
+                HoleData.ReadFrom(reader, out HoleData hole);
+                obj.RodataHoles.Add(hole);
+            }
+
             // read the data holes (length-prefixed)
             count = reader.ReadInt32();
             for (int i = 0; i < count; ++i)
@@ -216,6 +241,12 @@ namespace CSX64
             byte[] raw = new byte[count];
             if (reader.Read(raw, 0, count) != count) throw new FormatException("Object file was corrupted");
             obj.Text = raw.ToList();
+
+            // read the rodata (length-prefixed)
+            count = reader.ReadInt32();
+            raw = new byte[count];
+            if (reader.Read(raw, 0, count) != count) throw new FormatException("Object file was corrupted");
+            obj.Rodata = raw.ToList();
 
             // read the data (length-prefixed)
             count = reader.ReadInt32();
@@ -1032,14 +1063,8 @@ namespace CSX64
 
         private static readonly List<string> VerifyLegalExpressionIgnores = new List<string>()
         {
-            "#TEXT", "#DATA", "#BSS",
-            "##TEXT", "##DATA", "##BSS",
-            "__prog_end__"
-        };
-        private static readonly List<string> PtrdiffBases = new List<string>()
-        {
-            "#TEXT", "#DATA", "#BSS",
-            "##TEXT", "##DATA", "##BSS",
+            "#TEXT", "#RODATA", "#DATA", "#BSS",
+            "##TEXT", "##RODATA", "##DATA", "##BSS",
             "__prog_end__"
         };
 
@@ -1220,6 +1245,7 @@ namespace CSX64
                 {
                     // text and data segments are writable
                     case AsmSegment.TEXT: file.Text.Append(size, val); return true;
+                    case AsmSegment.RODATA: file.Rodata.Append(size, val); return true;
                     case AsmSegment.DATA: file.Data.Append(size, val); return true;
 
                     // others are not
@@ -1252,6 +1278,7 @@ namespace CSX64
                 switch (current_seg)
                 {
                     case AsmSegment.TEXT: return TryAppendExpr(size, expr, file.TextHoles, file.Text);
+                    case AsmSegment.RODATA: return TryAppendExpr(size, expr, file.RodataHoles, file.Rodata);
                     case AsmSegment.DATA: return TryAppendExpr(size, expr, file.DataHoles, file.Data);
 
                     default: res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to write to the {current_seg} segment"); return false;
@@ -1588,8 +1615,8 @@ namespace CSX64
                 // populate lists
                 expr.PopulateAddSub(add, sub);
 
-                // perform ptrdiff reduction
-                foreach (string seg_name in PtrdiffBases)
+                // perform ptrdiff reduction on anything defined by the linker
+                foreach (string seg_name in VerifyLegalExpressionIgnores)
                 {
                     for (int i = 0, j = 0; ; ++i, ++j)
                     {
@@ -2261,6 +2288,7 @@ namespace CSX64
                 switch (args[0].ToUpper())
                 {
                     case ".TEXT": current_seg = AsmSegment.TEXT; break;
+                    case ".RODATA": current_seg = AsmSegment.RODATA; break;
                     case ".DATA": current_seg = AsmSegment.DATA; break;
                     case ".BSS": current_seg = AsmSegment.BSS; break;
 
@@ -2676,6 +2704,7 @@ namespace CSX64
                 switch (args.current_seg)
                 {
                     case AsmSegment.TEXT: args.line_pos_in_seg = (UInt64)args.file.Text.Count; break;
+                    case AsmSegment.RODATA: args.line_pos_in_seg = (UInt64)args.file.Rodata.Count; break;
                     case AsmSegment.DATA: args.line_pos_in_seg = (UInt64)args.file.Data.Count; break;
                     case AsmSegment.BSS: args.line_pos_in_seg = args.file.BssLen; break;
 
@@ -2963,6 +2992,17 @@ namespace CSX64
                     default: throw new ArgumentException("Unknown patch error encountered");
                 }
             }
+            for (int i = file.RodataHoles.Count - 1; i >= 0; --i)
+            {
+                switch (TryPatchHole(file.Rodata, file.Symbols, file.RodataHoles[i], ref err))
+                {
+                    case PatchError.None: file.RodataHoles.RemoveAt(i); break; // remove the hole if we solved it
+                    case PatchError.Unevaluated: break;
+                    case PatchError.Error: return new AssembleResult(AssembleError.ArgError, err);
+
+                    default: throw new ArgumentException("Unknown patch error encountered");
+                }
+            }
             for (int i = file.DataHoles.Count - 1; i >= 0; --i)
             {
                 switch (TryPatchHole(file.Data, file.Symbols, file.DataHoles[i], ref err))
@@ -2989,11 +3029,8 @@ namespace CSX64
                     elim_symbols.Add(entry.Key);
                 }
             }
-            // for each symbol we can eliminate
-            foreach (string elim in elim_symbols)
-            {
-                file.Symbols.Remove(elim);
-            }
+            // remove all the symbols we can eliminate
+            foreach (string elim in elim_symbols) file.Symbols.Remove(elim);
 
             // -- finalize -- //
 
@@ -3026,7 +3063,7 @@ namespace CSX64
 
             // -- define things -- //
 
-            // resulting text segment (we don't know how large the resulting file will be, so it needs to be expandable) (sets aside space for header)
+            // create data segments (we don't know how large the resulting file will be, so it needs to be expandable) (write header to text segment)
             List<byte> text = new List<byte>()
             {
                 (byte)OPCode.CALL, 0x0c, 0, 0, 0, 0, 0, 0, 0, 0, // call    main         ; call main function
@@ -3035,9 +3072,8 @@ namespace CSX64
                 (byte)OPCode.MOV, 0x00, (byte)SyscallCode.Exit,  // mov:8   $0, sys_exit ; load sys_exit (bypasses endianness by only using low byte)
                 (byte)OPCode.SYSCALL                             // syscall              ; perform sys_exit to set error code and stop execution
             };
-            // resulting data segment
+            List<byte> rodata = new List<byte>();
             List<byte> data = new List<byte>();
-            // resulting length of bss segment
             UInt64 bsslen = 0;
 
             // a table for relating global symbols to their object file
@@ -3046,7 +3082,7 @@ namespace CSX64
             // the queue of object files that need to be added to the executable
             var include_queue = new Queue<ObjectFile>();
             // a table for relating included object files to their beginning positions in the resulting binary (text, data, bss) tuples
-            var included = new Dictionary<ObjectFile, Tuple<UInt64, UInt64, UInt64>>();
+            var included = new Dictionary<ObjectFile, Tuple<UInt64, UInt64, UInt64, UInt64>>();
 
             // parsing locations for evaluation
             UInt64 _res;
@@ -3099,14 +3135,16 @@ namespace CSX64
                 obj.Clean = false;
 
                 // add it to the set of included files
-                included.Add(obj, new Tuple<UInt64, UInt64, UInt64>((UInt64)text.Count, (UInt64)data.Count, bsslen));
-
+                included.Add(obj, new Tuple<UInt64, UInt64, UInt64, UInt64>((UInt64)text.Count, (UInt64)rodata.Count, (UInt64)data.Count, bsslen));
+                
                 // offset holes to be relative to the start of their total segment (not relative to resulting file)
                 foreach (HoleData hole in obj.TextHoles) hole.Address += (UInt32)text.Count;
+                foreach (HoleData hole in obj.RodataHoles) hole.Address += (UInt32)rodata.Count;
                 foreach (HoleData hole in obj.DataHoles) hole.Address += (UInt32)data.Count;
 
                 // append segments
                 for (int i = 0; i < obj.Text.Count; ++i) text.Add(obj.Text[i]);
+                for (int i = 0; i < obj.Rodata.Count; ++i) rodata.Add(obj.Rodata[i]);
                 for (int i = 0; i < obj.Data.Count; ++i) data.Add(obj.Data[i]);
                 bsslen += obj.BssLen;
 
@@ -3136,16 +3174,18 @@ namespace CSX64
 
                 // define the segment offsets
                 obj.Symbols.Add("##TEXT", new Expr() { IntResult = 0 });
-                obj.Symbols.Add("##DATA", new Expr() { IntResult = (UInt64)text.Count });
-                obj.Symbols.Add("##BSS", new Expr() { IntResult = (UInt64)text.Count + (UInt64)data.Count });
+                obj.Symbols.Add("##RODATA", new Expr() { IntResult = (UInt64)text.Count });
+                obj.Symbols.Add("##DATA", new Expr() { IntResult = (UInt64)text.Count + (UInt64)rodata.Count });
+                obj.Symbols.Add("##BSS", new Expr() { IntResult = (UInt64)text.Count + (UInt64)rodata.Count + (UInt64)data.Count });
 
                 // and file-scope segment offsets
                 obj.Symbols.Add("#TEXT", new Expr() { IntResult = entry.Value.Item1 });
-                obj.Symbols.Add("#DATA", new Expr() { IntResult = (UInt64)text.Count + entry.Value.Item2 });
-                obj.Symbols.Add("#BSS", new Expr() { IntResult = (UInt64)text.Count + (UInt64)data.Count + entry.Value.Item3 });
+                obj.Symbols.Add("#RODATA", new Expr() { IntResult = (UInt64)text.Count + entry.Value.Item2 });
+                obj.Symbols.Add("#DATA", new Expr() { IntResult = (UInt64)text.Count + (UInt64)rodata.Count + entry.Value.Item3 });
+                obj.Symbols.Add("#BSS", new Expr() { IntResult = (UInt64)text.Count + (UInt64)rodata.Count + (UInt64)data.Count + entry.Value.Item4 });
 
                 // and everything else
-                obj.Symbols.Add("__prog_end__", new Expr() { IntResult = (UInt64)text.Count + (UInt64)data.Count + bsslen });
+                obj.Symbols.Add("__prog_end__", new Expr() { IntResult = (UInt64)text.Count + (UInt64)rodata.Count + (UInt64)data.Count + bsslen });
 
                 // for each global symbol
                 foreach (string global in obj.GlobalSymbols)
@@ -3175,7 +3215,7 @@ namespace CSX64
                 // alias object file
                 ObjectFile obj = entry.Key;
 
-                // patch all the text holes
+                // patch all the holes
                 foreach (HoleData hole in obj.TextHoles)
                 {
                     switch (TryPatchHole(text, obj.Symbols, hole, ref _err))
@@ -3187,7 +3227,17 @@ namespace CSX64
                         default: throw new ArgumentException("Unknown patch error encountered");
                     }
                 }
-                // patch all the data holes
+                foreach (HoleData hole in obj.RodataHoles)
+                {
+                    switch (TryPatchHole(rodata, obj.Symbols, hole, ref _err))
+                    {
+                        case PatchError.None: break;
+                        case PatchError.Unevaluated: return new LinkResult(LinkError.MissingSymbol, _err);
+                        case PatchError.Error: return new LinkResult(LinkError.FormatError, _err);
+
+                        default: throw new ArgumentException("Unknown patch error encountered");
+                    }
+                }
                 foreach (HoleData hole in obj.DataHoles)
                 {
                     switch (TryPatchHole(data, obj.Symbols, hole, ref _err))
@@ -3204,15 +3254,18 @@ namespace CSX64
             // -- finalize things -- //
             
             // allocate executable space (header + text + data)
-            exe = new byte[16 + (UInt64)text.Count + (UInt64)data.Count];
+            exe = new byte[32 + (UInt64)text.Count + (UInt64)rodata.Count + (UInt64)data.Count];
 
-            // write header
-            exe.Write(0, 8, (UInt64)text.Count); // text segment length
-            exe.Write(8, 8, bsslen);             // bss segment length
+            // write header (length of each segment)
+            exe.Write(0, 8, (UInt64)text.Count);
+            exe.Write(8, 8, (UInt64)rodata.Count);
+            exe.Write(16, 8, (UInt64)data.Count);
+            exe.Write(24, 8, bsslen);
 
             // copy text and data
-            text.CopyTo(0, exe, 16, text.Count);
-            data.CopyTo(0, exe, 16 + text.Count, data.Count);
+            text.CopyTo(0, exe, 32, text.Count);
+            rodata.CopyTo(0, exe, 32 + text.Count, rodata.Count);
+            data.CopyTo(0, exe, 32 + text.Count + rodata.Count, data.Count);
 
             // linked successfully
             return new LinkResult(LinkError.None, string.Empty);

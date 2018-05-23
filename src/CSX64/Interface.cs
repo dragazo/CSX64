@@ -63,10 +63,15 @@ namespace CSX64
         /// Gets the total amount of memory the processor currently has access to
         /// </summary>
         public UInt64 MemorySize => (UInt64)Memory.Length;
+
+        /// <summary>
+        /// Gets the barrier before which memory is executable
+        /// </summary>
+        public UInt64 ExeBarrier { get; protected set; }
         /// <summary>
         /// Gets the barrier before which memory is read-only
         /// </summary>
-        public UInt64 TextBarrier { get; protected set; }
+        public UInt64 ReadonlyBarrier { get; protected set; }
 
         /// <summary>
         /// Gets the current time as used by the assembler
@@ -100,24 +105,26 @@ namespace CSX64
         public bool Initialize(byte[] exe, string[] args, UInt64 stacksize = 2 * 1024 * 1024)
         {
             // read header
-            if (!exe.Read(0, 8, out UInt64 text_seglen) || !exe.Read(8, 8, out UInt64 bss_seglen)) return false;
+            if (!exe.Read(0, 8, out UInt64 text_seglen) || !exe.Read(8, 8, out UInt64 rodata_seglen)
+                || !exe.Read(16, 8, out UInt64 data_seglen) || !exe.Read(24, 8, out UInt64 bss_seglen)) return false;
 
             // get size of memory and make sure it's doable (C# arrays use 32-bit signed integers as indexers)
-            UInt64 size = (UInt64)exe.Length - 16 + bss_seglen + stacksize;
+            UInt64 size = (UInt64)exe.Length - 32 + bss_seglen + stacksize;
             if (size > Int32.MaxValue) return false;
 
             // get new memory array (does not include header)
             Memory = new byte[size];
             
-            // copy over the text/data segments (not including header)
-            for (int i = 16; i < exe.Length; ++i) Memory[i - 16] = exe[i];
+            // copy over the text/rodata/data segments (not including header)
+            for (int i = 32; i < exe.Length; ++i) Memory[i - 32] = exe[i];
             // zero the bss segment (should already be done by C# but this makes it more clear and explicit)
-            for (int i = 0; i < (int)bss_seglen; ++i) Memory[i + exe.Length - 16] = 0;
+            for (int i = 0; i < (int)bss_seglen; ++i) Memory[i + exe.Length - 32] = 0;
             // randomize the heap/stack segments (C# won't let us create an uninitialized array and bit-zero is too safe - more realistic danger)
-            for (int i = exe.Length - 16 + (int)bss_seglen; i < Memory.Length; ++i) Memory[i] = (byte)Rand.Next();
+            for (int i = exe.Length - 32 + (int)bss_seglen; i < Memory.Length; ++i) Memory[i] = (byte)Rand.Next();
 
-            // set up readonly barrier
-            TextBarrier = text_seglen;
+            // set up mmory barriers
+            ExeBarrier = text_seglen;
+            ReadonlyBarrier = text_seglen + rodata_seglen;
 
             // randomize registers
             foreach (Register reg in Registers) reg.x64 = Rand.NextUInt64();
@@ -299,7 +306,7 @@ namespace CSX64
             bool flag;
 
             // make sure we're in in the text segment
-            if (Pos >= TextBarrier) { Terminate(ErrorCode.AccessViolation); return false; }
+            if (Pos >= ExeBarrier) { Terminate(ErrorCode.AccessViolation); return false; }
 
             // fetch the instruction
             if (!GetMemAdv(1, out op)) return false;
