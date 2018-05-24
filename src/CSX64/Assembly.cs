@@ -1065,7 +1065,7 @@ namespace CSX64
         {
             "#TEXT", "#RODATA", "#DATA", "#BSS",
             "##TEXT", "##RODATA", "##DATA", "##BSS",
-            "__prog_end__"
+            "__heap__"
         };
 
         /// <summary>
@@ -2481,7 +2481,7 @@ namespace CSX64
 
                 return true;
             }
-            public bool TryProcessSWAP(OPCode op)
+            public bool TryProcessXCHG(OPCode op)
             {
                 if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 2 args"); return false; }
 
@@ -2727,32 +2727,36 @@ namespace CSX64
                 // empty lines are ignored
                 if (args.op != string.Empty)
                 {
+                    // -- directive routing -- //
                     switch (args.op.ToUpper())
                     {
-                        // -- directive routing -- //
+                        case "GLOBAL": if (!args.TryProcessGlobal()) return args.res; goto op_done;
+                        case "EXTERN": if (!args.TryProcessExtern()) return args.res; goto op_done;
 
-                        case "GLOBAL": if (!args.TryProcessGlobal()) return args.res; break;
-                        case "EXTERN": if(!args.TryProcessExtern()) return args.res; break;
+                        case "DN": if (!args.TryProcessDeclare(Size(args.sizecode))) return args.res; goto op_done;
+                        case "DB": if (!args.TryProcessDeclare(1)) return args.res; goto op_done;
+                        case "DW": if (!args.TryProcessDeclare(2)) return args.res; goto op_done;
+                        case "DD": if (!args.TryProcessDeclare(4)) return args.res; goto op_done;
+                        case "DQ": if (!args.TryProcessDeclare(8)) return args.res; goto op_done;
 
-                        case "DN": if (!args.TryProcessDeclare(Size(args.sizecode))) return args.res; break;
-                        case "DB": if (!args.TryProcessDeclare(1)) return args.res; break;
-                        case "DW": if (!args.TryProcessDeclare(2)) return args.res; break;
-                        case "DD": if (!args.TryProcessDeclare(4)) return args.res; break;
-                        case "DQ": if (!args.TryProcessDeclare(8)) return args.res; break;
+                        case "RESN": if (!args.TryProcessReserve(Size(args.sizecode))) return args.res; goto op_done;
+                        case "RESB": if (!args.TryProcessReserve(1)) return args.res; goto op_done;
+                        case "RESW": if (!args.TryProcessReserve(2)) return args.res; goto op_done;
+                        case "RESD": if (!args.TryProcessReserve(4)) return args.res; goto op_done;
+                        case "RESQ": if (!args.TryProcessReserve(8)) return args.res; goto op_done;
+                        case "REST": if (!args.TryProcessReserve(10)) return args.res; goto op_done;
 
-                        case "RESN": if (!args.TryProcessReserve(Size(args.sizecode))) return args.res; break;
-                        case "RESB": if (!args.TryProcessReserve(1)) return args.res; break;
-                        case "RESW": if (!args.TryProcessReserve(2)) return args.res; break;
-                        case "RESD": if (!args.TryProcessReserve(4)) return args.res; break;
-                        case "RESQ": if (!args.TryProcessReserve(8)) return args.res; break;
-                        case "REST": if (!args.TryProcessReserve(10)) return args.res; break;
+                        case "EQU": if (!args.TryProcessEQU()) return args.res; goto op_done;
 
-                        case "EQU": if (!args.TryProcessEQU()) return args.res; break;
+                        case "SEGMENT": case "SECTION": if (!args.TryProcessSegment()) return args.res; goto op_done;
+                    }
 
-                        case "SEGMENT": case "SECTION": if (!args.TryProcessSegment()) return args.res; break;
+                    // if it wasn't a directive it's about to be an instruction: make sure we're in the text segment
+                    if (args.current_seg != AsmSegment.TEXT) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Attempt to write executable instructions to the {args.current_seg} segment");
 
-                        // -- instruction routing -- //
-
+                    // -- instruction routing -- //
+                    switch (args.op.ToUpper())
+                    {
                         case "NOP": if (!args.TryProcessNoArgOp(OPCode.NOP)) return args.res; break;
 
                         case "HLT": if (!args.TryProcessNoArgOp(OPCode.HLT)) return args.res; break;
@@ -2805,7 +2809,7 @@ namespace CSX64
                         case "MOVL": case "MOVNGE": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, (UInt64)ccOPCode.l)) return args.res; break;
                         case "MOVLE": case "MOVNG": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, (UInt64)ccOPCode.le)) return args.res; break;
 
-                        case "SWAP": if (!args.TryProcessSWAP(OPCode.SWAP)) return args.res; break;
+                        case "XCHG": if (!args.TryProcessXCHG(OPCode.XCHG)) return args.res; break;
 
                         case "JMP": if (!args.TryProcessIMMRM(OPCode.JMP)) return args.res; break;
 
@@ -2897,7 +2901,6 @@ namespace CSX64
                         case "DEC": if (!args.TryProcessUnaryOp(OPCode.DEC)) return args.res; break;
                         case "NEG": if (!args.TryProcessUnaryOp(OPCode.NEG)) return args.res; break;
                         case "NOT": if (!args.TryProcessUnaryOp(OPCode.NOT)) return args.res; break;
-                        case "ABS": if (!args.TryProcessUnaryOp(OPCode.ABS)) return args.res; break;
 
                         case "CMP":
                             // if there are 2 args and the second one is an instant 0, we can make this a CMPZ instruction
@@ -2971,6 +2974,8 @@ namespace CSX64
                         default: return new AssembleResult(AssembleError.UnknownOp, $"line {args.line}: Unknown operation \"{args.op}\"");
                     }
                 }
+
+                op_done:
 
                 // advance to after the new line
                 pos = end + 1;
@@ -3185,7 +3190,7 @@ namespace CSX64
                 obj.Symbols.Add("#BSS", new Expr() { IntResult = (UInt64)text.Count + (UInt64)rodata.Count + (UInt64)data.Count + entry.Value.Item4 });
 
                 // and everything else
-                obj.Symbols.Add("__prog_end__", new Expr() { IntResult = (UInt64)text.Count + (UInt64)rodata.Count + (UInt64)data.Count + bsslen });
+                obj.Symbols.Add("__heap__", new Expr() { IntResult = (UInt64)text.Count + (UInt64)rodata.Count + (UInt64)data.Count + bsslen });
 
                 // for each global symbol
                 foreach (string global in obj.GlobalSymbols)

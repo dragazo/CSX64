@@ -18,7 +18,7 @@ namespace CSX64
         SETcc,
 
         MOV, MOVcc,
-        SWAP,
+        XCHG,
 
         JMP, Jcc, LOOP, LOOPcc, CALL, RET,
         PUSH, POP,
@@ -30,7 +30,7 @@ namespace CSX64
         MUL, IMUL, DIV, IDIV,
         SHL, SHR, SAL, SAR, ROL, ROR,
         AND, OR, XOR,
-        INC, DEC, NEG, NOT, ABS,
+        INC, DEC, NEG, NOT,
 
         CMP, FCMP, TEST, CMPZ, FCMPZ,
 
@@ -109,69 +109,124 @@ namespace CSX64
     /// </summary>
     public class FlagsRegister
     {
+        public const UInt64 CF_Mask = 0x0001;
+        public const UInt64 RESERVED1_Mask = 0x0002;
+        public const UInt64 PF_Mask = 0x0004;
+        public const UInt64 RESERVED2_Mask = 0x0008;
+        public const UInt64 AF_Mask = 0x0010;
+        public const UInt64 RESERVED3_Mask = 0x0020;
+        public const UInt64 ZF_Mask = 0x0040;
+        public const UInt64 SF_Mask = 0x0080;
+        public const UInt64 TF_Mask = 0x0100;
+        public const UInt64 IF_Mask = 0x0200;
+        public const UInt64 DF_Mask = 0x0400;
+        public const UInt64 OF_Mask = 0x0800;
+
+        public const UInt64 FSF_Mask = 0x000_0001_0000_0000;
+
         /// <summary>
         /// Contains the actual flag data
         /// </summary>
         public UInt64 Flags = 0;
 
         /// <summary>
-        /// The Zero flag
-        /// </summary>
-        public bool Z
-        {
-            get => (Flags & 0x01ul) != 0;
-            set => Flags = (Flags & ~0x01ul) | (value ? 0x01ul : 0);
-        }
-        /// <summary>
-        /// The Parity flag
-        /// </summary>
-        public bool P
-        {
-            get => (Flags & 0x02ul) != 0;
-            set => Flags = (Flags & ~0x02ul) | (value ? 0x02ul : 0);
-        }
-        /// <summary>
-        /// The Overflow flag
-        /// </summary>
-        public bool O
-        {
-            get => (Flags & 0x04ul) != 0;
-            set => Flags = (Flags & ~0x04ul) | (value ? 0x04ul : 0);
-        }
-        /// <summary>
         /// The Carry flag
         /// </summary>
-        public bool C
+        public bool CF
         {
-            get => (Flags & 0x08ul) != 0;
-            set => Flags = (Flags & ~0x08ul) | (value ? 0x08ul : 0);
+            get => (Flags & CF_Mask) != 0;
+            set => Flags = (Flags & ~CF_Mask) | (value ? CF_Mask : 0);
         }
+
+        /// <summary>
+        /// The (even) Parity flag
+        /// </summary>
+        public bool PF
+        {
+            get => (Flags & PF_Mask) != 0;
+            set => Flags = (Flags & ~PF_Mask) | (value ? PF_Mask : 0);
+        }
+
+        /// <summary>
+        /// The Adjust flag
+        /// </summary>
+        public bool AF
+        {
+            get => (Flags & AF_Mask) != 0;
+            set => Flags = (Flags & ~AF_Mask) | (value ? AF_Mask : 0);
+        }
+
+        /// <summary>
+        /// The Zero flag
+        /// </summary>
+        public bool ZF
+        {
+            get => (Flags & ZF_Mask) != 0;
+            set => Flags = (Flags & ~ZF_Mask) | (value ? ZF_Mask : 0);
+        }
+
         /// <summary>
         /// The Sign flag
         /// </summary>
-        public bool S
+        public bool SF
         {
-            get => (Flags & 0x10ul) != 0;
-            set => Flags = (Flags & ~0x10ul) | (value ? 0x10ul : 0);
+            get => (Flags & SF_Mask) != 0;
+            set => Flags = (Flags & ~SF_Mask) | (value ? SF_Mask : 0);
         }
 
-        public bool a { get => !C && !Z; }
-        public bool ae { get => !C; }
-        public bool b { get => C; }
-        public bool be { get => C || Z; }
+        /// <summary>
+        /// The Trap flag (single step)
+        /// </summary>
+        public bool TF
+        {
+            get => (Flags & TF_Mask) != 0;
+            set => Flags = (Flags & ~TF_Mask) | (value ? TF_Mask : 0);
+        }
 
-        public bool g { get => !Z && S == O; }
-        public bool ge { get => S == O; }
-        public bool l { get => S != O; }
-        public bool le { get => Z || S != O; }
+        /// <summary>
+        /// The Interrupt enabled flag
+        /// </summary>
+        public bool IF
+        {
+            get => (Flags & IF_Mask) != 0;
+            set => Flags = (Flags & ~IF_Mask) | (value ? IF_Mask : 0);
+        }
+
+        /// <summary>
+        /// The Direction flag
+        /// </summary>
+        public bool DF
+        {
+            get => (Flags & DF_Mask) != 0;
+            set => Flags = (Flags & ~DF_Mask) | (value ? DF_Mask : 0);
+        }
+
+        /// <summary>
+        /// The Overflow flag
+        /// </summary>
+        public bool OF
+        {
+            get => (Flags & OF_Mask) != 0;
+            set => Flags = (Flags & ~OF_Mask) | (value ? OF_Mask : 0);
+        }
+
+        public bool a { get => !CF && !ZF; }
+        public bool ae { get => !CF; }
+        public bool b { get => CF; }
+        public bool be { get => CF || ZF; }
+
+        public bool g { get => !ZF && SF == OF; }
+        public bool ge { get => SF == OF; }
+        public bool l { get => SF != OF; }
+        public bool le { get => ZF || SF != OF; }
 
         /// <summary>
         /// The flag that indicates that we're allowed to run commands that may potentially modify the file system
         /// </summary>
         public bool FileSystem
         {
-            get => (Flags & 0x20ul) != 0;
-            set => Flags = (Flags & ~0x20ul) | (value ? 0x20ul : 0);
+            get => (Flags & FSF_Mask) != 0;
+            set => Flags = (Flags & ~FSF_Mask) | (value ? FSF_Mask : 0);
         }
     }
 

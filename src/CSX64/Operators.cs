@@ -140,33 +140,33 @@ namespace CSX64
         // updates the flags for integral ops (identical for most integral ops)
         private void UpdateFlagsInt(UInt64 value, UInt64 sizecode)
         {
-            Flags.Z = value == 0;
-            Flags.S = Negative(value, sizecode);
+            Flags.ZF = value == 0;
+            Flags.SF = Negative(value, sizecode);
 
             // compute parity flag (only of low 8 bits)
             bool parity = true;
             for (int i = 0; i < 8; ++i)
                 if (((value >> i) & 1) != 0) parity = !parity;
-            Flags.P = parity;
+            Flags.PF = parity;
         }
         // updates the flags for floating point ops
         private void UpdateFlagsDouble(double value)
         {
-            Flags.Z = value == 0;
-            Flags.S = value < 0;
-            Flags.O = false;
+            Flags.ZF = value == 0;
+            Flags.SF = value < 0;
+            Flags.OF = false;
 
-            Flags.C = double.IsInfinity(value);
-            Flags.P = double.IsNaN(value);
+            Flags.CF = double.IsInfinity(value);
+            Flags.PF = double.IsNaN(value);
         }
         private void UpdateFlagsFloat(float value)
         {
-            Flags.Z = value == 0;
-            Flags.S = value < 0;
-            Flags.O = false;
+            Flags.ZF = value == 0;
+            Flags.SF = value < 0;
+            Flags.OF = false;
 
-            Flags.C = float.IsInfinity(value);
-            Flags.P = float.IsNaN(value);
+            Flags.CF = float.IsInfinity(value);
+            Flags.PF = float.IsNaN(value);
         }
 
         // -- impl -- //
@@ -200,7 +200,7 @@ namespace CSX64
 
             return !apply || StoreBinaryOpFormat(s, m, b);
         }
-        private bool ProcessSWAP()
+        private bool ProcessXCHG()
         {
             UInt64 a, b, c, d;
 
@@ -308,8 +308,9 @@ namespace CSX64
             UInt64 res = Truncate(a + b, sizecode);
 
             UpdateFlagsInt(res, sizecode);
-            Flags.C = res < a && res < b; // if overflow is caused, some of one value must go toward it, so the truncated result must necessarily be less than both args
-            Flags.O = Positive(a, sizecode) == Positive(b, sizecode) && Positive(a, sizecode) != Positive(res, sizecode);
+            Flags.CF = res < a && res < b; // if overflow is caused, some of one value must go toward it, so the truncated result must necessarily be less than both args
+            Flags.AF = (res & 0xf) < (a & 0xf) && (res & 0xf) < (b & 0xf); // AF is just like CF but only the low nibble
+            Flags.OF = Positive(a, sizecode) == Positive(b, sizecode) && Positive(a, sizecode) != Positive(res, sizecode);
 
             return StoreBinaryOpFormat(s, m, res);
         }
@@ -321,8 +322,9 @@ namespace CSX64
             UInt64 res = Truncate(a - b, sizecode);
 
             UpdateFlagsInt(res, sizecode);
-            Flags.C = a < b; // if a < b, a borrow was taken from the highest bit
-            Flags.O = Positive(a, sizecode) != Positive(b, sizecode) && Positive(a, sizecode) != Positive(res, sizecode);
+            Flags.CF = a < b; // if a < b, a borrow was taken from the highest bit
+            Flags.AF = (a & 0xf) < (b & 0xf); // AF is just like CF but only the low nibble
+            Flags.OF = Positive(a, sizecode) != Positive(b, sizecode) && Positive(a, sizecode) != Positive(res, sizecode);
 
             return !apply || StoreBinaryOpFormat(s, m, res);
         }
@@ -336,21 +338,21 @@ namespace CSX64
             {
                 case 0:
                     Registers[0].x16 = Registers[0].x8 * a;
-                    Flags.C = Flags.O = (Registers[0].x16 >> 8) != 0;
+                    Flags.CF = Flags.OF = (Registers[0].x16 >> 8) != 0;
                     break;
                 case 1:
                     Registers[0].x32 = Registers[0].x16 * a;
-                    Flags.C = Flags.O = (Registers[0].x32 >> 16) != 0;
+                    Flags.CF = Flags.OF = (Registers[0].x32 >> 16) != 0;
                     break;
                 case 2:
                     Registers[0].x64 = Registers[0].x32 * a;
-                    Flags.C = Flags.O = (Registers[0].x64 >> 32) != 0;
+                    Flags.CF = Flags.OF = (Registers[0].x64 >> 32) != 0;
                     break;
                 case 3: // 64 bits requires extra logic
                     BigInteger full = new BigInteger(Registers[0].x64) * new BigInteger(a);
                     Registers[0].x64 = (UInt64)(full & 0xffffffffffffffff);
                     Registers[1].x64 = (UInt64)(full >> 64);
-                    Flags.C = Flags.O = Registers[1].x64 != 0;
+                    Flags.CF = Flags.OF = Registers[1].x64 != 0;
                     break;
             }
 
@@ -380,18 +382,18 @@ namespace CSX64
             {
                 case 0:
                     Registers[0].x16 = (UInt64)((Int64)SignExtend(Registers[0].x8, 0) * (Int64)SignExtend(a, 0));
-                    Flags.C = Flags.O = (Registers[0].x16 >> 8) == 0 && Positive(Registers[0].x8, 0) || (Registers[0].x16 >> 8) == 0xff && Negative(Registers[0].x8, 0);
-                    Flags.S = Negative(Registers[0].x16, 1);
+                    Flags.CF = Flags.OF = (Registers[0].x16 >> 8) == 0 && Positive(Registers[0].x8, 0) || (Registers[0].x16 >> 8) == 0xff && Negative(Registers[0].x8, 0);
+                    Flags.SF = Negative(Registers[0].x16, 1);
                     break;
                 case 1:
                     Registers[0].x32 = (UInt64)((Int64)SignExtend(Registers[0].x16, 1) * (Int64)SignExtend(a, 1));
-                    Flags.C = Flags.O = (Registers[0].x32 >> 16) == 0 && Positive(Registers[0].x16, 1) || (Registers[0].x32 >> 16) == 0xffff && Negative(Registers[0].x16, 1);
-                    Flags.S = Negative(Registers[0].x32, 2);
+                    Flags.CF = Flags.OF = (Registers[0].x32 >> 16) == 0 && Positive(Registers[0].x16, 1) || (Registers[0].x32 >> 16) == 0xffff && Negative(Registers[0].x16, 1);
+                    Flags.SF = Negative(Registers[0].x32, 2);
                     break;
                 case 2:
                     Registers[0].x64 = (UInt64)((Int64)SignExtend(Registers[0].x32, 2) * (Int64)SignExtend(a, 2));
-                    Flags.C = Flags.O = (Registers[0].x64 >> 32) == 0 && Positive(Registers[0].x32, 2) || (Registers[0].x64 >> 32) == 0xffffffff && Negative(Registers[0].x32, 2);
-                    Flags.S = Negative(Registers[0].x64, 3);
+                    Flags.CF = Flags.OF = (Registers[0].x64 >> 32) == 0 && Positive(Registers[0].x32, 2) || (Registers[0].x64 >> 32) == 0xffffffff && Negative(Registers[0].x32, 2);
+                    Flags.SF = Negative(Registers[0].x64, 3);
                     break;
                 case 3: // 64 bits requires extra logic
                     // store negative flag (we'll do the multiplication in signed values since bit shifting is well-defined for positive BigInteger)
@@ -413,8 +415,8 @@ namespace CSX64
                         // account for carry from low 64 bits
                         if (Registers[0].x64 == 0) ++Registers[1].x64;
                     }
-                    Flags.C = Flags.O = Registers[1].x64 == 0 && Positive(Registers[0].x64, 3) || Registers[1].x64 == 0xffffffffffffffff && Negative(Registers[0].x64, 3);
-                    Flags.S = Negative(Registers[1].x64, 3);
+                    Flags.CF = Flags.OF = Registers[1].x64 == 0 && Positive(Registers[0].x64, 3) || Registers[1].x64 == 0xffffffffffffffff && Negative(Registers[0].x64, 3);
+                    Flags.SF = Negative(Registers[1].x64, 3);
                     break;
             }
 
@@ -471,21 +473,21 @@ namespace CSX64
                     if ((full >> 8) != 0) { Terminate(ErrorCode.ArithmeticError); return false; }
                     Registers[1].x8 = Registers[0].x16 % a;
                     Registers[0].x8 = full;
-                    Flags.C = Registers[1].x8 != 0;
+                    Flags.CF = Registers[1].x8 != 0;
                     break;
                 case 1:
                     full = Registers[0].x32 / a;
                     if ((full >> 16) != 0) { Terminate(ErrorCode.ArithmeticError); return false; }
                     Registers[1].x16 = Registers[0].x32 % a;
                     Registers[0].x16 = full;
-                    Flags.C = Registers[1].x16 != 0;
+                    Flags.CF = Registers[1].x16 != 0;
                     break;
                 case 2:
                     full = Registers[0].x64 / a;
                     if ((full >> 32) != 0) { Terminate(ErrorCode.ArithmeticError); return false; }
                     Registers[1].x32 = Registers[0].x64 % a;
                     Registers[0].x32 = full;
-                    Flags.C = Registers[1].x32 != 0;
+                    Flags.CF = Registers[1].x32 != 0;
                     break;
                 case 3: // 64 bits requires extra logic
                     bigraw = (new BigInteger(Registers[1].x64) << 64) | new BigInteger(Registers[0].x64);
@@ -495,7 +497,7 @@ namespace CSX64
 
                     Registers[1].x64 = (UInt64)(bigraw % new BigInteger(a));
                     Registers[0].x64 = (UInt64)bigfull;
-                    Flags.C = Registers[1].x64 != 0;
+                    Flags.CF = Registers[1].x64 != 0;
                     break;
             }
 
@@ -523,8 +525,8 @@ namespace CSX64
 
                     Registers[0].x8 = (UInt64)full;
                     Registers[1].x8 = (UInt64)(_a % _b);
-                    Flags.C = Registers[1].x8 != 0;
-                    Flags.S = Negative(Registers[0].x8, 0);
+                    Flags.CF = Registers[1].x8 != 0;
+                    Flags.SF = Negative(Registers[0].x8, 0);
                     break;
                 case 1:
                     _a = (Int64)SignExtend(Registers[0].x32, 2);
@@ -535,8 +537,8 @@ namespace CSX64
 
                     Registers[0].x16 = (UInt64)full;
                     Registers[1].x16 = (UInt64)(_a % _b);
-                    Flags.C = Registers[1].x16 != 0;
-                    Flags.S = Negative(Registers[0].x16, 1);
+                    Flags.CF = Registers[1].x16 != 0;
+                    Flags.SF = Negative(Registers[0].x16, 1);
                     break;
                 case 2:
                     _a = (Int64)Registers[0].x64;
@@ -547,8 +549,8 @@ namespace CSX64
 
                     Registers[0].x32 = (UInt64)full;
                     Registers[1].x32 = (UInt64)(_a % _b);
-                    Flags.C = Registers[1].x32 != 0;
-                    Flags.S = Negative(Registers[0].x32, 2);
+                    Flags.CF = Registers[1].x32 != 0;
+                    Flags.SF = Negative(Registers[0].x32, 2);
                     break;
                 case 3: // 64 bits requires extra logic
                     _b = (Int64)a;
@@ -559,7 +561,7 @@ namespace CSX64
 
                     Registers[1].x64 = (UInt64)(Int64)(bigraw % _b);
                     Registers[0].x64 = (UInt64)(Int64)bigfull;
-                    Flags.C = Registers[1].x64 != 0;
+                    Flags.CF = Registers[1].x64 != 0;
                     break;
             }
 
@@ -571,24 +573,42 @@ namespace CSX64
             if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 0)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
-            UInt16 sh = (UInt16)(b % SizeBits(sizecode));
-            UInt64 res = Truncate(a << sh, sizecode);
+            UInt16 sh = (UInt16)(b & (sizecode == 3 ? 0x3ful : 0x1ful)); // mask shift val to 6 bits on 64-bit op, otherwise to 5 bits
 
-            UpdateFlagsInt(res, sizecode);
+            // shift of zero is no-op
+            if (sh != 0)
+            {
+                UInt64 res = Truncate(a << sh, sizecode);
 
-            return StoreBinaryOpFormat(s, m, res);
+                UpdateFlagsInt(res, sizecode);
+                Flags.CF = sh < SizeBits(sizecode) ? ((a >> ((UInt16)SizeBits(sizecode) - sh)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
+                Flags.OF = sh == 1 ? Negative(res, sizecode) != Flags.CF : Rand.NextBool(); // OF is 1 if top 2 bits of original value were different (UND for sh != 1)
+                Flags.AF = Rand.NextBool(); // AF is undefined
+
+                return StoreBinaryOpFormat(s, m, res);
+            }
+            else return true;
         }
         private bool ProcessSHR()
         {
             if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 0)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
-            UInt16 sh = (UInt16)(b % SizeBits(sizecode));
-            UInt64 res = a >> sh;
+            UInt16 sh = (UInt16)(b & (sizecode == 3 ? 0x3ful : 0x1ful)); // mask shift val to 6 bits on 64-bit op, otherwise to 5 bits
 
-            UpdateFlagsInt(res, sizecode);
+            // shift of zero is no-op
+            if (sh != 0)
+            {
+                UInt64 res = a >> sh;
 
-            return StoreBinaryOpFormat(s, m, res);
+                UpdateFlagsInt(res, sizecode);
+                Flags.CF = sh < SizeBits(sizecode) ? ((a >> (sh - 1)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
+                Flags.OF = sh == 1 ? Negative(a, sizecode) : Rand.NextBool(); // OF is high bit of original value (UND for sh != 1)
+                Flags.AF = Rand.NextBool(); // AF is undefined
+
+                return StoreBinaryOpFormat(s, m, res);
+            }
+            else return true;
         }
 
         private bool ProcessSAL()
@@ -596,24 +616,42 @@ namespace CSX64
             if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 0)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
-            UInt16 sh = (UInt16)(b % SizeBits(sizecode));
-            UInt64 res = Truncate((UInt64)((Int64)SignExtend(a, sizecode) << sh), sizecode);
+            UInt16 sh = (UInt16)(b & (sizecode == 3 ? 0x3ful : 0x1ful)); // mask shift val to 6 bits on 64-bit op, otherwise to 5 bits
 
-            UpdateFlagsInt(res, sizecode);
+            // shift of zero is no-op
+            if (sh != 0)
+            {
+                UInt64 res = Truncate((UInt64)((Int64)SignExtend(a, sizecode) << sh), sizecode);
 
-            return StoreBinaryOpFormat(s, m, res);
+                UpdateFlagsInt(res, sizecode);
+                Flags.CF = sh < SizeBits(sizecode) ? ((a >> ((UInt16)SizeBits(sizecode) - sh)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
+                Flags.OF = sh == 1 ? Negative(res, sizecode) != Flags.CF : Rand.NextBool(); // OF is 1 if top 2 bits of original value were different (UND for sh != 1)
+                Flags.AF = Rand.NextBool(); // AF is undefined
+
+                return StoreBinaryOpFormat(s, m, res);
+            }
+            else return true;
         }
         private bool ProcessSAR()
         {
             if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 0)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
-            UInt16 sh = (UInt16)(b % SizeBits(sizecode));
-            UInt64 res = Truncate((UInt64)((Int64)SignExtend(a, sizecode) >> sh), sizecode);
+            UInt16 sh = (UInt16)(b & (sizecode == 3 ? 0x3ful : 0x1ful)); // mask shift val to 6 bits on 64-bit op, otherwise to 5 bits
 
-            UpdateFlagsInt(res, sizecode);
+            // shift of zero is no-op
+            if (sh != 0)
+            {
+                UInt64 res = Truncate((UInt64)((Int64)SignExtend(a, sizecode) >> sh), sizecode);
 
-            return StoreBinaryOpFormat(s, m, res);
+                UpdateFlagsInt(res, sizecode);
+                Flags.CF = sh < SizeBits(sizecode) ? ((a >> (sh - 1)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
+                Flags.OF = sh == 1 ? false : Rand.NextBool(); // OF is cleared (UND for sh != 1)
+                Flags.AF = Rand.NextBool(); // AF is undefined
+
+                return StoreBinaryOpFormat(s, m, res);
+            }
+            else return false;
         }
 
         private bool ProcessROL()
@@ -621,24 +659,38 @@ namespace CSX64
             if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 0)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
-            UInt16 sh = (UInt16)(b % SizeBits(sizecode));
-            UInt64 res = Truncate((a << sh) | (a >> ((UInt16)SizeBits(sizecode) - sh)), sizecode);
+            UInt16 sh = (UInt16)(b % SizeBits(sizecode)); // rotate performed modulo-n
 
-            UpdateFlagsInt(res, sizecode);
+            // shift of zero is no-op
+            if (sh != 0)
+            {
+                UInt64 res = Truncate((a << sh) | (a >> ((UInt16)SizeBits(sizecode) - sh)), sizecode);
 
-            return StoreBinaryOpFormat(s, m, res);
+                Flags.CF = ((a >> ((UInt16)SizeBits(sizecode) - sh)) & 1) == 1; // CF holds last bit shifted around
+                Flags.OF = sh == 1 ? Flags.CF ^ Negative(res, sizecode) : Rand.NextBool(); // OF is xor of CF (after rotate) and high bit of result (UND if sh != 1)
+
+                return StoreBinaryOpFormat(s, m, res);
+            }
+            else return true;
         }
         private bool ProcessROR()
         {
             if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 0)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
-            UInt16 sh = (UInt16)(b % SizeBits(sizecode));
-            UInt64 res = Truncate((a >> sh) | (a << ((UInt16)SizeBits(sizecode) - sh)), sizecode);
+            UInt16 sh = (UInt16)(b % SizeBits(sizecode)); // rotate performed modulo-n
 
-            UpdateFlagsInt(res, sizecode);
+            // shift of zero is no-op
+            if (sh != 0)
+            {
+                UInt64 res = Truncate((a >> sh) | (a << ((UInt16)SizeBits(sizecode) - sh)), sizecode);
 
-            return StoreBinaryOpFormat(s, m, res);
+                Flags.CF = ((a >> (sh - 1)) & 1) == 1; // CF holds last bit shifted around
+                Flags.OF = sh == 1 ? Negative(res, sizecode) ^ (((res >> ((8 << (ushort)sizecode) - 2)) & 1) != 0) : Rand.NextBool(); // OF is xor of 2 highest bits of result
+
+                return StoreBinaryOpFormat(s, m, res);
+            }
+            else return true;
         }
 
         private bool ProcessAND(bool apply = true)
@@ -649,6 +701,8 @@ namespace CSX64
             UInt64 res = a & b;
 
             UpdateFlagsInt(res, sizecode);
+            Flags.OF = Flags.CF = false;
+            Flags.AF = Rand.NextBool();
 
             return !apply || StoreBinaryOpFormat(s, m, res);
         }
@@ -660,6 +714,8 @@ namespace CSX64
             UInt64 res = a | b;
 
             UpdateFlagsInt(res, sizecode);
+            Flags.OF = Flags.CF = false;
+            Flags.AF = Rand.NextBool();
 
             return StoreBinaryOpFormat(s, m, res);
         }
@@ -671,6 +727,8 @@ namespace CSX64
             UInt64 res = a ^ b;
 
             UpdateFlagsInt(res, sizecode);
+            Flags.OF = Flags.CF = false;
+            Flags.AF = Rand.NextBool();
 
             return StoreBinaryOpFormat(s, m, res);
         }
@@ -683,8 +741,8 @@ namespace CSX64
             UInt64 res = Truncate(a + 1, sizecode);
 
             UpdateFlagsInt(res, sizecode);
-            Flags.C = res == 0; // carry results in zero
-            Flags.O = Positive(a, sizecode) && Negative(res, sizecode); // + -> - is overflow
+            Flags.AF = (res & 0xf) == 0; // low nibble of 0 was a nibble overflow (TM)
+            Flags.OF = Positive(a, sizecode) && Negative(res, sizecode); // + -> - is overflow
 
             return StoreUnaryOpFormat(s, m, res);
         }
@@ -696,8 +754,8 @@ namespace CSX64
             UInt64 res = Truncate(a - 1, sizecode);
 
             UpdateFlagsInt(res, sizecode);
-            Flags.C = a == 0; // a = 0 results in borrow from high bit (carry)
-            Flags.O = Negative(a, sizecode) && Positive(res, sizecode); // - -> + is overflow
+            Flags.AF = (a & 0xf) == 0; // nibble a = 0 results in borrow from the low nibble
+            Flags.OF = Negative(a, sizecode) && Positive(res, sizecode); // - -> + is overflow
 
             return StoreUnaryOpFormat(s, m, res);
         }
@@ -706,9 +764,12 @@ namespace CSX64
             if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
-            UInt64 res = Truncate(~a + 1, sizecode);
+            UInt64 res = Truncate(0 - a, sizecode);
 
             UpdateFlagsInt(res, sizecode);
+            Flags.CF = 0 < a; // if 0 < a, a borrow was taken from the highest bit (see SUB code where a=0, b=a)
+            Flags.AF = 0 < (a & 0xf); // AF is just like CF but only the low nibble
+            Flags.OF = Negative(a, sizecode) && Negative(res, sizecode);
 
             return StoreUnaryOpFormat(s, m, res);
         }
@@ -719,28 +780,16 @@ namespace CSX64
 
             UInt64 res = Truncate(~a, sizecode);
 
-            UpdateFlagsInt(res, sizecode);
-
-            return StoreUnaryOpFormat(s, m, res);
-        }
-        private bool ProcessABS()
-        {
-            if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
-            UInt64 sizecode = (s >> 2) & 3;
-
-            UInt64 res = Positive(a, sizecode) ? a : Truncate(~a + 1, sizecode);
-
-            UpdateFlagsInt(res, sizecode);
-
             return StoreUnaryOpFormat(s, m, res);
         }
 
         private bool ProcessCMPZ()
         {
             if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
 
-            UpdateFlagsInt(a, (s >> 2) & 3);
-            Flags.C = Flags.O = false;
+            UpdateFlagsInt(a, sizecode);
+            Flags.CF = Flags.OF = Flags.AF = false;
 
             return true;
         }
@@ -781,15 +830,11 @@ namespace CSX64
                     {
                         double res = AsDouble(a) + AsDouble(b);
 
-                        UpdateFlagsDouble(res);
-
                         return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
                     }
                 case 2:
                     {
                         float res = AsFloat(a) + AsFloat(b);
-
-                        UpdateFlagsFloat(res);
 
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
@@ -807,17 +852,29 @@ namespace CSX64
                     {
                         double res = AsDouble(a) - AsDouble(b);
 
-                        UpdateFlagsDouble(res);
-
-                        return !apply || StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
+                        // if applying change, is FSUB
+                        if (apply) return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
+                        // otherwise is an FCMP
+                        else
+                        {
+                            // update flags
+                            UpdateFlagsDouble(res);
+                            return true;
+                        }
                     }
                 case 2:
                     {
                         float res = AsFloat(a) - AsFloat(b);
 
-                        UpdateFlagsFloat(res);
-
-                        return !apply || StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
+                        // if applying change, is FSUB
+                        if (apply) return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
+                        // otherwise is an FCMP
+                        else
+                        {
+                            // update flags
+                            UpdateFlagsFloat(res);
+                            return true;
+                        }
                     }
 
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
@@ -833,15 +890,11 @@ namespace CSX64
                     {
                         double res = AsDouble(b) - AsDouble(a);
 
-                        UpdateFlagsDouble(res);
-
                         return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
                     }
                 case 2:
                     {
                         float res = AsFloat(b) - AsFloat(a);
-
-                        UpdateFlagsFloat(res);
 
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
@@ -860,15 +913,11 @@ namespace CSX64
                     {
                         double res = AsDouble(a) * AsDouble(b);
 
-                        UpdateFlagsDouble(res);
-
                         return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
                     }
                 case 2:
                     {
                         float res = AsFloat(a) * AsFloat(b);
-
-                        UpdateFlagsFloat(res);
 
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
@@ -887,15 +936,11 @@ namespace CSX64
                     {
                         double res = AsDouble(a) / AsDouble(b);
 
-                        UpdateFlagsDouble(res);
-
                         return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
                     }
                 case 2:
                     {
                         float res = AsFloat(a) / AsFloat(b);
-
-                        UpdateFlagsFloat(res);
 
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
@@ -913,15 +958,11 @@ namespace CSX64
                     {
                         double res = AsDouble(b) / AsDouble(a);
 
-                        UpdateFlagsDouble(res);
-
                         return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
                     }
                 case 2:
                     {
                         float res = AsFloat(b) / AsFloat(a);
-
-                        UpdateFlagsFloat(res);
 
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
@@ -940,15 +981,11 @@ namespace CSX64
                     {
                         double res = Math.Pow(AsDouble(a), AsDouble(b));
 
-                        UpdateFlagsDouble(res);
-
                         return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
                     }
                 case 2:
                     {
                         float res = (float)Math.Pow(AsFloat(a), AsFloat(b));
-
-                        UpdateFlagsFloat(res);
 
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
@@ -966,15 +1003,11 @@ namespace CSX64
                     {
                         double res = Math.Pow(AsDouble(b), AsDouble(a));
 
-                        UpdateFlagsDouble(res);
-
                         return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
                     }
                 case 2:
                     {
                         float res = (float)Math.Pow(AsFloat(b), AsFloat(a));
-
-                        UpdateFlagsFloat(res);
 
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
@@ -993,15 +1026,11 @@ namespace CSX64
                     {
                         double res = Math.Log(AsDouble(a), AsDouble(b));
 
-                        UpdateFlagsDouble(res);
-
                         return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
                     }
                 case 2:
                     {
                         float res = (float)Math.Log(AsFloat(a), AsFloat(b));
-
-                        UpdateFlagsFloat(res);
 
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
@@ -1019,15 +1048,11 @@ namespace CSX64
                     {
                         double res = Math.Log(AsDouble(b), AsDouble(a));
 
-                        UpdateFlagsDouble(res);
-
                         return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
                     }
                 case 2:
                     {
                         float res = (float)Math.Log(AsFloat(b), AsFloat(a));
-
-                        UpdateFlagsFloat(res);
 
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
@@ -1046,15 +1071,11 @@ namespace CSX64
                     {
                         double res = Math.Sqrt(AsDouble(a));
 
-                        UpdateFlagsDouble(res);
-
                         return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
                     }
                 case 2:
                     {
                         float res = (float)Math.Sqrt(AsFloat(a));
-
-                        UpdateFlagsFloat(res);
 
                         return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
                     }
@@ -1072,15 +1093,11 @@ namespace CSX64
                     {
                         double res = -AsDouble(a);
 
-                        UpdateFlagsDouble(res);
-
                         return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
                     }
                 case 2:
                     {
                         float res = -AsFloat(a);
-
-                        UpdateFlagsFloat(res);
 
                         return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
                     }
@@ -1098,15 +1115,11 @@ namespace CSX64
                     {
                         double res = Math.Abs(AsDouble(a));
 
-                        UpdateFlagsDouble(res);
-
                         return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
                     }
                 case 2:
                     {
                         float res = Math.Abs(AsFloat(a));
-
-                        UpdateFlagsFloat(res);
 
                         return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
                     }
@@ -1125,15 +1138,11 @@ namespace CSX64
                     {
                         double res = Math.Floor(AsDouble(a));
 
-                        UpdateFlagsDouble(res);
-
                         return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
                     }
                 case 2:
                     {
                         float res = (float)Math.Floor(AsFloat(a));
-
-                        UpdateFlagsFloat(res);
 
                         return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
                     }
@@ -1151,15 +1160,11 @@ namespace CSX64
                     {
                         double res = Math.Ceiling(AsDouble(a));
 
-                        UpdateFlagsDouble(res);
-
                         return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
                     }
                 case 2:
                     {
                         float res = (float)Math.Ceiling(AsFloat(a));
-
-                        UpdateFlagsFloat(res);
 
                         return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
                     }
@@ -1177,15 +1182,11 @@ namespace CSX64
                     {
                         double res = Math.Round(AsDouble(a));
 
-                        UpdateFlagsDouble(res);
-
                         return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
                     }
                 case 2:
                     {
                         float res = (float)Math.Round(AsFloat(a));
-
-                        UpdateFlagsFloat(res);
 
                         return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
                     }
@@ -1203,15 +1204,11 @@ namespace CSX64
                     {
                         double res = Math.Truncate(AsDouble(a));
 
-                        UpdateFlagsDouble(res);
-
                         return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
                     }
                 case 2:
                     {
                         float res = (float)Math.Truncate(AsFloat(a));
-
-                        UpdateFlagsFloat(res);
 
                         return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
                     }
@@ -1230,15 +1227,11 @@ namespace CSX64
                     {
                         double res = Math.Sin(AsDouble(a));
 
-                        UpdateFlagsDouble(res);
-
                         return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
                     }
                 case 2:
                     {
                         float res = (float)Math.Sin(AsFloat(a));
-
-                        UpdateFlagsFloat(res);
 
                         return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
                     }
@@ -1256,15 +1249,11 @@ namespace CSX64
                     {
                         double res = Math.Cos(AsDouble(a));
 
-                        UpdateFlagsDouble(res);
-
                         return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
                     }
                 case 2:
                     {
                         float res = (float)Math.Cos(AsFloat(a));
-
-                        UpdateFlagsFloat(res);
 
                         return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
                     }
@@ -1282,15 +1271,11 @@ namespace CSX64
                     {
                         double res = Math.Tan(AsDouble(a));
 
-                        UpdateFlagsDouble(res);
-
                         return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
                     }
                 case 2:
                     {
                         float res = (float)Math.Tan(AsFloat(a));
-
-                        UpdateFlagsFloat(res);
 
                         return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
                     }
@@ -1309,15 +1294,11 @@ namespace CSX64
                     {
                         double res = Math.Sinh(AsDouble(a));
 
-                        UpdateFlagsDouble(res);
-
                         return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
                     }
                 case 2:
                     {
                         float res = (float)Math.Sinh(AsFloat(a));
-
-                        UpdateFlagsFloat(res);
 
                         return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
                     }
@@ -1335,15 +1316,11 @@ namespace CSX64
                     {
                         double res = Math.Cosh(AsDouble(a));
 
-                        UpdateFlagsDouble(res);
-
                         return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
                     }
                 case 2:
                     {
                         float res = (float)Math.Cosh(AsFloat(a));
-
-                        UpdateFlagsFloat(res);
 
                         return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
                     }
@@ -1361,15 +1338,11 @@ namespace CSX64
                     {
                         double res = Math.Tanh(AsDouble(a));
 
-                        UpdateFlagsDouble(res);
-
                         return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
                     }
                 case 2:
                     {
                         float res = (float)Math.Tanh(AsFloat(a));
-
-                        UpdateFlagsFloat(res);
 
                         return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
                     }
@@ -1388,15 +1361,11 @@ namespace CSX64
                     {
                         double res = Math.Asin(AsDouble(a));
 
-                        UpdateFlagsDouble(res);
-
                         return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
                     }
                 case 2:
                     {
                         float res = (float)Math.Asin(AsFloat(a));
-
-                        UpdateFlagsFloat(res);
 
                         return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
                     }
@@ -1414,15 +1383,11 @@ namespace CSX64
                     {
                         double res = Math.Acos(AsDouble(a));
 
-                        UpdateFlagsDouble(res);
-
                         return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
                     }
                 case 2:
                     {
                         float res = (float)Math.Acos(AsFloat(a));
-
-                        UpdateFlagsFloat(res);
 
                         return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
                     }
@@ -1440,15 +1405,11 @@ namespace CSX64
                     {
                         double res = Math.Atan(AsDouble(a));
 
-                        UpdateFlagsDouble(res);
-
                         return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
                     }
                 case 2:
                     {
                         float res = (float)Math.Atan(AsFloat(a));
-
-                        UpdateFlagsFloat(res);
 
                         return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
                     }
@@ -1466,15 +1427,11 @@ namespace CSX64
                     {
                         double res = Math.Atan2(AsDouble(a), AsDouble(b));
 
-                        UpdateFlagsDouble(res);
-
                         return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
                     }
                 case 2:
                     {
                         float res = (float)Math.Atan2(AsFloat(a), AsFloat(b));
-
-                        UpdateFlagsFloat(res);
 
                         return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
                     }
@@ -1536,15 +1493,27 @@ namespace CSX64
 
             UInt64 res = (a >> pos) & ((1ul << len) - 1);
 
+            Flags.SetPublicFlags(0); // clear all the (public) flags
+            Flags.ZF = res == 0; // ZF is set on zero
+            Flags.AF = Rand.NextBool(); // AF, SF, and PF are undefined
+            Flags.SF = Rand.NextBool();
+            Flags.PF = Rand.NextBool();
+
             return StoreBinaryOpFormat(s, m, res);
         }
         private bool ProcessBLSI()
         {
             if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
 
             UInt64 res = a & (~a + 1);
 
-            Flags.Z = res == 0;
+            Flags.ZF = res == 0;
+            Flags.SF = Negative(res, sizecode);
+            Flags.CF = a != 0;
+            Flags.OF = false;
+            Flags.AF = Rand.NextBool();
+            Flags.PF = Rand.NextBool();
 
             return StoreUnaryOpFormat(s, m, res);
         }
@@ -1555,26 +1524,42 @@ namespace CSX64
 
             UInt64 res = Truncate(a ^ (a - 1), sizecode);
 
+            Flags.SF = Negative(res, sizecode);
+            Flags.CF = a == 0;
+            Flags.ZF = Flags.OF = false;
+            Flags.AF = Rand.NextBool();
+            Flags.PF = Rand.NextBool();
+
             return StoreUnaryOpFormat(s, m, res);
         }
         private bool ProcessBLSR()
         {
             if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
 
             UInt64 res = a & (a - 1);
 
-            Flags.Z = res == 0;
+            Flags.ZF = res == 0;
+            Flags.SF = Negative(res, sizecode);
+            Flags.CF = a == 0;
+            Flags.OF = false;
+            Flags.AF = Rand.NextBool();
+            Flags.PF = Rand.NextBool();
 
             return StoreUnaryOpFormat(s, m, res);
         }
         private bool ProcessANDN()
         {
             if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
-            UInt64 sizecode = (a >> 2) & 3;
+            UInt64 sizecode = (s >> 2) & 3;
 
             UInt64 res = a & ~b;
 
-            UpdateFlagsInt(res, sizecode);
+            Flags.ZF = res == 0;
+            Flags.SF = Negative(res, sizecode);
+            Flags.OF = Flags.CF = false;
+            Flags.AF = Rand.NextBool();
+            Flags.PF = Rand.NextBool();
 
             return StoreBinaryOpFormat(s, m, res);
         }

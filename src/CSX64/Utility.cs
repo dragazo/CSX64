@@ -74,16 +74,16 @@ namespace CSX64
         {
             switch (code)
             {
-                case ccOPCode.z: res = flags.Z; return true;
-                case ccOPCode.nz: res = !flags.Z; return true;
-                case ccOPCode.s: res = flags.S; return true;
-                case ccOPCode.ns: res = !flags.S; return true;
-                case ccOPCode.p: res = flags.P; return true;
-                case ccOPCode.np: res = !flags.P; return true;
-                case ccOPCode.o: res = flags.O; return true;
-                case ccOPCode.no: res = !flags.O; return true;
-                case ccOPCode.c: res = flags.C; return true;
-                case ccOPCode.nc: res = !flags.C; return true;
+                case ccOPCode.z: res = flags.ZF; return true;
+                case ccOPCode.nz: res = !flags.ZF; return true;
+                case ccOPCode.s: res = flags.SF; return true;
+                case ccOPCode.ns: res = !flags.SF; return true;
+                case ccOPCode.p: res = flags.PF; return true;
+                case ccOPCode.np: res = !flags.PF; return true;
+                case ccOPCode.o: res = flags.OF; return true;
+                case ccOPCode.no: res = !flags.OF; return true;
+                case ccOPCode.c: res = flags.CF; return true;
+                case ccOPCode.nc: res = !flags.CF; return true;
 
                 case ccOPCode.a: res = flags.a; return true;
                 case ccOPCode.ae: res = flags.ae; return true;
@@ -396,6 +396,14 @@ namespace CSX64
         public static UInt64 NextUInt64(this Random rand)
         {
             return ((UInt64)(UInt32)rand.Next() << 32) | (UInt32)rand.Next();
+        }
+        /// <summary>
+        /// Gets a random boolean
+        /// </summary>
+        /// <param name="rand">the random object to use</param>
+        public static bool NextBool(this Random rand)
+        {
+            return rand.Next(2) == 1;
         }
 
         // -- CSX64 encoding utilities -- //

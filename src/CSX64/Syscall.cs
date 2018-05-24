@@ -39,7 +39,7 @@ namespace CSX64
                     SuspendedRead = true; // suspend execution until there's more data
                 }
                 // otherwise return num chars read from file
-                else Flags.Z = (Registers[0].x64 = (UInt64)n) == 0;
+                else Flags.ZF = (Registers[0].x64 = (UInt64)n) == 0;
 
                 return true;
             }

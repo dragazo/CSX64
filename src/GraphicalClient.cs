@@ -255,12 +255,12 @@ namespace CSX64
                     GetRegister(2).x32 = (UInt64)MousePos.Y;
                     break;
                 case (UInt64)GraphicalSyscallCodes.GetMouseDelta:
-                    GetFlags().Z = (GetRegister(1).x64 = (UInt64)MouseDelta) == 0;
+                    GetFlags().ZF = (GetRegister(1).x64 = (UInt64)MouseDelta) == 0;
                     MouseDelta = 0;
                     break;
 
-                case (UInt64)GraphicalSyscallCodes.GetMouseDown: GetFlags().Z = (GetRegister(1).x64 = (UInt64)MouseDown) == 0; break;
-                case (UInt64)GraphicalSyscallCodes.GetKeyDown: GetFlags().Z = (GetRegister(1).x64 = (UInt64)KeyDown) == 0; break;
+                case (UInt64)GraphicalSyscallCodes.GetMouseDown: GetFlags().ZF = (GetRegister(1).x64 = (UInt64)MouseDown) == 0; break;
+                case (UInt64)GraphicalSyscallCodes.GetKeyDown: GetFlags().ZF = (GetRegister(1).x64 = (UInt64)KeyDown) == 0; break;
 
                 // -- drawing settings -- //
 

@@ -15,7 +15,7 @@ namespace CSX64
         /// <summary>
         /// The bitmask representing the flags that can be modified by executing code
         /// </summary>
-        public const UInt64 PublicFlags = 0x1f;
+        public const UInt64 PublicFlags = 0xffff_ffff;
 
         /// <summary>
         /// Indicates if rmdir will remove non-empty directories recursively
@@ -131,6 +131,9 @@ namespace CSX64
             // randomize public flags
             Flags.SetPublicFlags((UInt64)Rand.Next());
 
+            // make sure flag 1 is set (from Intel x86_64 standard)
+            Flags.Flags |= 2;
+
             // set execution state
             Pos = 0;
             Running = true;
@@ -166,12 +169,12 @@ namespace CSX64
             Registers[0].x64 = args != null ? (UInt64)args.Length : 0;
             Registers[1].x64 = stack;
 
-            // initialize stack register
-            Registers[15].x64 = stack;
+            // initialize base/stack pointer registers
+            Registers[14].x64 = Registers[15].x64 = stack;
 
-            // also push $0 and $1 onto the stack so it'll work with stack calling conventions
-            Push(Registers[0].x64);
+            // also push $0 and $1 onto the stack so it'll work with cdecl calling conventions (RTL push order)
             Push(Registers[1].x64);
+            Push(Registers[0].x64);
 
             return true;
         }
@@ -327,7 +330,7 @@ namespace CSX64
                 case OPCode.MOV: return ProcessMOV();
                 case OPCode.MOVcc: if (!GetMemAdv(1, out op) || !Flags.TryGet_cc((ccOPCode)op, out flag)) { Terminate(ErrorCode.UndefinedBehavior); return false; } return ProcessMOV(flag);
 
-                case OPCode.SWAP: return ProcessSWAP();
+                case OPCode.XCHG: return ProcessXCHG();
 
                 case OPCode.JMP: return ProcessJMP(true, ref op);
                 case OPCode.Jcc: if (!GetMemAdv(1, out op) || !Flags.TryGet_cc((ccOPCode)op, out flag)) { Terminate(ErrorCode.UndefinedBehavior); return false; } return ProcessJMP(flag, ref op);
@@ -368,7 +371,6 @@ namespace CSX64
                 case OPCode.DEC: return ProcessDEC();
                 case OPCode.NEG: return ProcessNEG();
                 case OPCode.NOT: return ProcessNOT();
-                case OPCode.ABS: return ProcessABS();
 
                 case OPCode.CMP: return ProcessSUB(false);
                 case OPCode.FCMP: return ProcessFSUB(false);
