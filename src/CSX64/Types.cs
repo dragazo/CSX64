@@ -14,7 +14,7 @@ namespace CSX64
     {
         NOP,
         HLT, SYSCALL,
-        GETF, SETF,
+        PUSHF, POPF,
         SETcc,
 
         MOV, MOVcc,
@@ -45,7 +45,8 @@ namespace CSX64
 
         FTOI, ITOF,
 
-        BSWAP, BEXTR, BLSI, BLSMSK, BLSR, ANDN
+        BSWAP, BEXTR, BLSI, BLSMSK, BLSR, ANDN,
+        BT
     }
     public enum SyscallCode
     {
@@ -72,35 +73,44 @@ namespace CSX64
     public class Register
     {
         /// <summary>
-        /// gets/sets the full 64 bits of the register
+        /// gets/sets the full qword
         /// </summary>
         public UInt64 x64 = 0;
 
         /// <summary>
-        /// gets/sets the low 32 bits of the register
+        /// gets/sets the low dword
         /// </summary>
-        public UInt64 x32
+        public UInt32 x32
         {
-            get { return x64 & 0x00000000ffffffff; }
-            set { x64 = x64 & 0xffffffff00000000 | value & 0x00000000ffffffff; }
+            get => (UInt32)x64;
+            set => x64 = x64 & ~0xfffffffful | value;
         }
 
         /// <summary>
-        /// gets/sets the low 16 bits of the register
+        /// gets/sets the low word
         /// </summary>
-        public UInt64 x16
+        public UInt16 x16
         {
-            get { return x64 & 0x000000000000ffff; }
-            set { x64 = x64 & 0xffffffffffff0000 | value & 0x000000000000ffff; }
+            get => (UInt16)x64;
+            set => x64 = x64 & ~0xfffful | value;
+        }
+        
+        /// <summary>
+        /// gets/sets the high byte of the low word
+        /// </summary>
+        public byte x8h
+        {
+            get => (byte)(x64 >> 8);
+            set => x64 = x64 & ~0xff00ul | ((UInt64)value << 8);
         }
 
         /// <summary>
-        /// gets/sets the low 8 bits of the register
+        /// gets/sets the low byte
         /// </summary>
-        public UInt64 x8
+        public byte x8
         {
-            get { return x64 & 0x00000000000000ff; }
-            set { x64 = x64 & 0xffffffffffffff00 | value & 0x00000000000000ff; }
+            get => (byte)x64;
+            set => x64 = x64 & ~0xfful | value;
         }
     }
 
@@ -125,17 +135,33 @@ namespace CSX64
         public const UInt64 FSF_Mask = 0x000_0001_0000_0000;
 
         /// <summary>
-        /// Contains the actual flag data
+        /// The full 64-bit flags data
         /// </summary>
-        public UInt64 Flags = 0;
+        public UInt64 RFLAGS = 0;
+        /// <summary>
+        /// The lower 32 flags
+        /// </summary>
+        public UInt64 EFLAGS
+        {
+            get => RFLAGS & 0xffffffff;
+            set => RFLAGS = (RFLAGS & ~0xffffffff) | (value & 0xffffffff);
+        }
+        /// <summary>
+        /// The lower 16 flags
+        /// </summary>
+        public UInt64 WFLAGS
+        {
+            get => RFLAGS & 0xffff;
+            set => RFLAGS = (RFLAGS & ~0xfffful) | (value & 0xffff);
+        }
 
         /// <summary>
         /// The Carry flag
         /// </summary>
         public bool CF
         {
-            get => (Flags & CF_Mask) != 0;
-            set => Flags = (Flags & ~CF_Mask) | (value ? CF_Mask : 0);
+            get => (RFLAGS & CF_Mask) != 0;
+            set => RFLAGS = (RFLAGS & ~CF_Mask) | (value ? CF_Mask : 0);
         }
 
         /// <summary>
@@ -143,8 +169,8 @@ namespace CSX64
         /// </summary>
         public bool PF
         {
-            get => (Flags & PF_Mask) != 0;
-            set => Flags = (Flags & ~PF_Mask) | (value ? PF_Mask : 0);
+            get => (RFLAGS & PF_Mask) != 0;
+            set => RFLAGS = (RFLAGS & ~PF_Mask) | (value ? PF_Mask : 0);
         }
 
         /// <summary>
@@ -152,8 +178,8 @@ namespace CSX64
         /// </summary>
         public bool AF
         {
-            get => (Flags & AF_Mask) != 0;
-            set => Flags = (Flags & ~AF_Mask) | (value ? AF_Mask : 0);
+            get => (RFLAGS & AF_Mask) != 0;
+            set => RFLAGS = (RFLAGS & ~AF_Mask) | (value ? AF_Mask : 0);
         }
 
         /// <summary>
@@ -161,8 +187,8 @@ namespace CSX64
         /// </summary>
         public bool ZF
         {
-            get => (Flags & ZF_Mask) != 0;
-            set => Flags = (Flags & ~ZF_Mask) | (value ? ZF_Mask : 0);
+            get => (RFLAGS & ZF_Mask) != 0;
+            set => RFLAGS = (RFLAGS & ~ZF_Mask) | (value ? ZF_Mask : 0);
         }
 
         /// <summary>
@@ -170,8 +196,8 @@ namespace CSX64
         /// </summary>
         public bool SF
         {
-            get => (Flags & SF_Mask) != 0;
-            set => Flags = (Flags & ~SF_Mask) | (value ? SF_Mask : 0);
+            get => (RFLAGS & SF_Mask) != 0;
+            set => RFLAGS = (RFLAGS & ~SF_Mask) | (value ? SF_Mask : 0);
         }
 
         /// <summary>
@@ -179,8 +205,8 @@ namespace CSX64
         /// </summary>
         public bool TF
         {
-            get => (Flags & TF_Mask) != 0;
-            set => Flags = (Flags & ~TF_Mask) | (value ? TF_Mask : 0);
+            get => (RFLAGS & TF_Mask) != 0;
+            set => RFLAGS = (RFLAGS & ~TF_Mask) | (value ? TF_Mask : 0);
         }
 
         /// <summary>
@@ -188,8 +214,8 @@ namespace CSX64
         /// </summary>
         public bool IF
         {
-            get => (Flags & IF_Mask) != 0;
-            set => Flags = (Flags & ~IF_Mask) | (value ? IF_Mask : 0);
+            get => (RFLAGS & IF_Mask) != 0;
+            set => RFLAGS = (RFLAGS & ~IF_Mask) | (value ? IF_Mask : 0);
         }
 
         /// <summary>
@@ -197,8 +223,8 @@ namespace CSX64
         /// </summary>
         public bool DF
         {
-            get => (Flags & DF_Mask) != 0;
-            set => Flags = (Flags & ~DF_Mask) | (value ? DF_Mask : 0);
+            get => (RFLAGS & DF_Mask) != 0;
+            set => RFLAGS = (RFLAGS & ~DF_Mask) | (value ? DF_Mask : 0);
         }
 
         /// <summary>
@@ -206,8 +232,8 @@ namespace CSX64
         /// </summary>
         public bool OF
         {
-            get => (Flags & OF_Mask) != 0;
-            set => Flags = (Flags & ~OF_Mask) | (value ? OF_Mask : 0);
+            get => (RFLAGS & OF_Mask) != 0;
+            set => RFLAGS = (RFLAGS & ~OF_Mask) | (value ? OF_Mask : 0);
         }
 
         public bool a { get => !CF && !ZF; }
@@ -225,8 +251,8 @@ namespace CSX64
         /// </summary>
         public bool FileSystem
         {
-            get => (Flags & FSF_Mask) != 0;
-            set => Flags = (Flags & ~FSF_Mask) | (value ? FSF_Mask : 0);
+            get => (RFLAGS & FSF_Mask) != 0;
+            set => RFLAGS = (RFLAGS & ~FSF_Mask) | (value ? FSF_Mask : 0);
         }
     }
 

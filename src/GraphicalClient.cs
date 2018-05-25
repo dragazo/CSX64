@@ -246,13 +246,13 @@ namespace CSX64
                 // -- data utilities -- //
 
                 case (UInt64)GraphicalSyscallCodes.GetRenderSize:
-                    GetRegister(1).x32 = (UInt64)RenderImage.Width;
-                    GetRegister(2).x32 = (UInt64)RenderImage.Height;
+                    GetRegister(1).x32 = (UInt32)RenderImage.Width;
+                    GetRegister(2).x32 = (UInt32)RenderImage.Height;
                     break;
 
                 case (UInt64)GraphicalSyscallCodes.GetMousePos:
-                    GetRegister(1).x32 = (UInt64)MousePos.X;
-                    GetRegister(2).x32 = (UInt64)MousePos.Y;
+                    GetRegister(1).x32 = (UInt32)MousePos.X;
+                    GetRegister(2).x32 = (UInt32)MousePos.Y;
                     break;
                 case (UInt64)GraphicalSyscallCodes.GetMouseDelta:
                     GetFlags().ZF = (GetRegister(1).x64 = (UInt64)MouseDelta) == 0;

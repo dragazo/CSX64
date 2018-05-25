@@ -132,7 +132,7 @@ namespace CSX64
             Flags.SetPublicFlags((UInt64)Rand.Next());
 
             // make sure flag 1 is set (from Intel x86_64 standard)
-            Flags.Flags |= 2;
+            Flags.RFLAGS |= 2;
 
             // set execution state
             Pos = 0;
@@ -322,8 +322,8 @@ namespace CSX64
                 case OPCode.HLT: Terminate(ErrorCode.Abort); return true;
                 case OPCode.SYSCALL: if (Syscall()) return true; Terminate(ErrorCode.UnhandledSyscall); return false;
 
-                case OPCode.GETF: return ProcessGETF();
-                case OPCode.SETF: return ProcessSETF();
+                case OPCode.PUSHF: return PushRaw(2, Flags.RFLAGS);
+                case OPCode.POPF: if (!PopRaw(2, out op)) return false; Flags.RFLAGS = Flags.RFLAGS & ~0xfffful | op; return true;
 
                 case OPCode.SETcc: return ProcessSETcc();
 
@@ -422,6 +422,8 @@ namespace CSX64
                 case OPCode.BLSMSK: return ProcessBLSMSK();
                 case OPCode.BLSR: return ProcessBLSR();
                 case OPCode.ANDN: return ProcessANDN();
+
+                case OPCode.BT: return ProcessBT();
 
                 // otherwise, unknown opcode
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;

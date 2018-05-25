@@ -10,7 +10,8 @@ namespace CSX64
     {
         // -- op utilities -- //
 
-        private bool FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b, bool get_a = true, int _a_sizecode = -1, int _b_sizecode = -1)
+        private bool FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b,
+            bool get_a = true, int _a_sizecode = -1, int _b_sizecode = -1, bool allow_b_mem = true)
         {
             // read settings
             if (!GetMemAdv(1, out s)) { m = a = b = 0; return false; }
@@ -31,6 +32,8 @@ namespace CSX64
                     if (!GetMemAdv(Size(b_sizecode), out b)) return false;
                     return true;
                 case 1:
+                    if (!allow_b_mem) { b = 0; Terminate(ErrorCode.UndefinedBehavior); return false; }
+
                     if (get_a) a = Registers[s >> 4].Get(a_sizecode);
                     if (!GetAddressAdv(out b) || !GetMemRaw(b, Size(b_sizecode), out b)) return false;
                     return true;
@@ -175,7 +178,7 @@ namespace CSX64
         {
             if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, false)) return false;
 
-            return StoreUnaryOpFormat(s, m, Flags.Flags);
+            return StoreUnaryOpFormat(s, m, Flags.RFLAGS);
         }
         private bool ProcessSETF()
         {
@@ -281,7 +284,7 @@ namespace CSX64
                     switch (a & 3)
                     {
                         case 3: return true;
-                        case 2: Registers[a >> 4].x32 = FloatAsUInt64((float)AsDouble(Registers[a >> 4].x64)); return true;
+                        case 2: Registers[a >> 4].x32 = (UInt32)FloatAsUInt64((float)AsDouble(Registers[a >> 4].x64)); return true;
 
                         default: Terminate(ErrorCode.UndefinedBehavior); return false;
                     }
@@ -337,11 +340,11 @@ namespace CSX64
             switch ((s >> 2) & 3)
             {
                 case 0:
-                    Registers[0].x16 = Registers[0].x8 * a;
+                    Registers[0].x16 = (UInt16)(Registers[0].x8 * a);
                     Flags.CF = Flags.OF = (Registers[0].x16 >> 8) != 0;
                     break;
                 case 1:
-                    Registers[0].x32 = Registers[0].x16 * a;
+                    Registers[0].x32 = (UInt32)(Registers[0].x16 * a);
                     Flags.CF = Flags.OF = (Registers[0].x32 >> 16) != 0;
                     break;
                 case 2:
@@ -381,12 +384,12 @@ namespace CSX64
             switch ((s >> 2) & 3)
             {
                 case 0:
-                    Registers[0].x16 = (UInt64)((Int64)SignExtend(Registers[0].x8, 0) * (Int64)SignExtend(a, 0));
+                    Registers[0].x16 = (UInt16)((Int64)SignExtend(Registers[0].x8, 0) * (Int64)SignExtend(a, 0));
                     Flags.CF = Flags.OF = (Registers[0].x16 >> 8) == 0 && Positive(Registers[0].x8, 0) || (Registers[0].x16 >> 8) == 0xff && Negative(Registers[0].x8, 0);
                     Flags.SF = Negative(Registers[0].x16, 1);
                     break;
                 case 1:
-                    Registers[0].x32 = (UInt64)((Int64)SignExtend(Registers[0].x16, 1) * (Int64)SignExtend(a, 1));
+                    Registers[0].x32 = (UInt32)((Int64)SignExtend(Registers[0].x16, 1) * (Int64)SignExtend(a, 1));
                     Flags.CF = Flags.OF = (Registers[0].x32 >> 16) == 0 && Positive(Registers[0].x16, 1) || (Registers[0].x32 >> 16) == 0xffff && Negative(Registers[0].x16, 1);
                     Flags.SF = Negative(Registers[0].x32, 2);
                     break;
@@ -471,22 +474,22 @@ namespace CSX64
                 case 0:
                     full = Registers[0].x16 / a;
                     if ((full >> 8) != 0) { Terminate(ErrorCode.ArithmeticError); return false; }
-                    Registers[1].x8 = Registers[0].x16 % a;
-                    Registers[0].x8 = full;
+                    Registers[1].x8 = (byte)(Registers[0].x16 % a);
+                    Registers[0].x8 = (byte)full;
                     Flags.CF = Registers[1].x8 != 0;
                     break;
                 case 1:
                     full = Registers[0].x32 / a;
                     if ((full >> 16) != 0) { Terminate(ErrorCode.ArithmeticError); return false; }
-                    Registers[1].x16 = Registers[0].x32 % a;
-                    Registers[0].x16 = full;
+                    Registers[1].x16 = (UInt16)(Registers[0].x32 % a);
+                    Registers[0].x16 = (UInt16)full;
                     Flags.CF = Registers[1].x16 != 0;
                     break;
                 case 2:
                     full = Registers[0].x64 / a;
                     if ((full >> 32) != 0) { Terminate(ErrorCode.ArithmeticError); return false; }
-                    Registers[1].x32 = Registers[0].x64 % a;
-                    Registers[0].x32 = full;
+                    Registers[1].x32 = (UInt32)(Registers[0].x64 % a);
+                    Registers[0].x32 = (UInt32)full;
                     Flags.CF = Registers[1].x32 != 0;
                     break;
                 case 3: // 64 bits requires extra logic
@@ -523,8 +526,8 @@ namespace CSX64
 
                     if (full != (sbyte)full) { Terminate(ErrorCode.ArithmeticError); return false; }
 
-                    Registers[0].x8 = (UInt64)full;
-                    Registers[1].x8 = (UInt64)(_a % _b);
+                    Registers[0].x8 = (byte)full;
+                    Registers[1].x8 = (byte)(_a % _b);
                     Flags.CF = Registers[1].x8 != 0;
                     Flags.SF = Negative(Registers[0].x8, 0);
                     break;
@@ -535,8 +538,8 @@ namespace CSX64
 
                     if (full != (Int16)full) { Terminate(ErrorCode.ArithmeticError); return false; }
 
-                    Registers[0].x16 = (UInt64)full;
-                    Registers[1].x16 = (UInt64)(_a % _b);
+                    Registers[0].x16 = (UInt16)full;
+                    Registers[1].x16 = (UInt16)(_a % _b);
                     Flags.CF = Registers[1].x16 != 0;
                     Flags.SF = Negative(Registers[0].x16, 1);
                     break;
@@ -547,8 +550,8 @@ namespace CSX64
 
                     if (full != (Int32)full) { Terminate(ErrorCode.ArithmeticError); return false; }
 
-                    Registers[0].x32 = (UInt64)full;
-                    Registers[1].x32 = (UInt64)(_a % _b);
+                    Registers[0].x32 = (UInt32)full;
+                    Registers[1].x32 = (UInt32)(_a % _b);
                     Flags.CF = Registers[1].x32 != 0;
                     Flags.SF = Negative(Registers[0].x32, 2);
                     break;
@@ -1562,6 +1565,32 @@ namespace CSX64
             Flags.PF = Rand.NextBool();
 
             return StoreBinaryOpFormat(s, m, res);
+        }
+
+        private bool ProcessBT()
+        {
+            if (!GetMemAdv(1, out UInt64 ext)) return false;
+
+            if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 0, false)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
+
+            UInt64 mask = 1ul << (UInt16)(b % SizeBits(sizecode));
+
+            Flags.CF = (a & mask) != 0;
+            Flags.OF = Rand.NextBool();
+            Flags.SF = Rand.NextBool();
+            Flags.AF = Rand.NextBool();
+            Flags.PF = Rand.NextBool();
+
+            switch (ext)
+            {
+                case 0: return true;
+                case 1: return StoreBinaryOpFormat(s, m, a | mask);
+                case 2: return StoreBinaryOpFormat(s, m, a & ~mask);
+                case 3: return StoreBinaryOpFormat(s, m, a ^ mask);
+
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
+            }
         }
     }
 }

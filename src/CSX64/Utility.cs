@@ -35,7 +35,7 @@ namespace CSX64
         /// <param name="flags">the flags register to extract flags from</param>
         public static UInt64 GetPublicFlags(this FlagsRegister flags)
         {
-            return flags.Flags & Computer.PublicFlags;
+            return flags.RFLAGS & Computer.PublicFlags;
         }
         /// <summary>
         /// Sets the public flags of the flags register
@@ -44,7 +44,7 @@ namespace CSX64
         /// <param name="publicFlags">the values to use for public flags</param>
         public static void SetPublicFlags(this FlagsRegister flags, UInt64 publicFlags)
         {
-            flags.Flags = flags.Flags & ~Computer.PublicFlags | publicFlags & Computer.PublicFlags;
+            flags.RFLAGS = flags.RFLAGS & ~Computer.PublicFlags | publicFlags & Computer.PublicFlags;
         }
 
         /// <summary>
@@ -53,7 +53,7 @@ namespace CSX64
         /// <param name="flags">the flags register to extract flags from</param>
         public static UInt64 GetPrivateFlags(this FlagsRegister flags)
         {
-            return flags.Flags & ~Computer.PublicFlags;
+            return flags.RFLAGS & ~Computer.PublicFlags;
         }
         /// <summary>
         /// Sets the private flags of the flags register
@@ -62,7 +62,7 @@ namespace CSX64
         /// <param name="privateFlags">the values to use for private flags</param>
         public static void SetPrivateFlags(this FlagsRegister flags, UInt64 privateFlags)
         {
-            flags.Flags = flags.Flags & Computer.PublicFlags | privateFlags & ~Computer.PublicFlags;
+            flags.RFLAGS = flags.RFLAGS & Computer.PublicFlags | privateFlags & ~Computer.PublicFlags;
         }
 
         /// <summary>

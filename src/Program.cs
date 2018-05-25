@@ -545,7 +545,7 @@ namespace CSX64
                 computer.Initialize(exe, args);
 
                 // set private flags
-                computer.GetFlags().SetPrivateFlags(flags.Flags);
+                computer.GetFlags().SetPrivateFlags(flags.RFLAGS);
 
                 // tie standard streams
                 computer.GetFD(0).Open(Console.OpenStandardInput(), false, false); // stdin is non-interactive because we're not the ones that will be adding data to it. that's the console's responsibility
@@ -580,7 +580,7 @@ namespace CSX64
                 computer.Initialize(exe, args);
 
                 // set private flags
-                computer.GetFlags().SetPrivateFlags(flags.Flags);
+                computer.GetFlags().SetPrivateFlags(flags.RFLAGS);
 
                 // create the console client
                 using (GraphicalClient graphics = new GraphicalClient(computer))
