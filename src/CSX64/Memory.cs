@@ -500,8 +500,8 @@ namespace CSX64
         /// <param name="val">the value to push</param>
         private bool PushRaw(UInt64 size, UInt64 val)
         {
-            Registers[15].x64 -= size;
-            return SetMemRaw(Registers[15].x64, size, val);
+            RSP -= size;
+            return SetMemRaw(RSP, size, val);
         }
         /// <summary>
         /// Pops a value from the stack
@@ -510,9 +510,8 @@ namespace CSX64
         /// <param name="val">the resulting value</param>
         private bool PopRaw(UInt64 size, out UInt64 val)
         {
-            if (!GetMemRaw(Registers[15].x64, size, out val)) return false;
-
-            Registers[15].x64 += size;
+            if (!GetMemRaw(RSP, size, out val)) return false;
+            RSP += size;
             return true;
         }
 
@@ -557,7 +556,6 @@ namespace CSX64
         {
             // make sure we can get the memory
             if (!GetMemRaw(Pos, size, out res)) return false;
-
             Pos += size;
             return true;
         }

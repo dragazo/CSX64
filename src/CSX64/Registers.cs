@@ -6,6 +6,20 @@ namespace CSX64
 {
     public partial class Computer
     {
+        public UInt64 RFLAGS { get => Flags.RFLAGS; set => Flags.RFLAGS = value; }
+        public UInt32 EFLAGS { get => Flags.EFLAGS; set => Flags.EFLAGS = value; }
+        public UInt16 FLAGS { get => Flags.FLAGS; set => Flags.FLAGS = value; }
+
+        public bool CF { get => Flags.CF; set => Flags.CF = value; }
+        public bool PF { get => Flags.PF; set => Flags.PF = value; }
+        public bool AF { get => Flags.AF; set => Flags.AF = value; }
+        public bool ZF { get => Flags.ZF; set => Flags.ZF = value; }
+        public bool SF { get => Flags.SF; set => Flags.SF = value; }
+        public bool TF { get => Flags.TF; set => Flags.TF = value; }
+        public bool IF { get => Flags.IF; set => Flags.IF = value; }
+        public bool DF { get => Flags.DF; set => Flags.DF = value; }
+        public bool OF { get => Flags.OF; set => Flags.OF = value; }
+
         public UInt64 RAX { get => Registers[0].x64; set => Registers[0].x64 = value; }
         public UInt64 RBX { get => Registers[1].x64; set => Registers[1].x64 = value; }
         public UInt64 RCX { get => Registers[2].x64; set => Registers[2].x64 = value; }
@@ -73,5 +87,10 @@ namespace CSX64
         public byte R13B { get => Registers[13].x8; set => Registers[13].x8 = value; }
         public byte R14B { get => Registers[14].x8; set => Registers[14].x8 = value; }
         public byte R15B { get => Registers[15].x8; set => Registers[15].x8 = value; }
+
+        public byte AH { get => Registers[0].x8h; set => Registers[0].x8h = value; }
+        public byte BH { get => Registers[1].x8h; set => Registers[1].x8h = value; }
+        public byte CH { get => Registers[2].x8h; set => Registers[2].x8h = value; }
+        public byte DH { get => Registers[3].x8h; set => Registers[3].x8h = value; }
     }
 }

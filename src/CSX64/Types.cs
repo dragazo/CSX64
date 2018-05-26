@@ -8,7 +8,7 @@ namespace CSX64
     public enum ErrorCode
     {
         None, OutOfBounds, UnhandledSyscall, UndefinedBehavior, ArithmeticError, Abort,
-        IOFailure, FSDisabled, AccessViolation, InsufficientFDs, FDNotInUse, NotImplemented
+        IOFailure, FSDisabled, AccessViolation, InsufficientFDs, FDNotInUse, NotImplemented, StackOverflow
     }
     public enum OPCode
     {
@@ -23,8 +23,6 @@ namespace CSX64
         JMP, Jcc, LOOP, LOOPcc, CALL, RET,
         PUSH, POP,
         LEA,
-
-        ZX, SX, FX,
 
         ADD, SUB,
         MUL, IMUL, DIV, IDIV,
@@ -42,8 +40,6 @@ namespace CSX64
         FSIN, FCOS, FTAN,
         FSINH, FCOSH, FTANH,
         FASIN, FACOS, FATAN, FATAN2,
-
-        FTOI, ITOF,
 
         BSWAP, BEXTR, BLSI, BLSMSK, BLSR, ANDN,
         BT
@@ -141,18 +137,18 @@ namespace CSX64
         /// <summary>
         /// The lower 32 flags
         /// </summary>
-        public UInt64 EFLAGS
+        public UInt32 EFLAGS
         {
-            get => RFLAGS & 0xffffffff;
-            set => RFLAGS = (RFLAGS & ~0xffffffff) | (value & 0xffffffff);
+            get => (UInt32)RFLAGS;
+            set => RFLAGS = (RFLAGS & ~0xffffffff) | value;
         }
         /// <summary>
         /// The lower 16 flags
         /// </summary>
-        public UInt64 WFLAGS
+        public UInt16 FLAGS
         {
-            get => RFLAGS & 0xffff;
-            set => RFLAGS = (RFLAGS & ~0xfffful) | (value & 0xffff);
+            get => (UInt16)RFLAGS;
+            set => RFLAGS = (RFLAGS & ~0xfffful) | value;
         }
 
         /// <summary>

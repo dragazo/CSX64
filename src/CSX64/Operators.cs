@@ -174,18 +174,34 @@ namespace CSX64
 
         // -- impl -- //
 
-        private bool ProcessGETF()
+        private bool ProcessPUSHF()
         {
-            if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, false)) return false;
+            if (!GetMemAdv(1, out UInt64 ext)) return false;
 
-            return StoreUnaryOpFormat(s, m, Flags.RFLAGS);
+            switch (ext)
+            {
+                case 0: return PushRaw(2, RFLAGS);
+                case 1: return PushRaw(4, RFLAGS & 0x00fcffff); // VM and RF flags are not saved in the stored image for PUSHD and PUSHQ
+                case 2: return PushRaw(8, RFLAGS & 0x00fcffff);
+
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
+            }
         }
-        private bool ProcessSETF()
+        private bool ProcessPOPF()
         {
-            if (!FetchIMMRMFormat(out UInt64 s, out UInt64 a)) return false;
+            if (!GetMemAdv(1, out UInt64 ext)) return false;
 
-            Flags.SetPublicFlags(a);
-            return true;
+            switch (ext)
+            {
+                case 0:
+                case 1:
+                case 2:
+                    if (!PopRaw(Size(ext + 1), out ext)) return false;
+                    RFLAGS = RFLAGS & ~0x7fd5ul | ext & 0x7fd5ul; // can't modify reserved flags (for now we only care about the low 16 flags)
+                    return true;
+
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
+            }
         }
 
         private bool ProcessSETcc()
@@ -274,35 +290,6 @@ namespace CSX64
             return true;
         }
 
-        private bool ProcessFX()
-        {
-            if (!GetMemAdv(1, out UInt64 a)) return false;
-
-            switch ((a >> 2) & 3)
-            {
-                case 3:
-                    switch (a & 3)
-                    {
-                        case 3: return true;
-                        case 2: Registers[a >> 4].x32 = (UInt32)FloatAsUInt64((float)AsDouble(Registers[a >> 4].x64)); return true;
-
-                        default: Terminate(ErrorCode.UndefinedBehavior); return false;
-                    }
-                case 2:
-                    switch (a & 3)
-                    {
-                        case 3: Registers[a >> 4].x64 = DoubleAsUInt64((double)AsFloat(Registers[a >> 4].x32)); return true;
-                        case 2: return true;
-
-                        default: Terminate(ErrorCode.UndefinedBehavior); return false;
-                    }
-
-                
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-
         private bool ProcessADD()
         {
             if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
@@ -336,28 +323,38 @@ namespace CSX64
         {
             if (!FetchIMMRMFormat(out UInt64 s, out UInt64 a)) return false;
 
+            UInt64 res;
+            BigInteger full;
+
             // switch through register sizes
             switch ((s >> 2) & 3)
             {
                 case 0:
-                    Registers[0].x16 = (UInt16)(Registers[0].x8 * a);
-                    Flags.CF = Flags.OF = (Registers[0].x16 >> 8) != 0;
+                    res = AL * a;
+                    AX = (UInt16)res;
+                    CF = OF = AH != 0;
                     break;
                 case 1:
-                    Registers[0].x32 = (UInt32)(Registers[0].x16 * a);
-                    Flags.CF = Flags.OF = (Registers[0].x32 >> 16) != 0;
+                    res = AX * a;
+                    DX = (UInt16)(res >> 16); AX = (UInt16)res;
+                    CF = OF = DX != 0;
                     break;
                 case 2:
-                    Registers[0].x64 = Registers[0].x32 * a;
-                    Flags.CF = Flags.OF = (Registers[0].x64 >> 32) != 0;
+                    res = EAX * a;
+                    EDX = (UInt32)(res >> 32); EAX = (UInt32)res;
+                    CF = OF = EDX != 0;
                     break;
-                case 3: // 64 bits requires extra logic
-                    BigInteger full = new BigInteger(Registers[0].x64) * new BigInteger(a);
-                    Registers[0].x64 = (UInt64)(full & 0xffffffffffffffff);
-                    Registers[1].x64 = (UInt64)(full >> 64);
-                    Flags.CF = Flags.OF = Registers[1].x64 != 0;
+                case 3:
+                    full = new BigInteger(RAX) * a;
+                    RDX = (UInt64)(full >> 64); RAX = (UInt64)(full & 0xffffffffffffffff);
+                    CF = OF = RDX != 0;
                     break;
             }
+
+            SF = Rand.NextBool();
+            ZF = Rand.NextBool();
+            AF = Rand.NextBool();
+            PF = Rand.NextBool();
 
             return true;
         }
@@ -376,197 +373,237 @@ namespace CSX64
         }
         private bool ProcessUnary_IMUL()
         {
-            UInt64 s, a;
+            if (!FetchIMMRMFormat(out UInt64 s, out UInt64 _a)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
 
-            if (!FetchIMMRMFormat(out s, out a)) return false;
+            // get val as sign extended
+            Int64 a = (Int64)SignExtend(_a, sizecode);
+
+            Int64 res;
+            BigInteger full;
 
             // switch through register sizes
-            switch ((s >> 2) & 3)
+            switch (sizecode)
             {
                 case 0:
-                    Registers[0].x16 = (UInt16)((Int64)SignExtend(Registers[0].x8, 0) * (Int64)SignExtend(a, 0));
-                    Flags.CF = Flags.OF = (Registers[0].x16 >> 8) == 0 && Positive(Registers[0].x8, 0) || (Registers[0].x16 >> 8) == 0xff && Negative(Registers[0].x8, 0);
-                    Flags.SF = Negative(Registers[0].x16, 1);
+                    res = AL * a;
+                    AX = (UInt16)res;
+                    CF = OF = res != (sbyte)res;
                     break;
                 case 1:
-                    Registers[0].x32 = (UInt32)((Int64)SignExtend(Registers[0].x16, 1) * (Int64)SignExtend(a, 1));
-                    Flags.CF = Flags.OF = (Registers[0].x32 >> 16) == 0 && Positive(Registers[0].x16, 1) || (Registers[0].x32 >> 16) == 0xffff && Negative(Registers[0].x16, 1);
-                    Flags.SF = Negative(Registers[0].x32, 2);
+                    res = AX * a;
+                    DX = (UInt16)(res >> 16); AX = (UInt16)res;
+                    CF = OF = res != (Int16)res;
                     break;
                 case 2:
-                    Registers[0].x64 = (UInt64)((Int64)SignExtend(Registers[0].x32, 2) * (Int64)SignExtend(a, 2));
-                    Flags.CF = Flags.OF = (Registers[0].x64 >> 32) == 0 && Positive(Registers[0].x32, 2) || (Registers[0].x64 >> 32) == 0xffffffff && Negative(Registers[0].x32, 2);
-                    Flags.SF = Negative(Registers[0].x64, 3);
+                    res = EAX * a;
+                    EDX = (UInt32)(res >> 32); EAX = (UInt32)res;
+                    CF = OF = res != (Int32)res;
                     break;
-                case 3: // 64 bits requires extra logic
-                    // store negative flag (we'll do the multiplication in signed values since bit shifting is well-defined for positive BigInteger)
-                    bool neg = false;
-                    if (Negative(Registers[0].x64, 3)) { neg = !neg; Registers[0].x64 = ~Registers[0].x64 + 1; }
-                    if (Negative(a, 3)) { neg = !neg; a = ~a + 1; }
-
-                    // form the full (positive) product
-                    BigInteger full = new BigInteger(Registers[0].x64) * new BigInteger(a);
-                    Registers[0].x64 = (UInt64)(full & 0xffffffffffffffff);
-                    Registers[1].x64 = (UInt64)(full >> 64);
-
-                    // if it should be negative, apply that change now
-                    if (neg)
-                    {
-                        Registers[0].x64 = ~Registers[0].x64 + 1;
-                        Registers[1].x64 = ~Registers[1].x64;
-
-                        // account for carry from low 64 bits
-                        if (Registers[0].x64 == 0) ++Registers[1].x64;
-                    }
-                    Flags.CF = Flags.OF = Registers[1].x64 == 0 && Positive(Registers[0].x64, 3) || Registers[1].x64 == 0xffffffffffffffff && Negative(Registers[0].x64, 3);
-                    Flags.SF = Negative(Registers[1].x64, 3);
+                case 3:
+                    full = new BigInteger(RAX) * a;
+                    RDX = (UInt64)(full >> 64); RAX = (UInt64)(full & 0xffffffffffffffff);
+                    CF = OF = full != (Int64)RAX;
                     break;
             }
+
+            SF = Rand.NextBool();
+            ZF = Rand.NextBool();
+            AF = Rand.NextBool();
+            PF = Rand.NextBool();
 
             return true;
         }
         private bool ProcessBinary_IMUL()
         {
-            if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
+            if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 _a, out UInt64 _b)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
-            UInt64 res = Truncate(a * b, sizecode);
+            // get vals as sign extended
+            Int64 a = (Int64)SignExtend(_a, sizecode);
+            Int64 b = (Int64)SignExtend(_b, sizecode);
 
-            UpdateFlagsInt(res, sizecode);
+            Int64 res = 0;
+            BigInteger full;
 
-            return StoreBinaryOpFormat(s, m, res);
+            // switch through register sizes
+            switch (sizecode)
+            {
+                case 0:
+                    res = a * b;
+                    CF = OF = res != (sbyte)res;
+                    break;
+                case 1:
+                    res = a * b;
+                    CF = OF = res != (Int16)res;
+                    break;
+                case 2:
+                    res = a * b;
+                    CF = OF = res != (Int32)res;
+                    break;
+                case 3:
+                    full = new BigInteger(a) * b;
+                    res = (Int64)(full & 0xffffffffffffffff);
+                    CF = OF = full != res;
+                    break;
+            }
+
+            SF = Rand.NextBool();
+            ZF = Rand.NextBool();
+            AF = Rand.NextBool();
+            PF = Rand.NextBool();
+
+            return StoreBinaryOpFormat(s, m, (UInt64)res);
         }
         private bool ProcessTernary_IMUL()
         {
             if (!GetMemAdv(1, out UInt64 s)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
-            UInt64 a;
+            // read raw vals
+            UInt64 _a;
             if ((s & 1) == 0)
             {
-                if (!GetMemAdv(1, out a)) return false;
-                a = Registers[s & 15].Get(sizecode);
+                if (!GetMemAdv(1, out _a)) return false;
+                _a = Registers[s & 15].Get(sizecode);
             }
-            else if (!GetAddressAdv(out a) || !GetMemRaw(a, Size(sizecode), out a)) return false;
+            else if (!GetAddressAdv(out _a) || !GetMemRaw(_a, Size(sizecode), out _a)) return false;
 
-            if (!GetMemAdv(Size(sizecode), out UInt64 b)) return false;
+            if (!GetMemAdv(Size(sizecode), out UInt64 _b)) return false;
 
-            UInt64 res = (UInt64)((Int64)a * (Int64)b);
+            // get vals as signed
+            Int64 a = (Int64)SignExtend(_a, sizecode);
+            Int64 b = (Int64)SignExtend(_b, sizecode);
 
-            UpdateFlagsInt(res, sizecode);
+            Int64 res = 0;
+            BigInteger full;
 
-            Registers[s >> 4].Set(sizecode, res);
+            // switch through register sizes
+            switch (sizecode)
+            {
+                case 0:
+                    res = a * b;
+                    CF = OF = res != (sbyte)res;
+                    break;
+                case 1:
+                    res = a * b;
+                    CF = OF = res != (Int16)res;
+                    break;
+                case 2:
+                    res = a * b;
+                    CF = OF = res != (Int32)res;
+                    break;
+                case 3:
+                    full = new BigInteger(a) * b;
+                    res = (Int64)(full & 0xffffffffffffffff);
+                    CF = OF = full != res;
+                    break;
+            }
+
+            SF = Rand.NextBool();
+            ZF = Rand.NextBool();
+            AF = Rand.NextBool();
+            PF = Rand.NextBool();
+
+            Registers[s >> 4].Set(sizecode, (UInt64)res);
             return true;
         }
 
         private bool ProcessDIV()
         {
-            UInt64 s, a, full;
-            BigInteger bigraw, bigfull;
-
-            if (!FetchIMMRMFormat(out s, out a)) return false;
+            if (!FetchIMMRMFormat(out UInt64 s, out UInt64 a)) return false;
 
             if (a == 0) { Terminate(ErrorCode.ArithmeticError); return false; }
+
+            UInt64 full, quo, rem;
+            BigInteger bigfull, bigquo, bigrem;
 
             // switch through register sizes
             switch ((s >> 2) & 3)
             {
                 case 0:
-                    full = Registers[0].x16 / a;
-                    if ((full >> 8) != 0) { Terminate(ErrorCode.ArithmeticError); return false; }
-                    Registers[1].x8 = (byte)(Registers[0].x16 % a);
-                    Registers[0].x8 = (byte)full;
-                    Flags.CF = Registers[1].x8 != 0;
+                    full = AX;
+                    quo = full / a; rem = full % a;
+                    if (quo > 0xfful) { Terminate(ErrorCode.ArithmeticError); return false; }
+                    AL = (byte)quo; AH = (byte)rem;
                     break;
                 case 1:
-                    full = Registers[0].x32 / a;
-                    if ((full >> 16) != 0) { Terminate(ErrorCode.ArithmeticError); return false; }
-                    Registers[1].x16 = (UInt16)(Registers[0].x32 % a);
-                    Registers[0].x16 = (UInt16)full;
-                    Flags.CF = Registers[1].x16 != 0;
+                    full = ((UInt64)DX << 16) | AX;
+                    quo = full / a; rem = full % a;
+                    if (quo > 0xfffful) { Terminate(ErrorCode.ArithmeticError); return false; }
+                    AX = (UInt16)quo; DX = (UInt16)rem;
                     break;
                 case 2:
-                    full = Registers[0].x64 / a;
-                    if ((full >> 32) != 0) { Terminate(ErrorCode.ArithmeticError); return false; }
-                    Registers[1].x32 = (UInt32)(Registers[0].x64 % a);
-                    Registers[0].x32 = (UInt32)full;
-                    Flags.CF = Registers[1].x32 != 0;
+                    full = ((UInt64)EDX << 32) | EAX;
+                    quo = full / a; rem = full % a;
+                    if (quo > 0xfffffffful) { Terminate(ErrorCode.ArithmeticError); return false; }
+                    EAX = (UInt32)quo; EDX = (UInt32)rem;
                     break;
-                case 3: // 64 bits requires extra logic
-                    bigraw = (new BigInteger(Registers[1].x64) << 64) | new BigInteger(Registers[0].x64);
-                    bigfull = bigraw / new BigInteger(a);
-
-                    if ((bigfull >> 64) != 0) { Terminate(ErrorCode.ArithmeticError); return false; }
-
-                    Registers[1].x64 = (UInt64)(bigraw % new BigInteger(a));
-                    Registers[0].x64 = (UInt64)bigfull;
-                    Flags.CF = Registers[1].x64 != 0;
+                case 3:
+                    bigfull = (new BigInteger(RDX) << 64) | RAX;
+                    bigquo = BigInteger.DivRem(bigfull, a, out bigrem);
+                    if (bigquo > 0xfffffffffffffffful) { Terminate(ErrorCode.ArithmeticError); return false; }
+                    RAX = (UInt64)bigquo; RDX = (UInt64)bigrem;
                     break;
             }
+
+            CF = Rand.NextBool();
+            OF = Rand.NextBool();
+            SF = Rand.NextBool();
+            ZF = Rand.NextBool();
+            AF = Rand.NextBool();
+            PF = Rand.NextBool();
 
             return true;
         }
         private bool ProcessIDIV()
         {
-            UInt64 s, a;
-            Int64 _a, _b, full;
-            BigInteger bigraw, bigfull;
+            if (!FetchIMMRMFormat(out UInt64 s, out UInt64 _a)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
 
-            if (!FetchIMMRMFormat(out s, out a)) return false;
+            if (_a == 0) { Terminate(ErrorCode.ArithmeticError); return false; }
 
-            if (a == 0) { Terminate(ErrorCode.ArithmeticError); return false; }
+            // get val as signed
+            Int64 a = (Int64)SignExtend(_a, sizecode);
+
+            Int64 full, quo, rem;
+            BigInteger bigfull, bigquo, bigrem;
 
             // switch through register sizes
             switch ((s >> 2) & 3)
             {
                 case 0:
-                    _a = (Int64)SignExtend(Registers[0].x16, 1);
-                    _b = (Int64)SignExtend(a, 0);
-                    full = _a / _b;
-
-                    if (full != (sbyte)full) { Terminate(ErrorCode.ArithmeticError); return false; }
-
-                    Registers[0].x8 = (byte)full;
-                    Registers[1].x8 = (byte)(_a % _b);
-                    Flags.CF = Registers[1].x8 != 0;
-                    Flags.SF = Negative(Registers[0].x8, 0);
+                    full = AX;
+                    quo = full / a; rem = full % a;
+                    if (quo != (sbyte)quo) { Terminate(ErrorCode.ArithmeticError); return false; }
+                    AL = (byte)quo; AH = (byte)rem;
                     break;
                 case 1:
-                    _a = (Int64)SignExtend(Registers[0].x32, 2);
-                    _b = (Int64)SignExtend(a, 1);
-                    full = _a / _b;
-
-                    if (full != (Int16)full) { Terminate(ErrorCode.ArithmeticError); return false; }
-
-                    Registers[0].x16 = (UInt16)full;
-                    Registers[1].x16 = (UInt16)(_a % _b);
-                    Flags.CF = Registers[1].x16 != 0;
-                    Flags.SF = Negative(Registers[0].x16, 1);
+                    full = (DX << 16) | AX;
+                    quo = full / a; rem = full % a;
+                    if (quo != (Int16)quo) { Terminate(ErrorCode.ArithmeticError); return false; }
+                    AX = (UInt16)quo; DX = (UInt16)rem;
                     break;
                 case 2:
-                    _a = (Int64)Registers[0].x64;
-                    _b = (Int64)SignExtend(a, 2);
-                    full = _a / _b;
-
-                    if (full != (Int32)full) { Terminate(ErrorCode.ArithmeticError); return false; }
-
-                    Registers[0].x32 = (UInt32)full;
-                    Registers[1].x32 = (UInt32)(_a % _b);
-                    Flags.CF = Registers[1].x32 != 0;
-                    Flags.SF = Negative(Registers[0].x32, 2);
+                    full = ((Int64)EDX << 32) | EAX;
+                    quo = full / a; rem = full % a;
+                    if (quo != (Int32)quo) { Terminate(ErrorCode.ArithmeticError); return false; }
+                    EAX = (UInt32)quo; EDX = (UInt32)rem;
                     break;
-                case 3: // 64 bits requires extra logic
-                    _b = (Int64)a;
-                    bigraw = (new BigInteger((Int64)Registers[1].x64) << 64) + new BigInteger((Int64)Registers[0].x64);
-                    bigfull = bigraw / _b;
-
-                    if (bigfull != (Int64)bigfull) { Terminate(ErrorCode.ArithmeticError); return false; }
-
-                    Registers[1].x64 = (UInt64)(Int64)(bigraw % _b);
-                    Registers[0].x64 = (UInt64)(Int64)bigfull;
-                    Flags.CF = Registers[1].x64 != 0;
+                case 3:
+                    bigfull = (new BigInteger((Int64)RDX) << 64) | (Int64)RAX;
+                    bigquo = BigInteger.DivRem(bigfull, a, out bigrem);
+                    if (bigquo > Int64.MaxValue || bigquo < Int64.MinValue) { Terminate(ErrorCode.ArithmeticError); return false; }
+                    RAX = (UInt64)bigquo; RDX = (UInt64)bigrem;
                     break;
             }
+
+            CF = Rand.NextBool();
+            OF = Rand.NextBool();
+            SF = Rand.NextBool();
+            ZF = Rand.NextBool();
+            AF = Rand.NextBool();
+            PF = Rand.NextBool();
 
             return true;
         }

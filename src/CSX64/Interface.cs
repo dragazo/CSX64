@@ -128,11 +128,8 @@ namespace CSX64
 
             // randomize registers
             foreach (Register reg in Registers) reg.x64 = Rand.NextUInt64();
-            // randomize public flags
-            Flags.SetPublicFlags((UInt64)Rand.Next());
-
-            // make sure flag 1 is set (from Intel x86_64 standard)
-            Flags.RFLAGS |= 2;
+            // set public flags: make sure flag 1 is set (from Intel x86_64 standard)
+            EFLAGS = 2;
 
             // set execution state
             Pos = 0;
@@ -165,16 +162,16 @@ namespace CSX64
                 for (int i = 0; i < pointers.Length; ++i) SetMem(stack + (UInt64)i * 8, pointers[i]);
             }
 
-            // load arg count and arg array pointer to $0 and $1 respecively
-            Registers[0].x64 = args != null ? (UInt64)args.Length : 0;
-            Registers[1].x64 = stack;
+            // load arg count and arg array pointer to RDI, RSI
+            RDI = args != null ? (UInt64)args.Length : 0;
+            RSI = stack;
 
             // initialize base/stack pointer registers
-            Registers[14].x64 = Registers[15].x64 = stack;
+            RBP = RSP = stack;
 
-            // also push $0 and $1 onto the stack so it'll work with cdecl calling conventions (RTL push order)
-            Push(Registers[1].x64);
-            Push(Registers[0].x64);
+            // also push args to stack (RTL)
+            Push(RSI);
+            Push(RDI);
 
             return true;
         }
@@ -322,8 +319,8 @@ namespace CSX64
                 case OPCode.HLT: Terminate(ErrorCode.Abort); return true;
                 case OPCode.SYSCALL: if (Syscall()) return true; Terminate(ErrorCode.UnhandledSyscall); return false;
 
-                case OPCode.PUSHF: return PushRaw(2, Flags.RFLAGS);
-                case OPCode.POPF: if (!PopRaw(2, out op)) return false; Flags.RFLAGS = Flags.RFLAGS & ~0xfffful | op; return true;
+                case OPCode.PUSHF: return ProcessPUSHF();
+                case OPCode.POPF: return ProcessPOPF();
 
                 case OPCode.SETcc: return ProcessSETcc();
 
@@ -343,10 +340,6 @@ namespace CSX64
                 case OPCode.POP: return ProcessPOP();
 
                 case OPCode.LEA: return ProcessLEA();
-
-                case OPCode.ZX: if (!GetMemAdv(1, out op)) return false; Registers[op >> 4].Set(op & 3, Registers[op >> 4].Get((op >> 2) & 3)); return true;
-                case OPCode.SX: if (!GetMemAdv(1, out op)) return false; Registers[op >> 4].Set(op & 3, SignExtend(Registers[op >> 4].Get((op >> 2) & 3), (op >> 2) & 3)); return true;
-                case OPCode.FX: return ProcessFX();
 
                 case OPCode.ADD: return ProcessADD();
                 case OPCode.SUB: return ProcessSUB();
@@ -411,10 +404,7 @@ namespace CSX64
                 case OPCode.FASIN: return ProcessFASIN();
                 case OPCode.FACOS: return ProcessFACOS();
                 case OPCode.FATAN: return ProcessFATAN();
-                case OPCode.FATAN2: return ProcessFATAN2();                
-
-                case OPCode.FTOI: return ProcessFTOI();
-                case OPCode.ITOF: return ProcessITOF();
+                case OPCode.FATAN2: return ProcessFATAN2();
 
                 case OPCode.BSWAP: return ProcessBSWAP();
                 case OPCode.BEXTR: return ProcessBEXTR();

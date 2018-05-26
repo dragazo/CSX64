@@ -125,6 +125,15 @@ namespace CSX64
             return res.ToString();
         }
 
+        /// <summary>
+        /// Returns true if this value is a power of two. (zero returns false)
+        /// </summary>
+        /// <param name="val">the value to test</param>
+        public static bool IsPowerOf2(this UInt64 val)
+        {
+            return val != 0 && (val & (val - 1)) == 0;
+        }
+
         // -- memory utilities -- //
 
         /// <summary>
