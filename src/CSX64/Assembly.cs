@@ -684,7 +684,7 @@ namespace CSX64
             };
         }
 
-        private bool _FindPath(string value, Stack<Expr> path)
+        private bool _FindPath(string value, Stack<Expr> path, bool upper)
         {
             // mark ourselves as a candidate
             path.Push(this);
@@ -693,13 +693,13 @@ namespace CSX64
             if (OP == OPs.None)
             {
                 // if we found the value, we're done
-                if (value == Token) return true;
+                if ((upper ? Token?.ToUpper() : Token) == value) return true;
             }
             // otherwise test children
             else
             {
                 // if they found it, we're done
-                if (Left._FindPath(value, path) || Right != null && Right._FindPath(value, path)) return true;
+                if (Left._FindPath(value, path, upper) || Right != null && Right._FindPath(value, path, upper)) return true;
             }
 
             // otherwise we couldn't find it
@@ -711,38 +711,41 @@ namespace CSX64
         /// </summary>
         /// <param name="value">the value to find</param>
         /// <param name="path">the path to the specified value, with the value at the top of the stack and the root at the bottom</param>
-        public bool FindPath(string value, out Stack<Expr> path)
+        /// <param name="upper">true if the token should be converted to upper case before the comparison</param>
+        public bool FindPath(string value, out Stack<Expr> path, bool upper = false)
         {
             // create the stack
             path = new Stack<Expr>();
 
             // refer to helper
-            return _FindPath(value, path);
+            return _FindPath(value, path, upper);
         }
         /// <summary>
         /// Finds the path to the specified value in the expression tree. Returns true on success. This version reuses the stack object by first clearing its contents.
         /// </summary>
         /// <param name="value">the value to find</param>
         /// <param name="path">the path to the specified value, with the root at the bottom of the stack and the found node at the top</param>
-        public bool FindPath(string value, Stack<Expr> path)
+        /// <param name="upper">true if the token should be converted to upper case before the comparison</param>
+        public bool FindPath(string value, Stack<Expr> path, bool upper = false)
         {
             // ensure stack is empty
             path.Clear();
 
             // refer to helper
-            return _FindPath(value, path);
+            return _FindPath(value, path, upper);
         }
 
         /// <summary>
         /// Finds the value in the specified expression tree. Returns it on success, otherwise null
         /// </summary>
         /// <param name="value">the found node or null</param>
-        public Expr Find(string value)
+        /// <param name="upper">true if the token should be converted to upper case before the comparison</param>
+        public Expr Find(string value, bool upper = false)
         {
             // if we're a leaf, test ourself
-            if (OP == OPs.None) return Token == value ? this : null;
+            if (OP == OPs.None) return (upper ? Token?.ToUpper() : Token) == value ? this : null;
             // otherwise test children
-            else return Left.Find(value) ?? Right?.Find(value);
+            else return Left.Find(value, upper) ?? Right?.Find(value, upper);
         }
 
         /// <summary>
@@ -1064,16 +1067,23 @@ namespace CSX64
             "##TEXT", "##RODATA", "##DATA", "##BSS",
             "__heap__"
         };
-
+        
         private static string[] AddressRegs = // must be in correct binary order (register code)
         {
-            "RAX", "RBX", "RCX", "RDX",
-            "RSI", "RDI", "RBP", "RSP",
-            "R8", "R9", "R10", "R11", "R12", "R13", "R14", "R15"
+            "RAX", "RBX", "RCX", "RDX", "RSI", "RDI", "RBP", "RSP", "R8", "R9", "R10", "R11", "R12", "R13", "R14", "R15"
         };
         private static string[] AddressPrefixes = // must be in correct binary order (size code)
         {
             "BYTEPTR", "WORDPTR", "DWORDPTR", "QWORDPTR"
+        };
+
+        private static string[] RegisterLabels =
+        {
+            "RAX", "RBX", "RCX", "RDX", "RSI", "RDI", "RBP", "RSP", "R8", "R9", "R10", "R11", "R12", "R13", "R14", "R15",
+            "EAX", "EBX", "ECX", "EDX", "ESI", "EDI", "EBP", "ESP", "R8D", "R9D", "R10D", "R11D", "R12D", "R13D", "R14D", "R15D",
+            "AX", "BX", "CX", "DX", "SI", "DI", "BP", "SP", "R8W", "R9W", "R10W", "R11W", "R12W", "R13W", "R14W", "R15W",
+            "AL", "BL", "CL", "DL", "SIL", "DIL", "BPL", "SPL", "R8B", "R9B", "R10B", "R11B", "R12B", "R13B", "R14B", "R15B",
+            "AH", "BH", "CH", "DH"
         };
 
         /// <summary>
@@ -1093,7 +1103,7 @@ namespace CSX64
             public int line;
             public UInt64 line_pos_in_seg;
 
-            public string last_nonlocal_label; // string value of last non-local label
+            public string last_nonlocal_label;
 
             public string label_def;
             public string op;
@@ -1188,16 +1198,16 @@ namespace CSX64
                 return true;
             }
 
-            public static bool IsValidName(string token)
+            public static bool IsValidName(string token, ref string err)
             {
                 // can't be empty or over 255 chars long
-                if (token.Length == 0 || token.Length > 255) return false;
+                if (token.Length == 0 || token.Length > 255) { err = $"Symbol \"{token}\" is too long"; return false; }
 
                 // first char is underscore or letter
-                if (token[0] != '_' && !char.IsLetter(token[0])) return false;
+                if (token[0] != '_' && !char.IsLetter(token[0])) { err = $"Symbol \"{token}\" contained an illegal character"; return false; }
                 // all other chars may additionally be numbers or periods
                 for (int i = 1; i < token.Length; ++i)
-                    if (token[i] != '_' && token[i] != '.' && !char.IsLetterOrDigit(token[i])) return false;
+                    if (token[i] != '_' && token[i] != '.' && !char.IsLetterOrDigit(token[i])) { err = $"Symbol \"{token}\" contained an illegal character"; return false; }
 
                 return true;
             }
@@ -1207,9 +1217,10 @@ namespace CSX64
                 if (label[0] == '.')
                 {
                     string sub = label.Substring(1); // local symbol name
+                    string err = null;
 
                     // local name can't be empty
-                    if (!IsValidName(sub)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: \"{label}\" is not a legal local symbol name"); return false; }
+                    if (!IsValidName(sub, ref err)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: {err}"); return false; }
                     // can't make a local symbol before any non-local ones exist
                     if (last_nonlocal_label == null) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: Cannot define a local symbol before the first non-local symbol in the segment"); return false; }
 
@@ -1452,7 +1463,7 @@ namespace CSX64
                             temp = new Expr() { Token = val };
 
                             // it either needs to be evaluatable or a valid label name
-                            if (!temp.Evaluate(file.Symbols, out UInt64 _res, out bool floating, ref err) && !IsValidName(val))
+                            if (!temp.Evaluate(file.Symbols, out UInt64 _res, out bool floating, ref err) && !IsValidName(val, ref err))
                             { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to resolve token as a valid imm or symbol name \"{val}\"\n-> {err}"); return false; }
                         }
                     }
@@ -1815,7 +1826,7 @@ namespace CSX64
                 string err = string.Empty; // evaluation error
 
                 // while we can find this symbol
-                while (hole.FindPath(label, path))
+                while (hole.FindPath(label, path, true))
                 {
                     // move path into list
                     while (path.Count > 0) list.Add(path.Pop());
@@ -2014,6 +2025,10 @@ namespace CSX64
                     }
                 }
 
+                // if it still contains any registers they weren't 64-bit
+                foreach (string reg in RegisterLabels)
+                    if (hole.Find(reg, true) != null) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to use register {reg} in an address expression. Only 64-bit registers are allowed."); return false; }
+
                 // make sure only one register is negative
                 if (n1 && n2) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Only one register may be negative in an address expression"); return false; }
                 // if the negative register is r1, swap with r2
@@ -2092,6 +2107,8 @@ namespace CSX64
             {
                 if (label_def != null)
                 {
+                    string err = null;
+
                     // ensure it's not empty
                     if (label_def.Length == 0) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: Empty label encountered"); return false; }
 
@@ -2100,7 +2117,10 @@ namespace CSX64
 
                     // mutate and test result for legality
                     if (!MutateName(ref label_def)) return false;
-                    if (!IsValidName(label_def)) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: Symbol name \"{label_def}\" is invalid"); return false; }
+                    if (!IsValidName(label_def, ref err)) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: {err}"); return false; }
+
+                    // can't name same as a register (could be problematic) (not in IsValidName() because then address parser would fail if address contained a register)
+                    if (RegisterLabels.Contains(label_def.ToUpper())) { res = new AssembleResult(AssembleError.InvalidLabel, $"Symbol \"{label_def}\" is reserved"); return false; }
 
                     // ensure we don't redefine a symbol
                     if (file.Symbols.ContainsKey(label_def)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Symbol \"{label_def}\" was already defined"); return false; }
@@ -2122,12 +2142,13 @@ namespace CSX64
             {
                 if (args.Length == 0) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: GLOBAL expected at least one symbol to export"); return false; }
 
+                string err = null;
                 foreach (string symbol in args)
                 {
                     // special error message for using global on local labels
                     if (symbol[0] == '.') { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Cannot export local symbols"); return false; }
                     // test name for legality
-                    if (!IsValidName(symbol)) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: Invalid symbol name \"{symbol}\""); return false; }
+                    if (!IsValidName(symbol, ref err)) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: {err}"); return false; }
 
                     // don't add to global list twice
                     if (file.GlobalSymbols.Contains(symbol)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Attempt to global symbol \"{symbol}\" multiple times"); return false; }
@@ -2144,12 +2165,13 @@ namespace CSX64
             {
                 if (args.Length == 0) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: EXTERN expected at least one symbol to import"); return false; }
 
+                string err = null;
                 foreach (string symbol in args)
                 {
                     // special error message for using extern on local labels
                     if (symbol[0] == '.') { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Cannot import local symbols"); return false; }
                     // test name for legality
-                    if (!IsValidName(symbol)) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: Invalid symbol name \"{symbol}\""); return false; }
+                    if (!IsValidName(symbol, ref err)) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: {err}"); return false; }
 
                     // ensure we don't extern a symbol that already exists
                     if (file.Symbols.ContainsKey(label_def)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Cannot define symbol \"{label_def}\" (defined internally) as external"); return false; }

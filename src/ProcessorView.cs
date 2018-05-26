@@ -77,7 +77,6 @@ namespace CSX64
             
             // alias graphics object and flags register
             Graphics g = e.Graphics;
-            FlagsRegister f = Computer.GetFlags();
 
             // render position / settings
             float x, y;
@@ -87,30 +86,44 @@ namespace CSX64
 
             x = 0; y = 0;
             g.DrawString("Registers", DebuggingFont, DebuggingBrush, x, y); y += h;
-            for (int i = 0; i < 16; ++i)
-                g.DrawString($"R{i:x}: {Computer.GetRegister(i).x64:x16}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"RAX: {Computer.RAX:x16}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"RBX: {Computer.RBX:x16}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"RCX: {Computer.RCX:x16}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"RDX: {Computer.RDX:x16}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"RSI: {Computer.RSI:x16}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"RDI: {Computer.RDI:x16}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"RBP: {Computer.RBP:x16}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"RSP: {Computer.RSP:x16}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"R8:  {Computer.R8:x16}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"R9:  {Computer.R9:x16}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"R10: {Computer.R10:x16}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"R11: {Computer.R11:x16}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"R12: {Computer.R12:x16}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"R13: {Computer.R13:x16}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"R14: {Computer.R14:x16}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"R15: {Computer.R15:x16}", DebuggingFont, DebuggingBrush, x, y += h);
 
             // -- flags -- //
-
+            
             x = 400; y = 0;
             g.DrawString("Flags", DebuggingFont, DebuggingBrush, x, y); y += h;
-            g.DrawString($"Z:  {(f.ZF ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
-            g.DrawString($"S:  {(f.SF ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
-            g.DrawString($"P:  {(f.PF ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
-            g.DrawString($"O:  {(f.OF ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
-            g.DrawString($"C:  {(f.CF ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"Z:  {(Computer.ZF ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"S:  {(Computer.SF ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"P:  {(Computer.PF ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"O:  {(Computer.OF ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"C:  {(Computer.CF ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
 
             y += h;
-            g.DrawString($"a:  {(f.a ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
-            g.DrawString($"ae: {(f.ae ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
-            g.DrawString($"b:  {(f.b ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
-            g.DrawString($"be: {(f.be ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"a:  {(Computer.a ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"ae: {(Computer.ae ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"b:  {(Computer.b ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"be: {(Computer.be ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
 
             y += h;
-            g.DrawString($"g:  {(f.g ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
-            g.DrawString($"ge: {(f.ge ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
-            g.DrawString($"l:  {(f.l ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
-            g.DrawString($"le: {(f.le ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"g:  {(Computer.g ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"ge: {(Computer.ge ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"l:  {(Computer.l ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"le: {(Computer.le ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
 
             // -- state -- //
 

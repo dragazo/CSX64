@@ -10,6 +10,41 @@ namespace CSX64
     {
         // -- op utilities -- //
 
+        /// <summary>
+        /// Attempts to extract the specified <see cref="ccOPCode"/> status flag. Returns true on success.
+        /// </summary>
+        /// <param name="computer">the flags object to examine</param>
+        /// <param name="code">the code to extract</param>
+        public bool TryGet_cc(ccOPCode code, out bool res)
+        {
+            switch (code)
+            {
+                case ccOPCode.z: res = ZF; return true;
+                case ccOPCode.nz: res = !ZF; return true;
+                case ccOPCode.s: res = SF; return true;
+                case ccOPCode.ns: res = !SF; return true;
+                case ccOPCode.p: res = PF; return true;
+                case ccOPCode.np: res = !PF; return true;
+                case ccOPCode.o: res = OF; return true;
+                case ccOPCode.no: res = !OF; return true;
+                case ccOPCode.c: res = CF; return true;
+                case ccOPCode.nc: res = !CF; return true;
+
+                case ccOPCode.a: res = a; return true;
+                case ccOPCode.ae: res = ae; return true;
+                case ccOPCode.b: res = b; return true;
+                case ccOPCode.be: res = be; return true;
+
+                case ccOPCode.g: res = g; return true;
+                case ccOPCode.ge: res = ge; return true;
+                case ccOPCode.l: res = l; return true;
+                case ccOPCode.le: res = le; return true;
+
+                // otherwise code unknown
+                default: return res = false;
+            }
+        }
+
         private bool FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b,
             bool get_a = true, int _a_sizecode = -1, int _b_sizecode = -1, bool allow_b_mem = true)
         {
@@ -28,13 +63,13 @@ namespace CSX64
             switch (s & 3)
             {
                 case 0:
-                    if (get_a) a = Registers[s >> 4].Get(a_sizecode);
+                    if (get_a) a = Registers[s >> 4][a_sizecode];
                     if (!GetMemAdv(Size(b_sizecode), out b)) return false;
                     return true;
                 case 1:
                     if (!allow_b_mem) { b = 0; Terminate(ErrorCode.UndefinedBehavior); return false; }
 
-                    if (get_a) a = Registers[s >> 4].Get(a_sizecode);
+                    if (get_a) a = Registers[s >> 4][a_sizecode];
                     if (!GetAddressAdv(out b) || !GetMemRaw(b, Size(b_sizecode), out b)) return false;
                     return true;
                 case 2:
@@ -42,12 +77,12 @@ namespace CSX64
                     switch ((b >> 4) & 1)
                     {
                         case 0:
-                            if (get_a) a = Registers[s >> 4].Get(a_sizecode);
-                            b = Registers[b & 15].Get(b_sizecode);
+                            if (get_a) a = Registers[s >> 4][a_sizecode];
+                            b = Registers[b & 15][b_sizecode];
                             return true;
                         case 1:
                             if (!GetAddressAdv(out m) || get_a && !GetMemRaw(m, Size(a_sizecode), out a)) return false;
-                            b = Registers[b & 15].Get(b_sizecode);
+                            b = Registers[b & 15][b_sizecode];
                             s |= 256; // mark as memory path of mode 2
                             return true;
 
@@ -70,7 +105,7 @@ namespace CSX64
             {
                 case 0:
                 case 1:
-                    Registers[s >> 4].Set(sizecode, res);
+                    Registers[s >> 4][sizecode] = res;
                     return true;
                 case 2:
                     if (s < 256) goto case 1; else goto case 3;
@@ -97,7 +132,7 @@ namespace CSX64
             switch (s & 1)
             {
                 case 0:
-                    if (get_a) a = Registers[s >> 4].Get(a_sizecode);
+                    if (get_a) a = Registers[s >> 4][a_sizecode];
                     return true;
                 case 1:
                     return GetAddressAdv(out m) && (!get_a || GetMemRaw(m, Size(a_sizecode), out a));
@@ -113,7 +148,7 @@ namespace CSX64
             switch (s & 1)
             {
                 case 0:
-                    Registers[s >> 4].Set(sizecode, res);
+                    Registers[s >> 4][sizecode] = res;
                     return true;
                 case 1:
                     return SetMemRaw(m, Size(sizecode), res);
@@ -132,7 +167,7 @@ namespace CSX64
             switch (s & 3)
             {
                 case 0: if (!GetMemAdv(Size((s >> 2) & 3), out a)) return false; break;
-                case 1: a = Registers[s >> 4].Get((s >> 2) & 3); break;
+                case 1: a = Registers[s >> 4][(s >> 2) & 3]; break;
                 case 2: if (!GetAddressAdv(out a) || !GetMemRaw(a, Size((s >> 2) & 3), out a)) return false; break;
                 default: Terminate(ErrorCode.UndefinedBehavior); { a = 0; return false; }
             }
@@ -143,33 +178,33 @@ namespace CSX64
         // updates the flags for integral ops (identical for most integral ops)
         private void UpdateFlagsInt(UInt64 value, UInt64 sizecode)
         {
-            Flags.ZF = value == 0;
-            Flags.SF = Negative(value, sizecode);
+            ZF = value == 0;
+            SF = Negative(value, sizecode);
 
             // compute parity flag (only of low 8 bits)
             bool parity = true;
             for (int i = 0; i < 8; ++i)
                 if (((value >> i) & 1) != 0) parity = !parity;
-            Flags.PF = parity;
+            PF = parity;
         }
         // updates the flags for floating point ops
         private void UpdateFlagsDouble(double value)
         {
-            Flags.ZF = value == 0;
-            Flags.SF = value < 0;
-            Flags.OF = false;
+            ZF = value == 0;
+            SF = value < 0;
+            OF = false;
 
-            Flags.CF = double.IsInfinity(value);
-            Flags.PF = double.IsNaN(value);
+            CF = double.IsInfinity(value);
+            PF = double.IsNaN(value);
         }
         private void UpdateFlagsFloat(float value)
         {
-            Flags.ZF = value == 0;
-            Flags.SF = value < 0;
-            Flags.OF = false;
+            ZF = value == 0;
+            SF = value < 0;
+            OF = false;
 
-            Flags.CF = float.IsInfinity(value);
-            Flags.PF = float.IsNaN(value);
+            CF = float.IsInfinity(value);
+            PF = float.IsNaN(value);
         }
 
         // -- impl -- //
@@ -206,7 +241,7 @@ namespace CSX64
 
         private bool ProcessSETcc()
         {
-            if (!GetMemAdv(1, out UInt64 ext) || !Flags.TryGet_cc((ccOPCode)ext, out bool flag)) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+            if (!GetMemAdv(1, out UInt64 ext) || !TryGet_cc((ccOPCode)ext, out bool flag)) { Terminate(ErrorCode.UndefinedBehavior); return false; }
 
             if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, false, 0)) return false;
 
@@ -229,13 +264,13 @@ namespace CSX64
                 case 0:
                     if (!GetMemAdv(1, out b)) return false;
                     c = Registers[a >> 4].x64;
-                    Registers[a >> 4].Set((a >> 2) & 3, Registers[b & 15].x64);
-                    Registers[b & 15].Set((a >> 2) & 3, c);
+                    Registers[a >> 4][(a >> 2) & 3] = Registers[b & 15].x64;
+                    Registers[b & 15][(a >> 2) & 3] = c;
                     break;
                 case 1:
                     if (!GetAddressAdv(out b) || !GetMemRaw(b, Size((a >> 2) & 3), out c)) return false;
                     d = Registers[a >> 4].x64;
-                    Registers[a >> 4].Set((a >> 2) & 3, c);
+                    Registers[a >> 4][(a >> 2) & 3] = c;
                     if (!SetMemRaw(b, Size((a >> 2) & 3), d)) return false;
                     break;
             }
@@ -252,7 +287,7 @@ namespace CSX64
             switch (s & 3)
             {
                 case 0: if (!GetMemAdv(Size(sizecode), out val)) return false; break;
-                case 1: val = Registers[s >> 4].Get(sizecode); break;
+                case 1: val = Registers[s >> 4][sizecode]; break;
                 case 2: if (!GetAddressAdv(out val) || !GetMemRaw(val, Size(sizecode), out val)) return false; break;
                 case 3:
                     UInt64 tempPos = Pos - 2; // hold initial pos (-2 to account for op code and settings bytes that were already read)
@@ -278,7 +313,7 @@ namespace CSX64
         {
             if (!GetMemAdv(1, out UInt64 s) || !PopRaw(Size((s >> 2) & 3), out UInt64 val)) return false;
 
-            Registers[s >> 4].Set((s >> 2) & 3, val);
+            Registers[s >> 4][(s >> 2) & 3] = val;
             return true;
         }
 
@@ -286,7 +321,7 @@ namespace CSX64
         {
             if (!GetMemAdv(1, out UInt64 s) || !GetAddressAdv(out UInt64 address)) return false;
 
-            Registers[s >> 4].Set((s >> 2) & 3, address);
+            Registers[s >> 4][(s >> 2) & 3] = address;
             return true;
         }
 
@@ -298,9 +333,9 @@ namespace CSX64
             UInt64 res = Truncate(a + b, sizecode);
 
             UpdateFlagsInt(res, sizecode);
-            Flags.CF = res < a && res < b; // if overflow is caused, some of one value must go toward it, so the truncated result must necessarily be less than both args
-            Flags.AF = (res & 0xf) < (a & 0xf) && (res & 0xf) < (b & 0xf); // AF is just like CF but only the low nibble
-            Flags.OF = Positive(a, sizecode) == Positive(b, sizecode) && Positive(a, sizecode) != Positive(res, sizecode);
+            CF = res < a && res < b; // if overflow is caused, some of one value must go toward it, so the truncated result must necessarily be less than both args
+            AF = (res & 0xf) < (a & 0xf) && (res & 0xf) < (b & 0xf); // AF is just like CF but only the low nibble
+            OF = Positive(a, sizecode) == Positive(b, sizecode) && Positive(a, sizecode) != Positive(res, sizecode);
 
             return StoreBinaryOpFormat(s, m, res);
         }
@@ -312,9 +347,9 @@ namespace CSX64
             UInt64 res = Truncate(a - b, sizecode);
 
             UpdateFlagsInt(res, sizecode);
-            Flags.CF = a < b; // if a < b, a borrow was taken from the highest bit
-            Flags.AF = (a & 0xf) < (b & 0xf); // AF is just like CF but only the low nibble
-            Flags.OF = Positive(a, sizecode) != Positive(b, sizecode) && Positive(a, sizecode) != Positive(res, sizecode);
+            CF = a < b; // if a < b, a borrow was taken from the highest bit
+            AF = (a & 0xf) < (b & 0xf); // AF is just like CF but only the low nibble
+            OF = Positive(a, sizecode) != Positive(b, sizecode) && Positive(a, sizecode) != Positive(res, sizecode);
 
             return !apply || StoreBinaryOpFormat(s, m, res);
         }
@@ -465,7 +500,7 @@ namespace CSX64
             if ((s & 1) == 0)
             {
                 if (!GetMemAdv(1, out _a)) return false;
-                _a = Registers[s & 15].Get(sizecode);
+                _a = Registers[s & 15][sizecode];
             }
             else if (!GetAddressAdv(out _a) || !GetMemRaw(_a, Size(sizecode), out _a)) return false;
 
@@ -505,7 +540,7 @@ namespace CSX64
             AF = Rand.NextBool();
             PF = Rand.NextBool();
 
-            Registers[s >> 4].Set(sizecode, (UInt64)res);
+            Registers[s >> 4][sizecode] = (UInt64)res;
             return true;
         }
 
@@ -621,9 +656,9 @@ namespace CSX64
                 UInt64 res = Truncate(a << sh, sizecode);
 
                 UpdateFlagsInt(res, sizecode);
-                Flags.CF = sh < SizeBits(sizecode) ? ((a >> ((UInt16)SizeBits(sizecode) - sh)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
-                Flags.OF = sh == 1 ? Negative(res, sizecode) != Flags.CF : Rand.NextBool(); // OF is 1 if top 2 bits of original value were different (UND for sh != 1)
-                Flags.AF = Rand.NextBool(); // AF is undefined
+                CF = sh < SizeBits(sizecode) ? ((a >> ((UInt16)SizeBits(sizecode) - sh)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
+                OF = sh == 1 ? Negative(res, sizecode) != CF : Rand.NextBool(); // OF is 1 if top 2 bits of original value were different (UND for sh != 1)
+                AF = Rand.NextBool(); // AF is undefined
 
                 return StoreBinaryOpFormat(s, m, res);
             }
@@ -642,9 +677,9 @@ namespace CSX64
                 UInt64 res = a >> sh;
 
                 UpdateFlagsInt(res, sizecode);
-                Flags.CF = sh < SizeBits(sizecode) ? ((a >> (sh - 1)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
-                Flags.OF = sh == 1 ? Negative(a, sizecode) : Rand.NextBool(); // OF is high bit of original value (UND for sh != 1)
-                Flags.AF = Rand.NextBool(); // AF is undefined
+                CF = sh < SizeBits(sizecode) ? ((a >> (sh - 1)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
+                OF = sh == 1 ? Negative(a, sizecode) : Rand.NextBool(); // OF is high bit of original value (UND for sh != 1)
+                AF = Rand.NextBool(); // AF is undefined
 
                 return StoreBinaryOpFormat(s, m, res);
             }
@@ -664,9 +699,9 @@ namespace CSX64
                 UInt64 res = Truncate((UInt64)((Int64)SignExtend(a, sizecode) << sh), sizecode);
 
                 UpdateFlagsInt(res, sizecode);
-                Flags.CF = sh < SizeBits(sizecode) ? ((a >> ((UInt16)SizeBits(sizecode) - sh)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
-                Flags.OF = sh == 1 ? Negative(res, sizecode) != Flags.CF : Rand.NextBool(); // OF is 1 if top 2 bits of original value were different (UND for sh != 1)
-                Flags.AF = Rand.NextBool(); // AF is undefined
+                CF = sh < SizeBits(sizecode) ? ((a >> ((UInt16)SizeBits(sizecode) - sh)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
+                OF = sh == 1 ? Negative(res, sizecode) != CF : Rand.NextBool(); // OF is 1 if top 2 bits of original value were different (UND for sh != 1)
+                AF = Rand.NextBool(); // AF is undefined
 
                 return StoreBinaryOpFormat(s, m, res);
             }
@@ -685,9 +720,9 @@ namespace CSX64
                 UInt64 res = Truncate((UInt64)((Int64)SignExtend(a, sizecode) >> sh), sizecode);
 
                 UpdateFlagsInt(res, sizecode);
-                Flags.CF = sh < SizeBits(sizecode) ? ((a >> (sh - 1)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
-                Flags.OF = sh == 1 ? false : Rand.NextBool(); // OF is cleared (UND for sh != 1)
-                Flags.AF = Rand.NextBool(); // AF is undefined
+                CF = sh < SizeBits(sizecode) ? ((a >> (sh - 1)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
+                OF = sh == 1 ? false : Rand.NextBool(); // OF is cleared (UND for sh != 1)
+                AF = Rand.NextBool(); // AF is undefined
 
                 return StoreBinaryOpFormat(s, m, res);
             }
@@ -706,8 +741,8 @@ namespace CSX64
             {
                 UInt64 res = Truncate((a << sh) | (a >> ((UInt16)SizeBits(sizecode) - sh)), sizecode);
 
-                Flags.CF = ((a >> ((UInt16)SizeBits(sizecode) - sh)) & 1) == 1; // CF holds last bit shifted around
-                Flags.OF = sh == 1 ? Flags.CF ^ Negative(res, sizecode) : Rand.NextBool(); // OF is xor of CF (after rotate) and high bit of result (UND if sh != 1)
+                CF = ((a >> ((UInt16)SizeBits(sizecode) - sh)) & 1) == 1; // CF holds last bit shifted around
+                OF = sh == 1 ? CF ^ Negative(res, sizecode) : Rand.NextBool(); // OF is xor of CF (after rotate) and high bit of result (UND if sh != 1)
 
                 return StoreBinaryOpFormat(s, m, res);
             }
@@ -725,8 +760,8 @@ namespace CSX64
             {
                 UInt64 res = Truncate((a >> sh) | (a << ((UInt16)SizeBits(sizecode) - sh)), sizecode);
 
-                Flags.CF = ((a >> (sh - 1)) & 1) == 1; // CF holds last bit shifted around
-                Flags.OF = sh == 1 ? Negative(res, sizecode) ^ (((res >> ((8 << (ushort)sizecode) - 2)) & 1) != 0) : Rand.NextBool(); // OF is xor of 2 highest bits of result
+                CF = ((a >> (sh - 1)) & 1) == 1; // CF holds last bit shifted around
+                OF = sh == 1 ? Negative(res, sizecode) ^ (((res >> ((8 << (ushort)sizecode) - 2)) & 1) != 0) : Rand.NextBool(); // OF is xor of 2 highest bits of result
 
                 return StoreBinaryOpFormat(s, m, res);
             }
@@ -741,8 +776,8 @@ namespace CSX64
             UInt64 res = a & b;
 
             UpdateFlagsInt(res, sizecode);
-            Flags.OF = Flags.CF = false;
-            Flags.AF = Rand.NextBool();
+            OF = CF = false;
+            AF = Rand.NextBool();
 
             return !apply || StoreBinaryOpFormat(s, m, res);
         }
@@ -754,8 +789,8 @@ namespace CSX64
             UInt64 res = a | b;
 
             UpdateFlagsInt(res, sizecode);
-            Flags.OF = Flags.CF = false;
-            Flags.AF = Rand.NextBool();
+            OF = CF = false;
+            AF = Rand.NextBool();
 
             return StoreBinaryOpFormat(s, m, res);
         }
@@ -767,8 +802,8 @@ namespace CSX64
             UInt64 res = a ^ b;
 
             UpdateFlagsInt(res, sizecode);
-            Flags.OF = Flags.CF = false;
-            Flags.AF = Rand.NextBool();
+            OF = CF = false;
+            AF = Rand.NextBool();
 
             return StoreBinaryOpFormat(s, m, res);
         }
@@ -781,8 +816,8 @@ namespace CSX64
             UInt64 res = Truncate(a + 1, sizecode);
 
             UpdateFlagsInt(res, sizecode);
-            Flags.AF = (res & 0xf) == 0; // low nibble of 0 was a nibble overflow (TM)
-            Flags.OF = Positive(a, sizecode) && Negative(res, sizecode); // + -> - is overflow
+            AF = (res & 0xf) == 0; // low nibble of 0 was a nibble overflow (TM)
+            OF = Positive(a, sizecode) && Negative(res, sizecode); // + -> - is overflow
 
             return StoreUnaryOpFormat(s, m, res);
         }
@@ -794,8 +829,8 @@ namespace CSX64
             UInt64 res = Truncate(a - 1, sizecode);
 
             UpdateFlagsInt(res, sizecode);
-            Flags.AF = (a & 0xf) == 0; // nibble a = 0 results in borrow from the low nibble
-            Flags.OF = Negative(a, sizecode) && Positive(res, sizecode); // - -> + is overflow
+            AF = (a & 0xf) == 0; // nibble a = 0 results in borrow from the low nibble
+            OF = Negative(a, sizecode) && Positive(res, sizecode); // - -> + is overflow
 
             return StoreUnaryOpFormat(s, m, res);
         }
@@ -807,9 +842,9 @@ namespace CSX64
             UInt64 res = Truncate(0 - a, sizecode);
 
             UpdateFlagsInt(res, sizecode);
-            Flags.CF = 0 < a; // if 0 < a, a borrow was taken from the highest bit (see SUB code where a=0, b=a)
-            Flags.AF = 0 < (a & 0xf); // AF is just like CF but only the low nibble
-            Flags.OF = Negative(a, sizecode) && Negative(res, sizecode);
+            CF = 0 < a; // if 0 < a, a borrow was taken from the highest bit (see SUB code where a=0, b=a)
+            AF = 0 < (a & 0xf); // AF is just like CF but only the low nibble
+            OF = Negative(a, sizecode) && Negative(res, sizecode);
 
             return StoreUnaryOpFormat(s, m, res);
         }
@@ -829,7 +864,7 @@ namespace CSX64
             UInt64 sizecode = (s >> 2) & 3;
 
             UpdateFlagsInt(a, sizecode);
-            Flags.CF = Flags.OF = Flags.AF = false;
+            CF = OF = AF = false;
 
             return true;
         }
@@ -1533,11 +1568,11 @@ namespace CSX64
 
             UInt64 res = (a >> pos) & ((1ul << len) - 1);
 
-            Flags.SetPublicFlags(0); // clear all the (public) flags
-            Flags.ZF = res == 0; // ZF is set on zero
-            Flags.AF = Rand.NextBool(); // AF, SF, and PF are undefined
-            Flags.SF = Rand.NextBool();
-            Flags.PF = Rand.NextBool();
+            EFLAGS = 2; // clear all the (public) flags (flag 1 must always be set)
+            ZF = res == 0; // ZF is set on zero
+            AF = Rand.NextBool(); // AF, SF, and PF are undefined
+            SF = Rand.NextBool();
+            PF = Rand.NextBool();
 
             return StoreBinaryOpFormat(s, m, res);
         }
@@ -1548,12 +1583,12 @@ namespace CSX64
 
             UInt64 res = a & (~a + 1);
 
-            Flags.ZF = res == 0;
-            Flags.SF = Negative(res, sizecode);
-            Flags.CF = a != 0;
-            Flags.OF = false;
-            Flags.AF = Rand.NextBool();
-            Flags.PF = Rand.NextBool();
+            ZF = res == 0;
+            SF = Negative(res, sizecode);
+            CF = a != 0;
+            OF = false;
+            AF = Rand.NextBool();
+            PF = Rand.NextBool();
 
             return StoreUnaryOpFormat(s, m, res);
         }
@@ -1564,11 +1599,11 @@ namespace CSX64
 
             UInt64 res = Truncate(a ^ (a - 1), sizecode);
 
-            Flags.SF = Negative(res, sizecode);
-            Flags.CF = a == 0;
-            Flags.ZF = Flags.OF = false;
-            Flags.AF = Rand.NextBool();
-            Flags.PF = Rand.NextBool();
+            SF = Negative(res, sizecode);
+            CF = a == 0;
+            ZF = OF = false;
+            AF = Rand.NextBool();
+            PF = Rand.NextBool();
 
             return StoreUnaryOpFormat(s, m, res);
         }
@@ -1579,12 +1614,12 @@ namespace CSX64
 
             UInt64 res = a & (a - 1);
 
-            Flags.ZF = res == 0;
-            Flags.SF = Negative(res, sizecode);
-            Flags.CF = a == 0;
-            Flags.OF = false;
-            Flags.AF = Rand.NextBool();
-            Flags.PF = Rand.NextBool();
+            ZF = res == 0;
+            SF = Negative(res, sizecode);
+            CF = a == 0;
+            OF = false;
+            AF = Rand.NextBool();
+            PF = Rand.NextBool();
 
             return StoreUnaryOpFormat(s, m, res);
         }
@@ -1595,11 +1630,11 @@ namespace CSX64
 
             UInt64 res = a & ~b;
 
-            Flags.ZF = res == 0;
-            Flags.SF = Negative(res, sizecode);
-            Flags.OF = Flags.CF = false;
-            Flags.AF = Rand.NextBool();
-            Flags.PF = Rand.NextBool();
+            ZF = res == 0;
+            SF = Negative(res, sizecode);
+            OF = CF = false;
+            AF = Rand.NextBool();
+            PF = Rand.NextBool();
 
             return StoreBinaryOpFormat(s, m, res);
         }
@@ -1613,11 +1648,11 @@ namespace CSX64
 
             UInt64 mask = 1ul << (UInt16)(b % SizeBits(sizecode));
 
-            Flags.CF = (a & mask) != 0;
-            Flags.OF = Rand.NextBool();
-            Flags.SF = Rand.NextBool();
-            Flags.AF = Rand.NextBool();
-            Flags.PF = Rand.NextBool();
+            CF = (a & mask) != 0;
+            OF = Rand.NextBool();
+            SF = Rand.NextBool();
+            AF = Rand.NextBool();
+            PF = Rand.NextBool();
 
             switch (ext)
             {

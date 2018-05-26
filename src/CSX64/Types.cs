@@ -66,12 +66,12 @@ namespace CSX64
     /// <summary>
     /// Represents a 64 bit register
     /// </summary>
-    public class Register
+    public struct Register
     {
         /// <summary>
         /// gets/sets the full qword
         /// </summary>
-        public UInt64 x64 = 0;
+        public UInt64 x64;
 
         /// <summary>
         /// gets/sets the low dword
@@ -108,147 +108,15 @@ namespace CSX64
             get => (byte)x64;
             set => x64 = x64 & ~0xfful | value;
         }
-    }
-
-    /// <summary>
-    /// Represents a collection of 1-bit flags used by the processor
-    /// </summary>
-    public class FlagsRegister
-    {
-        public const UInt64 CF_Mask = 0x0001;
-        public const UInt64 RESERVED1_Mask = 0x0002;
-        public const UInt64 PF_Mask = 0x0004;
-        public const UInt64 RESERVED2_Mask = 0x0008;
-        public const UInt64 AF_Mask = 0x0010;
-        public const UInt64 RESERVED3_Mask = 0x0020;
-        public const UInt64 ZF_Mask = 0x0040;
-        public const UInt64 SF_Mask = 0x0080;
-        public const UInt64 TF_Mask = 0x0100;
-        public const UInt64 IF_Mask = 0x0200;
-        public const UInt64 DF_Mask = 0x0400;
-        public const UInt64 OF_Mask = 0x0800;
-
-        public const UInt64 FSF_Mask = 0x000_0001_0000_0000;
 
         /// <summary>
-        /// The full 64-bit flags data
+        /// Gets/sets the register partition with the specified size code
         /// </summary>
-        public UInt64 RFLAGS = 0;
-        /// <summary>
-        /// The lower 32 flags
-        /// </summary>
-        public UInt32 EFLAGS
+        /// <param name="sizecode">the size code to select</param>
+        internal UInt64 this[UInt64 sizecode]
         {
-            get => (UInt32)RFLAGS;
-            set => RFLAGS = (RFLAGS & ~0xffffffff) | value;
-        }
-        /// <summary>
-        /// The lower 16 flags
-        /// </summary>
-        public UInt16 FLAGS
-        {
-            get => (UInt16)RFLAGS;
-            set => RFLAGS = (RFLAGS & ~0xfffful) | value;
-        }
-
-        /// <summary>
-        /// The Carry flag
-        /// </summary>
-        public bool CF
-        {
-            get => (RFLAGS & CF_Mask) != 0;
-            set => RFLAGS = (RFLAGS & ~CF_Mask) | (value ? CF_Mask : 0);
-        }
-
-        /// <summary>
-        /// The (even) Parity flag
-        /// </summary>
-        public bool PF
-        {
-            get => (RFLAGS & PF_Mask) != 0;
-            set => RFLAGS = (RFLAGS & ~PF_Mask) | (value ? PF_Mask : 0);
-        }
-
-        /// <summary>
-        /// The Adjust flag
-        /// </summary>
-        public bool AF
-        {
-            get => (RFLAGS & AF_Mask) != 0;
-            set => RFLAGS = (RFLAGS & ~AF_Mask) | (value ? AF_Mask : 0);
-        }
-
-        /// <summary>
-        /// The Zero flag
-        /// </summary>
-        public bool ZF
-        {
-            get => (RFLAGS & ZF_Mask) != 0;
-            set => RFLAGS = (RFLAGS & ~ZF_Mask) | (value ? ZF_Mask : 0);
-        }
-
-        /// <summary>
-        /// The Sign flag
-        /// </summary>
-        public bool SF
-        {
-            get => (RFLAGS & SF_Mask) != 0;
-            set => RFLAGS = (RFLAGS & ~SF_Mask) | (value ? SF_Mask : 0);
-        }
-
-        /// <summary>
-        /// The Trap flag (single step)
-        /// </summary>
-        public bool TF
-        {
-            get => (RFLAGS & TF_Mask) != 0;
-            set => RFLAGS = (RFLAGS & ~TF_Mask) | (value ? TF_Mask : 0);
-        }
-
-        /// <summary>
-        /// The Interrupt enabled flag
-        /// </summary>
-        public bool IF
-        {
-            get => (RFLAGS & IF_Mask) != 0;
-            set => RFLAGS = (RFLAGS & ~IF_Mask) | (value ? IF_Mask : 0);
-        }
-
-        /// <summary>
-        /// The Direction flag
-        /// </summary>
-        public bool DF
-        {
-            get => (RFLAGS & DF_Mask) != 0;
-            set => RFLAGS = (RFLAGS & ~DF_Mask) | (value ? DF_Mask : 0);
-        }
-
-        /// <summary>
-        /// The Overflow flag
-        /// </summary>
-        public bool OF
-        {
-            get => (RFLAGS & OF_Mask) != 0;
-            set => RFLAGS = (RFLAGS & ~OF_Mask) | (value ? OF_Mask : 0);
-        }
-
-        public bool a { get => !CF && !ZF; }
-        public bool ae { get => !CF; }
-        public bool b { get => CF; }
-        public bool be { get => CF || ZF; }
-
-        public bool g { get => !ZF && SF == OF; }
-        public bool ge { get => SF == OF; }
-        public bool l { get => SF != OF; }
-        public bool le { get => ZF || SF != OF; }
-
-        /// <summary>
-        /// The flag that indicates that we're allowed to run commands that may potentially modify the file system
-        /// </summary>
-        public bool FileSystem
-        {
-            get => (RFLAGS & FSF_Mask) != 0;
-            set => RFLAGS = (RFLAGS & ~FSF_Mask) | (value ? FSF_Mask : 0);
+            get => (((1ul << (8 << (ushort)sizecode)) & ~1ul) - 1) & x64;
+            set => x64 = ~(((1ul << (8 << (ushort)sizecode)) & ~1ul) - 1) & x64 | (((1ul << (8 << (ushort)sizecode)) & ~1ul) - 1) & value;
         }
     }
 

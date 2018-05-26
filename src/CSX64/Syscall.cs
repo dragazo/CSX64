@@ -39,7 +39,7 @@ namespace CSX64
                     SuspendedRead = true; // suspend execution until there's more data
                 }
                 // otherwise return num chars read from file
-                else Flags.ZF = (Registers[0].x64 = (UInt64)n) == 0;
+                else ZF = (Registers[0].x64 = (UInt64)n) == 0;
 
                 return true;
             }
@@ -54,7 +54,7 @@ namespace CSX64
         private bool Sys_Write()
         {
             // get fd index
-            UInt64 fd_index = Registers[1].x64;
+            UInt64 fd_index = RBX;
             if (fd_index >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
 
             // get fd
@@ -62,7 +62,7 @@ namespace CSX64
             if (!fd.InUse) { Terminate(ErrorCode.FDNotInUse); return false; }
             
             // attempt to write from memory to the file
-            try { fd.BaseStream.Write(Memory, (int)Registers[2].x64, (int)Registers[3].x64); return true; }
+            try { fd.BaseStream.Write(Memory, (int)RCX, (int)RDX); return true; }
             catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
         }
 
@@ -75,7 +75,7 @@ namespace CSX64
         private bool Sys_Open()
         {
             // make sure we're allowed to do this
-            if (!Flags.FileSystem) { Terminate(ErrorCode.FSDisabled); return false; }
+            if (!FSF) { Terminate(ErrorCode.FSDisabled); return false; }
 
             // get an available file descriptor
             FileDescriptor fd = FindAvailableFD(out UInt64 fd_index);
@@ -183,7 +183,7 @@ namespace CSX64
         private bool Sys_Move()
         {
             // make sure we're allowed to do this
-            if (!Flags.FileSystem) { Terminate(ErrorCode.FSDisabled); return false; }
+            if (!FSF) { Terminate(ErrorCode.FSDisabled); return false; }
 
             // get the paths
             if (!GetCString(Registers[1].x64, out string from) || !GetCString(Registers[2].x64, out string to)) return false;
@@ -200,7 +200,7 @@ namespace CSX64
         private bool Sys_Remove()
         {
             // make sure we're allowed to do this
-            if (!Flags.FileSystem) { Terminate(ErrorCode.FSDisabled); return false; }
+            if (!FSF) { Terminate(ErrorCode.FSDisabled); return false; }
 
             // get the path
             if (!GetCString(Registers[1].x64, out string path)) return false;
@@ -217,7 +217,7 @@ namespace CSX64
         private bool Sys_Mkdir()
         {
             // make sure we're allowed to do this
-            if (!Flags.FileSystem) { Terminate(ErrorCode.FSDisabled); return false; }
+            if (!FSF) { Terminate(ErrorCode.FSDisabled); return false; }
 
             // get the path
             if (!GetCString(Registers[1].x64, out string path)) return false;
@@ -233,7 +233,7 @@ namespace CSX64
         private bool Sys_Rmdir()
         {
             // make sure we're allowed to do this
-            if (!Flags.FileSystem) { Terminate(ErrorCode.FSDisabled); return false; }
+            if (!FSF) { Terminate(ErrorCode.FSDisabled); return false; }
 
             // get the path
             if (!GetCString(Registers[1].x64, out string path)) return false;

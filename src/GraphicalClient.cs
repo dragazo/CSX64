@@ -241,65 +241,65 @@ namespace CSX64
             bool ret = true; // return value (stored here because we need to dispose everything before returning)
             
             // register 0 contains a 64-bit syscall code
-            switch (GetRegister(0).x64)
+            switch (RAX)
             {
                 // -- data utilities -- //
 
                 case (UInt64)GraphicalSyscallCodes.GetRenderSize:
-                    GetRegister(1).x32 = (UInt32)RenderImage.Width;
-                    GetRegister(2).x32 = (UInt32)RenderImage.Height;
+                    EBX = (UInt32)RenderImage.Width;
+                    ECX = (UInt32)RenderImage.Height;
                     break;
 
                 case (UInt64)GraphicalSyscallCodes.GetMousePos:
-                    GetRegister(1).x32 = (UInt32)MousePos.X;
-                    GetRegister(2).x32 = (UInt32)MousePos.Y;
+                    EBX = (UInt32)MousePos.X;
+                    ECX = (UInt32)MousePos.Y;
                     break;
                 case (UInt64)GraphicalSyscallCodes.GetMouseDelta:
-                    GetFlags().ZF = (GetRegister(1).x64 = (UInt64)MouseDelta) == 0;
+                    ZF = (RBX = (UInt64)MouseDelta) == 0;
                     MouseDelta = 0;
                     break;
 
-                case (UInt64)GraphicalSyscallCodes.GetMouseDown: GetFlags().ZF = (GetRegister(1).x64 = (UInt64)MouseDown) == 0; break;
-                case (UInt64)GraphicalSyscallCodes.GetKeyDown: GetFlags().ZF = (GetRegister(1).x64 = (UInt64)KeyDown) == 0; break;
+                case (UInt64)GraphicalSyscallCodes.GetMouseDown: ZF = (RBX = (UInt64)MouseDown) == 0; break;
+                case (UInt64)GraphicalSyscallCodes.GetKeyDown: ZF = (RBX = (UInt64)KeyDown) == 0; break;
 
                 // -- drawing settings -- //
 
-                case (UInt64)GraphicalSyscallCodes.SetBrush: return GetBrush(GetRegister(1).x64);
-                case (UInt64)GraphicalSyscallCodes.SetPen: return GetPen(GetRegister(1).x64);
-                case (UInt64)GraphicalSyscallCodes.SetFont: return GetFont(GetRegister(1).x64);
+                case (UInt64)GraphicalSyscallCodes.SetBrush: return GetBrush(RBX);
+                case (UInt64)GraphicalSyscallCodes.SetPen: return GetPen(RBX);
+                case (UInt64)GraphicalSyscallCodes.SetFont: return GetFont(RBX);
 
                 // -- drawing utilities -- //
 
                 case (UInt64)GraphicalSyscallCodes.Render: Invalidated = true; break;
 
                 case (UInt64)GraphicalSyscallCodes.Clear: // ($1 32:color)
-                    Graphics.Clear(Color.FromArgb((int)GetRegister(1).x32));
+                    Graphics.Clear(Color.FromArgb((int)EBX));
                     break;
 
                 case (UInt64)GraphicalSyscallCodes.FillRect: // ($1 rect)
-                    if (!GetRect(GetRegister(1).x64, out rect)) { ret = false; break; }
+                    if (!GetRect(RBX, out rect)) { ret = false; break; }
                     Graphics.FillRectangle(Brush, rect);
                     break;
                 case (UInt64)GraphicalSyscallCodes.DrawRect: // ($1 rect)
-                    if (!GetRect(GetRegister(1).x64, out rect)) { ret = false; break; }
+                    if (!GetRect(RBX, out rect)) { ret = false; break; }
                     Graphics.DrawRectangle(Pen, rect);
                     break;
 
                 case (UInt64)GraphicalSyscallCodes.FillEllipse: // ($1 rect)
-                    if (!GetRect(GetRegister(1).x64, out rect)) { ret = false; break; }
+                    if (!GetRect(RBX, out rect)) { ret = false; break; }
                     Graphics.FillEllipse(Brush, rect);
                     break;
                 case (UInt64)GraphicalSyscallCodes.DrawEllipse: // ($1 rect)
-                    if (!GetRect(GetRegister(1).x64, out rect)) { ret = false; break; }
+                    if (!GetRect(RBX, out rect)) { ret = false; break; }
                     Graphics.DrawEllipse(Pen, rect);
                     break;
 
                 case (UInt64)GraphicalSyscallCodes.DrawString: // ($1 point) ($2 string)
-                    if (!GetPoint(GetRegister(1).x64, out point) || !GetCString(GetRegister(2).x64, out str)) { ret = false; break; }
+                    if (!GetPoint(RBX, out point) || !GetCString(RCX, out str)) { ret = false; break; }
                     Graphics.DrawString(str, Font, Brush, point);
                     break;
                 case (UInt64)GraphicalSyscallCodes.DrawStringBounded: // ($1 rect) ($2 string)
-                    if (!GetRect(GetRegister(1).x64, out rect) || !GetCString(GetRegister(2).x64, out str)) { ret = false; break; }
+                    if (!GetRect(RBX, out rect) || !GetCString(RCX, out str)) { ret = false; break; }
                     Graphics.DrawString(str, Font, Brush, rect);
                     break;
                     

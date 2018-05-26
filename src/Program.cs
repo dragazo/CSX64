@@ -88,7 +88,7 @@ namespace CSX64
             string output = null;                                // output path
             ProgramAction action = ProgramAction.ExecuteConsole; // requested action
             bool accepting_options = true;                       // marks that we're still accepting options
-            FlagsRegister flags = new FlagsRegister();           // the flags register to provide (only supplies private flags)
+            bool fsf = false;                                    // fsf flag
 
             /*
             // performance testing stuff
@@ -126,7 +126,7 @@ namespace CSX64
                         case "--link": if (action != ProgramAction.ExecuteConsole) { Print("usage error - see -h for help"); return 0; } action = ProgramAction.Link; break;
                         case "--output": if (output != null || i + 1 >= args.Length) { Print("usage error - see -h for help"); return 0; } output = args[++i]; break;
                         case "--end": accepting_options = false; break;
-                        case "--fs": flags.FileSystem = true; break;
+                        case "--fs": fsf = true; break;
                         case "--": break; // -- is a no-op separator
 
                         default:
@@ -165,12 +165,12 @@ namespace CSX64
                     if (pathspec.Count == 0) { Print("Execution mode expected a file to execute"); return 0; }
 
                     // first path is file to run, then pass all of pathspec as command line args for client code
-                    return RunRawConsole(pathspec[0], pathspec.ToArray(), flags);
+                    return RunRawConsole(pathspec[0], pathspec.ToArray(), fsf);
                 case ProgramAction.ExecuteGraphical:
                     if (pathspec.Count == 0) { Print("Graphical execution mode expected a file to execute"); return 0; }
 
                     // first path is file to run, then pass all of pathspec as command line args for client code
-                    return RunGraphicalClient(pathspec[0], pathspec.ToArray(), flags);
+                    return RunGraphicalClient(pathspec[0], pathspec.ToArray(), fsf);
 
                 case ProgramAction.Assemble:
                     // if no output is provided, batch process
@@ -508,27 +508,27 @@ namespace CSX64
         /// </summary>
         /// <param name="path">the file to execute</param>
         /// <param name="args">the command line arguments for the client program</param>
-        private static int RunRawConsole(string path, string[] args, FlagsRegister flags)
+        private static int RunRawConsole(string path, string[] args, bool fsf)
         {
             // read the binary data
             int ret = LoadBinaryFile(path, out byte[] exe);
             if (ret != 0) return ret;
 
             // run as a console client and return success flag
-            return RunRawConsole(exe, args, flags);
+            return RunRawConsole(exe, args, fsf);
         }
         /// <summary>
         /// Executes a program via the graphical client. returns true if there were no errors
         /// </summary>
         /// <param name="path">the file to execute</param>
-        private static int RunGraphicalClient(string path, string[] args, FlagsRegister flags)
+        private static int RunGraphicalClient(string path, string[] args, bool fsf)
         {
             // read the binary data
             int ret = LoadBinaryFile(path, out byte[] exe);
             if (ret != 0) return ret;
 
             // run as a console client and return success flag
-            return RunGraphicalClient(exe, args, flags);
+            return RunGraphicalClient(exe, args, fsf);
         }
 
         /// <summary>
@@ -536,7 +536,7 @@ namespace CSX64
         /// </summary>
         /// <param name="exe">the code to execute</param>
         /// <param name="args">the command line arguments for the client program</param>
-        private static int RunRawConsole(byte[] exe, string[] args, FlagsRegister flags)
+        private static int RunRawConsole(byte[] exe, string[] args, bool fsf)
         {
             // create the computer
             using (Computer computer = new Computer())
@@ -545,7 +545,7 @@ namespace CSX64
                 computer.Initialize(exe, args);
 
                 // set private flags
-                computer.GetFlags().SetPrivateFlags(flags.RFLAGS);
+                computer.FSF = fsf;
 
                 // tie standard streams
                 computer.GetFD(0).Open(Console.OpenStandardInput(), false, false); // stdin is non-interactive because we're not the ones that will be adding data to it. that's the console's responsibility
@@ -571,7 +571,7 @@ namespace CSX64
         /// Executes a program via the graphical client. returns true if there were no errors
         /// </summary>
         /// <param name="exe">the code to execute</param>
-        private static int RunGraphicalClient(byte[] exe, string[] args, FlagsRegister flags)
+        private static int RunGraphicalClient(byte[] exe, string[] args, bool fsf)
         {
             // create the computer
             using (GraphicalComputer computer = new GraphicalComputer())
@@ -580,7 +580,7 @@ namespace CSX64
                 computer.Initialize(exe, args);
 
                 // set private flags
-                computer.GetFlags().SetPrivateFlags(flags.RFLAGS);
+                computer.FSF = fsf;
 
                 // create the console client
                 using (GraphicalClient graphics = new GraphicalClient(computer))

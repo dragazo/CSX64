@@ -29,9 +29,6 @@ namespace CSX64
 
         // ----------------------------------------
 
-        protected Register[] Registers = new Register[16];
-        protected FlagsRegister Flags = new FlagsRegister();
-
         protected byte[] Memory = new byte[0];
 
         protected FileDescriptor[] FileDescriptors = new FileDescriptor[NFileDescriptors];
@@ -85,9 +82,6 @@ namespace CSX64
         /// </summary>
         public Computer()
         {
-            // allocate registers
-            for (int i = 0; i < Registers.Length; ++i) Registers[i] = new Register();
-
             // allocate file descriptors
             for (int i = 0; i < NFileDescriptors; ++i) FileDescriptors[i] = new FileDescriptor();
 
@@ -127,7 +121,7 @@ namespace CSX64
             ReadonlyBarrier = text_seglen + rodata_seglen;
 
             // randomize registers
-            foreach (Register reg in Registers) reg.x64 = Rand.NextUInt64();
+            for (int i = 0; i < Registers.Length; ++i) Registers[i].x64 = Rand.NextUInt64();
             // set public flags: make sure flag 1 is set (from Intel x86_64 standard)
             EFLAGS = 2;
 
@@ -218,16 +212,6 @@ namespace CSX64
         }
 
         /// <summary>
-        /// Gets the specified register in this computer (no bounds checking: test index against NRegisters)
-        /// </summary>
-        /// <param name="index">The index of the register</param>
-        public Register GetRegister(int index) => Registers[index];
-        /// <summary>
-        /// Returns the flags register
-        /// </summary>
-        public FlagsRegister GetFlags() => Flags;
-
-        /// <summary>
         /// Gets the file descriptor at the specified index. (no bounds checking)
         /// </summary>
         /// <param name="index">the index of the file descriptor</param>
@@ -266,7 +250,7 @@ namespace CSX64
         /// </summary>
         protected virtual bool Syscall()
         {
-            switch (Registers[0].x64)
+            switch (RAX)
             {
                 case (UInt64)SyscallCode.Read: return Sys_Read();
                 case (UInt64)SyscallCode.Write: return Sys_Write();
@@ -325,14 +309,14 @@ namespace CSX64
                 case OPCode.SETcc: return ProcessSETcc();
 
                 case OPCode.MOV: return ProcessMOV();
-                case OPCode.MOVcc: if (!GetMemAdv(1, out op) || !Flags.TryGet_cc((ccOPCode)op, out flag)) { Terminate(ErrorCode.UndefinedBehavior); return false; } return ProcessMOV(flag);
+                case OPCode.MOVcc: if (!GetMemAdv(1, out op) || !TryGet_cc((ccOPCode)op, out flag)) { Terminate(ErrorCode.UndefinedBehavior); return false; } return ProcessMOV(flag);
 
                 case OPCode.XCHG: return ProcessXCHG();
 
                 case OPCode.JMP: return ProcessJMP(true, ref op);
-                case OPCode.Jcc: if (!GetMemAdv(1, out op) || !Flags.TryGet_cc((ccOPCode)op, out flag)) { Terminate(ErrorCode.UndefinedBehavior); return false; } return ProcessJMP(flag, ref op);
+                case OPCode.Jcc: if (!GetMemAdv(1, out op) || !TryGet_cc((ccOPCode)op, out flag)) { Terminate(ErrorCode.UndefinedBehavior); return false; } return ProcessJMP(flag, ref op);
                 case OPCode.LOOP: return ProcessJMP(--Registers[0].x64 != 0, ref op);
-                case OPCode.LOOPcc: if (!GetMemAdv(1, out op) || !Flags.TryGet_cc((ccOPCode)op, out flag)) { Terminate(ErrorCode.UndefinedBehavior); return false; } return ProcessJMP(--Registers[0].x64 != 0 && flag, ref op);
+                case OPCode.LOOPcc: if (!GetMemAdv(1, out op) || !TryGet_cc((ccOPCode)op, out flag)) { Terminate(ErrorCode.UndefinedBehavior); return false; } return ProcessJMP(--Registers[0].x64 != 0 && flag, ref op);
                 case OPCode.CALL: return ProcessJMP(true, ref op) && PushRaw(8, op);
                 case OPCode.RET: if (!PopRaw(8, out op)) return false; Pos = op; return true;
 
