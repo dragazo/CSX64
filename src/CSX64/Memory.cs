@@ -555,8 +555,8 @@ namespace CSX64
         private bool GetMemAdv(UInt64 size, out UInt64 res)
         {
             // make sure we can get the memory
-            if (!GetMemRaw(Pos, size, out res)) return false;
-            Pos += size;
+            if (!GetMemRaw(RIP, size, out res)) return false;
+            RIP += size;
             return true;
         }
         /// <summary>

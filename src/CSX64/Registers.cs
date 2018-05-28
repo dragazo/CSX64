@@ -6,119 +6,61 @@ namespace CSX64
 {
     public partial class Computer
     {
-        public const UInt64 CF_Mask = 0x0001;
-        public const UInt64 RESERVED1_Mask = 0x0002;
-        public const UInt64 PF_Mask = 0x0004;
-        public const UInt64 RESERVED2_Mask = 0x0008;
-        public const UInt64 AF_Mask = 0x0010;
-        public const UInt64 RESERVED3_Mask = 0x0020;
-        public const UInt64 ZF_Mask = 0x0040;
-        public const UInt64 SF_Mask = 0x0080;
-        public const UInt64 TF_Mask = 0x0100;
-        public const UInt64 IF_Mask = 0x0200;
-        public const UInt64 DF_Mask = 0x0400;
-        public const UInt64 OF_Mask = 0x0800;
+        private const UInt64 CF_Mask = 0x0001;
+        private const UInt64 RESERVED1_Mask = 0x0002;
+        private const UInt64 PF_Mask = 0x0004;
+        private const UInt64 RESERVED2_Mask = 0x0008;
+        private const UInt64 AF_Mask = 0x0010;
+        private const UInt64 RESERVED3_Mask = 0x0020;
+        private const UInt64 ZF_Mask = 0x0040;
+        private const UInt64 SF_Mask = 0x0080;
+        private const UInt64 TF_Mask = 0x0100;
+        private const UInt64 IF_Mask = 0x0200;
+        private const UInt64 DF_Mask = 0x0400;
+        private const UInt64 OF_Mask = 0x0800;
 
-        public const UInt64 FSF_Mask = 0x000_0001_0000_0000;
+        private const UInt64 FSF_Mask = 0x000_0001_0000_0000;
 
-        // --------------------------------------------
-
-        /// <summary>
-        /// The full 64-bit flags data
-        /// </summary>
-        public UInt64 RFLAGS = 0;
-        /// <summary>
-        /// The lower 32 flags
-        /// </summary>
-        public UInt32 EFLAGS
-        {
-            get => (UInt32)RFLAGS;
-            set => RFLAGS = (RFLAGS & ~0xffffffff) | value;
-        }
-        /// <summary>
-        /// The lower 16 flags
-        /// </summary>
-        public UInt16 FLAGS
-        {
-            get => (UInt16)RFLAGS;
-            set => RFLAGS = (RFLAGS & ~0xfffful) | value;
-        }
-
-        /// <summary>
-        /// The Carry flag
-        /// </summary>
         public bool CF
         {
             get => (RFLAGS & CF_Mask) != 0;
             set => RFLAGS = (RFLAGS & ~CF_Mask) | (value ? CF_Mask : 0);
         }
-
-        /// <summary>
-        /// The (even) Parity flag
-        /// </summary>
         public bool PF
         {
             get => (RFLAGS & PF_Mask) != 0;
             set => RFLAGS = (RFLAGS & ~PF_Mask) | (value ? PF_Mask : 0);
         }
-
-        /// <summary>
-        /// The Adjust flag
-        /// </summary>
         public bool AF
         {
             get => (RFLAGS & AF_Mask) != 0;
             set => RFLAGS = (RFLAGS & ~AF_Mask) | (value ? AF_Mask : 0);
         }
-
-        /// <summary>
-        /// The Zero flag
-        /// </summary>
         public bool ZF
         {
             get => (RFLAGS & ZF_Mask) != 0;
             set => RFLAGS = (RFLAGS & ~ZF_Mask) | (value ? ZF_Mask : 0);
         }
-
-        /// <summary>
-        /// The Sign flag
-        /// </summary>
         public bool SF
         {
             get => (RFLAGS & SF_Mask) != 0;
             set => RFLAGS = (RFLAGS & ~SF_Mask) | (value ? SF_Mask : 0);
         }
-
-        /// <summary>
-        /// The Trap flag (single step)
-        /// </summary>
         public bool TF
         {
             get => (RFLAGS & TF_Mask) != 0;
             set => RFLAGS = (RFLAGS & ~TF_Mask) | (value ? TF_Mask : 0);
         }
-
-        /// <summary>
-        /// The Interrupt enabled flag
-        /// </summary>
         public bool IF
         {
             get => (RFLAGS & IF_Mask) != 0;
             set => RFLAGS = (RFLAGS & ~IF_Mask) | (value ? IF_Mask : 0);
         }
-
-        /// <summary>
-        /// The Direction flag
-        /// </summary>
         public bool DF
         {
             get => (RFLAGS & DF_Mask) != 0;
             set => RFLAGS = (RFLAGS & ~DF_Mask) | (value ? DF_Mask : 0);
         }
-
-        /// <summary>
-        /// The Overflow flag
-        /// </summary>
         public bool OF
         {
             get => (RFLAGS & OF_Mask) != 0;
@@ -136,7 +78,7 @@ namespace CSX64
         public bool le { get => ZF || SF != OF; }
 
         /// <summary>
-        /// The flag that indicates that we're allowed to run commands that may potentially modify the file system
+        /// Indicates that we're allowed to run file system instructions
         /// </summary>
         public bool FSF
         {
@@ -146,7 +88,19 @@ namespace CSX64
 
         // --------------------------------------------
 
+        private Register _RFLAGS;
+        private Register _RIP;
         private Register[] Registers = new Register[16];
+        private FPURegister[] FPURegisters = new FPURegister[8];
+        private int FPU_TOP;
+
+        public UInt64 RFLAGS { get => _RFLAGS.x64; set => _RFLAGS.x64 = value; }
+        public UInt32 EFLAGS { get => _RFLAGS.x32; set => _RFLAGS.x32 = value; }
+        public UInt16 FLAGS { get => _RFLAGS.x16; set => _RFLAGS.x16 = value; }
+
+        public UInt64 RIP { get => _RIP.x64; set => _RIP.x64 = value; }
+        public UInt32 EIP { get => _RIP.x32; set => _RIP.x32 = value; }
+        public UInt16 IP { get => _RIP.x16; set => _RIP.x16 = value; }
 
         public UInt64 RAX { get => Registers[0].x64; set => Registers[0].x64 = value; }
         public UInt64 RBX { get => Registers[1].x64; set => Registers[1].x64 = value; }
@@ -220,5 +174,23 @@ namespace CSX64
         public byte BH { get => Registers[1].x8h; set => Registers[1].x8h = value; }
         public byte CH { get => Registers[2].x8h; set => Registers[2].x8h = value; }
         public byte DH { get => Registers[3].x8h; set => Registers[3].x8h = value; }
+
+        public UInt64 ST0 { get => FPURegisters[(FPU_TOP + 0) & 7].Value; set => FPURegisters[(FPU_TOP + 0) & 7].Value = value; }
+        public UInt64 ST1 { get => FPURegisters[(FPU_TOP + 1) & 7].Value; set => FPURegisters[(FPU_TOP + 1) & 7].Value = value; }
+        public UInt64 ST2 { get => FPURegisters[(FPU_TOP + 2) & 7].Value; set => FPURegisters[(FPU_TOP + 2) & 7].Value = value; }
+        public UInt64 ST3 { get => FPURegisters[(FPU_TOP + 3) & 7].Value; set => FPURegisters[(FPU_TOP + 3) & 7].Value = value; }
+        public UInt64 ST4 { get => FPURegisters[(FPU_TOP + 4) & 7].Value; set => FPURegisters[(FPU_TOP + 4) & 7].Value = value; }
+        public UInt64 ST5 { get => FPURegisters[(FPU_TOP + 5) & 7].Value; set => FPURegisters[(FPU_TOP + 5) & 7].Value = value; }
+        public UInt64 ST6 { get => FPURegisters[(FPU_TOP + 6) & 7].Value; set => FPURegisters[(FPU_TOP + 6) & 7].Value = value; }
+        public UInt64 ST7 { get => FPURegisters[(FPU_TOP + 7) & 7].Value; set => FPURegisters[(FPU_TOP + 7) & 7].Value = value; }
+
+        public UInt64 MM0 { get => FPURegisters[(FPU_TOP + 0) & 7].Value; set => FPURegisters[(FPU_TOP + 0) & 7].Value = value; }
+        public UInt64 MM1 { get => FPURegisters[(FPU_TOP + 1) & 7].Value; set => FPURegisters[(FPU_TOP + 1) & 7].Value = value; }
+        public UInt64 MM2 { get => FPURegisters[(FPU_TOP + 2) & 7].Value; set => FPURegisters[(FPU_TOP + 2) & 7].Value = value; }
+        public UInt64 MM3 { get => FPURegisters[(FPU_TOP + 3) & 7].Value; set => FPURegisters[(FPU_TOP + 3) & 7].Value = value; }
+        public UInt64 MM4 { get => FPURegisters[(FPU_TOP + 4) & 7].Value; set => FPURegisters[(FPU_TOP + 4) & 7].Value = value; }
+        public UInt64 MM5 { get => FPURegisters[(FPU_TOP + 5) & 7].Value; set => FPURegisters[(FPU_TOP + 5) & 7].Value = value; }
+        public UInt64 MM6 { get => FPURegisters[(FPU_TOP + 6) & 7].Value; set => FPURegisters[(FPU_TOP + 6) & 7].Value = value; }
+        public UInt64 MM7 { get => FPURegisters[(FPU_TOP + 7) & 7].Value; set => FPURegisters[(FPU_TOP + 7) & 7].Value = value; }
     }
 }

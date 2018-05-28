@@ -1068,22 +1068,93 @@ namespace CSX64
             "__heap__"
         };
         
-        private static string[] AddressRegs = // must be in correct binary order (register code)
-        {
-            "RAX", "RBX", "RCX", "RDX", "RSI", "RDI", "RBP", "RSP", "R8", "R9", "R10", "R11", "R12", "R13", "R14", "R15"
-        };
-        private static string[] AddressPrefixes = // must be in correct binary order (size code)
+        private static readonly string[] AddressPrefixes = // must be in correct binary order (size code)
         {
             "BYTEPTR", "WORDPTR", "DWORDPTR", "QWORDPTR"
         };
 
-        private static string[] RegisterLabels =
+        private static readonly string[] AddressRegs = // must be in correct register id order
         {
-            "RAX", "RBX", "RCX", "RDX", "RSI", "RDI", "RBP", "RSP", "R8", "R9", "R10", "R11", "R12", "R13", "R14", "R15",
-            "EAX", "EBX", "ECX", "EDX", "ESI", "EDI", "EBP", "ESP", "R8D", "R9D", "R10D", "R11D", "R12D", "R13D", "R14D", "R15D",
-            "AX", "BX", "CX", "DX", "SI", "DI", "BP", "SP", "R8W", "R9W", "R10W", "R11W", "R12W", "R13W", "R14W", "R15W",
-            "AL", "BL", "CL", "DL", "SIL", "DIL", "BPL", "SPL", "R8B", "R9B", "R10B", "R11B", "R12B", "R13B", "R14B", "R15B",
-            "AH", "BH", "CH", "DH"
+            "RAX", "RBX", "RCX", "RDX", "RSI", "RDI", "RBP", "RSP", "R8", "R9", "R10", "R11", "R12", "R13", "R14", "R15"
+        };
+
+        /// <summary>
+        /// Maps register names (all caps) to tules of (id, sizecode, high)
+        /// </summary>
+        private static readonly Dictionary<string, Tuple<byte, byte, bool>> RegisterData = new Dictionary<string, Tuple<byte, byte, bool>>()
+        {
+            ["RAX"] = new Tuple<byte, byte, bool>(0, 3, false),
+            ["RBX"] = new Tuple<byte, byte, bool>(1, 3, false),
+            ["RCX"] = new Tuple<byte, byte, bool>(2, 3, false),
+            ["RDX"] = new Tuple<byte, byte, bool>(3, 3, false),
+            ["RSI"] = new Tuple<byte, byte, bool>(4, 3, false),
+            ["RDI"] = new Tuple<byte, byte, bool>(5, 3, false),
+            ["RBP"] = new Tuple<byte, byte, bool>(6, 3, false),
+            ["RSP"] = new Tuple<byte, byte, bool>(7, 3, false),
+            ["R8"] = new Tuple<byte, byte, bool>(8, 3, false),
+            ["R9"] = new Tuple<byte, byte, bool>(9, 3, false),
+            ["R10"] = new Tuple<byte, byte, bool>(10, 3, false),
+            ["R11"] = new Tuple<byte, byte, bool>(11, 3, false),
+            ["R12"] = new Tuple<byte, byte, bool>(12, 3, false),
+            ["R13"] = new Tuple<byte, byte, bool>(13, 3, false),
+            ["R14"] = new Tuple<byte, byte, bool>(14, 3, false),
+            ["R15"] = new Tuple<byte, byte, bool>(15, 3, false),
+
+            ["EAX"] = new Tuple<byte, byte, bool>(0, 2, false),
+            ["EBX"] = new Tuple<byte, byte, bool>(1, 2, false),
+            ["ECX"] = new Tuple<byte, byte, bool>(2, 2, false),
+            ["EDX"] = new Tuple<byte, byte, bool>(3, 2, false),
+            ["ESI"] = new Tuple<byte, byte, bool>(4, 2, false),
+            ["EDI"] = new Tuple<byte, byte, bool>(5, 2, false),
+            ["EBP"] = new Tuple<byte, byte, bool>(6, 2, false),
+            ["ESP"] = new Tuple<byte, byte, bool>(7, 2, false),
+            ["R8D"] = new Tuple<byte, byte, bool>(8, 2, false),
+            ["R9D"] = new Tuple<byte, byte, bool>(9, 2, false),
+            ["R10D"] = new Tuple<byte, byte, bool>(10, 2, false),
+            ["R11D"] = new Tuple<byte, byte, bool>(11, 2, false),
+            ["R12D"] = new Tuple<byte, byte, bool>(12, 2, false),
+            ["R13D"] = new Tuple<byte, byte, bool>(13, 2, false),
+            ["R14D"] = new Tuple<byte, byte, bool>(14, 2, false),
+            ["R15D"] = new Tuple<byte, byte, bool>(15, 2, false),
+
+            ["AX"] = new Tuple<byte, byte, bool>(0, 1, false),
+            ["BX"] = new Tuple<byte, byte, bool>(1, 1, false),
+            ["CX"] = new Tuple<byte, byte, bool>(2, 1, false),
+            ["DX"] = new Tuple<byte, byte, bool>(3, 1, false),
+            ["SI"] = new Tuple<byte, byte, bool>(4, 1, false),
+            ["DI"] = new Tuple<byte, byte, bool>(5, 1, false),
+            ["BP"] = new Tuple<byte, byte, bool>(6, 1, false),
+            ["SP"] = new Tuple<byte, byte, bool>(7, 1, false),
+            ["R8W"] = new Tuple<byte, byte, bool>(8, 1, false),
+            ["R9W"] = new Tuple<byte, byte, bool>(9, 1, false),
+            ["R10W"] = new Tuple<byte, byte, bool>(10, 1, false),
+            ["R11W"] = new Tuple<byte, byte, bool>(11, 1, false),
+            ["R12W"] = new Tuple<byte, byte, bool>(12, 1, false),
+            ["R13W"] = new Tuple<byte, byte, bool>(13, 1, false),
+            ["R14W"] = new Tuple<byte, byte, bool>(14, 1, false),
+            ["R15W"] = new Tuple<byte, byte, bool>(15, 1, false),
+
+            ["AL"] = new Tuple<byte, byte, bool>(0, 0, false),
+            ["BL"] = new Tuple<byte, byte, bool>(1, 0, false),
+            ["CL"] = new Tuple<byte, byte, bool>(2, 0, false),
+            ["DL"] = new Tuple<byte, byte, bool>(3, 0, false),
+            ["SIL"] = new Tuple<byte, byte, bool>(4, 0, false),
+            ["DIL"] = new Tuple<byte, byte, bool>(5, 0, false),
+            ["BPL"] = new Tuple<byte, byte, bool>(6, 0, false),
+            ["SPL"] = new Tuple<byte, byte, bool>(7, 0, false),
+            ["R8B"] = new Tuple<byte, byte, bool>(8, 0, false),
+            ["R9B"] = new Tuple<byte, byte, bool>(9, 0, false),
+            ["R10B"] = new Tuple<byte, byte, bool>(10, 0, false),
+            ["R11B"] = new Tuple<byte, byte, bool>(11, 0, false),
+            ["R12B"] = new Tuple<byte, byte, bool>(12, 0, false),
+            ["R13B"] = new Tuple<byte, byte, bool>(13, 0, false),
+            ["R14B"] = new Tuple<byte, byte, bool>(14, 0, false),
+            ["R15B"] = new Tuple<byte, byte, bool>(15, 0, false),
+
+            ["AH"] = new Tuple<byte, byte, bool>(0, 0, true),
+            ["BH"] = new Tuple<byte, byte, bool>(1, 0, true),
+            ["CH"] = new Tuple<byte, byte, bool>(2, 0, true),
+            ["DH"] = new Tuple<byte, byte, bool>(3, 0, true)
         };
 
         /// <summary>
@@ -1714,82 +1785,23 @@ namespace CSX64
                 return true;
             }
 
-            public bool TryParseRegister(string token, out UInt64 reg, out UInt64 sizecode)
+            public bool TryParseRegister(string token, out UInt64 reg, out UInt64 sizecode, out bool high)
             {
-                switch (token.ToUpper())
+                // copy data if we can parse it
+                if (RegisterData.TryGetValue(token.ToUpper(), out var data))
                 {
-                    case "RAX": reg = 0; sizecode = 3; return true;
-                    case "RBX": reg = 1; sizecode = 3; return true;
-                    case "RCX": reg = 2; sizecode = 3; return true;
-                    case "RDX": reg = 3; sizecode = 3; return true;
-                    case "RSI": reg = 4; sizecode = 3; return true;
-                    case "RDI": reg = 5; sizecode = 3; return true;
-                    case "RBP": reg = 6; sizecode = 3; return true;
-                    case "RSP": reg = 7; sizecode = 3; return true;
-                    case "R8": reg = 8; sizecode = 3; return true;
-                    case "R9": reg = 9; sizecode = 3; return true;
-                    case "R10": reg = 10; sizecode = 3; return true;
-                    case "R11": reg = 11; sizecode = 3; return true;
-                    case "R12": reg = 12; sizecode = 3; return true;
-                    case "R13": reg = 13; sizecode = 3; return true;
-                    case "R14": reg = 14; sizecode = 3; return true;
-                    case "R15": reg = 15; sizecode = 3; return true;
-
-                    case "EAX": reg = 0; sizecode = 2; return true;
-                    case "EBX": reg = 1; sizecode = 2; return true;
-                    case "ECX": reg = 2; sizecode = 2; return true;
-                    case "EDX": reg = 3; sizecode = 2; return true;
-                    case "ESI": reg = 4; sizecode = 2; return true;
-                    case "EDI": reg = 5; sizecode = 2; return true;
-                    case "EBP": reg = 6; sizecode = 2; return true;
-                    case "ESP": reg = 7; sizecode = 2; return true;
-                    case "R8D": reg = 8; sizecode = 2; return true;
-                    case "R9D": reg = 9; sizecode = 2; return true;
-                    case "R10D": reg = 10; sizecode = 2; return true;
-                    case "R11D": reg = 11; sizecode = 2; return true;
-                    case "R12D": reg = 12; sizecode = 2; return true;
-                    case "R13D": reg = 13; sizecode = 2; return true;
-                    case "R14D": reg = 14; sizecode = 2; return true;
-                    case "R15D": reg = 15; sizecode = 2; return true;
-
-                    case "AX": reg = 0; sizecode = 1; return true;
-                    case "BX": reg = 1; sizecode = 1; return true;
-                    case "CX": reg = 2; sizecode = 1; return true;
-                    case "DX": reg = 3; sizecode = 1; return true;
-                    case "SI": reg = 4; sizecode = 1; return true;
-                    case "DI": reg = 5; sizecode = 1; return true;
-                    case "BP": reg = 6; sizecode = 1; return true;
-                    case "SP": reg = 7; sizecode = 1; return true;
-                    case "R8W": reg = 8; sizecode = 1; return true;
-                    case "R9W": reg = 9; sizecode = 1; return true;
-                    case "R10W": reg = 10; sizecode = 1; return true;
-                    case "R11W": reg = 11; sizecode = 1; return true;
-                    case "R12W": reg = 12; sizecode = 1; return true;
-                    case "R13W": reg = 13; sizecode = 1; return true;
-                    case "R14W": reg = 14; sizecode = 1; return true;
-                    case "R15W": reg = 15; sizecode = 1; return true;
-
-                    case "AL": reg = 0; sizecode = 0; return true;
-                    case "BL": reg = 1; sizecode = 0; return true;
-                    case "CL": reg = 2; sizecode = 0; return true;
-                    case "DL": reg = 3; sizecode = 0; return true;
-                    case "SIL": reg = 4; sizecode = 0; return true;
-                    case "DIL": reg = 5; sizecode = 0; return true;
-                    case "BPL": reg = 6; sizecode = 0; return true;
-                    case "SPL": reg = 7; sizecode = 0; return true;
-                    case "R8B": reg = 8; sizecode = 0; return true;
-                    case "R9B": reg = 9; sizecode = 0; return true;
-                    case "R10B": reg = 10; sizecode = 0; return true;
-                    case "R11B": reg = 11; sizecode = 0; return true;
-                    case "R12B": reg = 12; sizecode = 0; return true;
-                    case "R13B": reg = 13; sizecode = 0; return true;
-                    case "R14B": reg = 14; sizecode = 0; return true;
-                    case "R15B": reg = 15; sizecode = 0; return true;
-
-                    default:
-                        res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{token}\" as a register");
-                        reg = sizecode = 0;
-                        return false;
+                    reg = data.Item1;
+                    sizecode = data.Item2;
+                    high = data.Item3;
+                    return true;
+                }
+                // otherwise is not a register
+                else
+                {
+                    res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{token}\" as a register");
+                    reg = sizecode = 0;
+                    high = false;
+                    return false;
                 }
             }
 
@@ -2026,8 +2038,8 @@ namespace CSX64
                 }
 
                 // if it still contains any registers they weren't 64-bit
-                foreach (string reg in RegisterLabels)
-                    if (hole.Find(reg, true) != null) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to use register {reg} in an address expression. Only 64-bit registers are allowed."); return false; }
+                foreach (var entry in RegisterData)
+                    if (hole.Find(entry.Key, true) != null) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to use register {entry.Key} in an address expression. Only 64-bit registers are allowed."); return false; }
 
                 // make sure only one register is negative
                 if (n1 && n2) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Only one register may be negative in an address expression"); return false; }
@@ -2120,7 +2132,7 @@ namespace CSX64
                     if (!IsValidName(label_def, ref err)) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: {err}"); return false; }
 
                     // can't name same as a register (could be problematic) (not in IsValidName() because then address parser would fail if address contained a register)
-                    if (RegisterLabels.Contains(label_def.ToUpper())) { res = new AssembleResult(AssembleError.InvalidLabel, $"Symbol \"{label_def}\" is reserved"); return false; }
+                    if (RegisterData.ContainsKey(label_def.ToUpper())) { res = new AssembleResult(AssembleError.InvalidLabel, $"Symbol \"{label_def}\" is reserved"); return false; }
 
                     // ensure we don't redefine a symbol
                     if (file.Symbols.ContainsKey(label_def)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Symbol \"{label_def}\" was already defined"); return false; }
@@ -2316,30 +2328,30 @@ namespace CSX64
                 if (!TryAppendVal(1, (UInt64)op)) return false;
                 if (has_ext_op) { if (!TryAppendVal(1, ext_op)) return false; }
 
-                if (!TryParseRegister(args[0], out UInt64 dest, out UInt64 a_sizecode)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} expected a register as the first argument"); return false; }
+                if (!TryParseRegister(args[0], out UInt64 dest, out UInt64 a_sizecode, out bool dest_high)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} expected a register as the first argument"); return false; }
                 if (!TryParseImm(args[2], out Expr imm)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} expected an imm as the third argument"); return false; }
 
                 if ((Size(a_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
 
-                UInt64 b_sizecode;
+                UInt64 b_sizecode; // only used for ensuring no size conflicts (machine code only uses a_sizecode)
 
                 // reg
-                if (TryParseRegister(args[1], out UInt64 reg, out b_sizecode))
+                if (TryParseRegister(args[1], out UInt64 reg, out b_sizecode, out bool reg_high))
                 {
                     if (a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Argument size missmatch"); return false; }
 
-                    if (!TryAppendVal(1, (dest << 4) | (a_sizecode << 2) | 0)) return false;
-                    if (!TryAppendVal(1, reg)) return false;
+                    if (!TryAppendVal(1, (dest << 4) | (a_sizecode << 2) | (dest_high ? 2 : 0ul) | 0)) return false;
                     if (!TryAppendExpr(Size(a_sizecode), imm)) return false;
+                    if (!TryAppendVal(1, (reg_high ? 128 : 0ul) | reg)) return false;
                 }
                 // mem
                 else if (TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out b_sizecode, out bool explicit_size))
                 {
                     if (explicit_size && a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Argument size missmatch"); return false; }
-                    
-                    if (!TryAppendVal(1, (dest << 4) | (a_sizecode << 2) | 1)) return false;
-                    if (!TryAppendAddress(a, b, ptr_base)) return false;
+
+                    if (!TryAppendVal(1, (dest << 4) | (a_sizecode << 2) | (dest_high ? 2 : 0ul) | 1)) return false;
                     if (!TryAppendExpr(Size(a_sizecode), imm)) return false;
+                    if (!TryAppendAddress(a, b, ptr_base)) return false;
                 }
                 // imm
                 else { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} requires second arg be a register or memory value"); return false; }
@@ -2357,16 +2369,16 @@ namespace CSX64
                 UInt64 a_sizecode, b_sizecode;
 
                 // reg, *
-                if (TryParseRegister(args[0], out UInt64 dest, out a_sizecode))
+                if (TryParseRegister(args[0], out UInt64 dest, out a_sizecode, out bool dest_high))
                 {
                     if ((Size(a_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
-
+                    
                     // reg, reg
-                    if (TryParseRegister(args[1], out UInt64 src, out b_sizecode))
+                    if (TryParseRegister(args[1], out UInt64 src, out b_sizecode, out bool src_high))
                     {
                         if (a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Argument size missmatch"); return false; }
 
-                        if (!TryAppendVal(1, (dest << 4) | (a_sizecode << 2) | 2)) return false;
+                        if (!TryAppendVal(1, (dest << 4) | (a_sizecode << 2) | (dest_high ? 2 : 0ul) | (src_high ? 1 : 0ul))) return false;
                         if (!TryAppendVal(1, src)) return false;
                     }
                     // reg, mem
@@ -2376,7 +2388,8 @@ namespace CSX64
 
                         if (!allow_b_mem) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not allow the second argument to be a memory value"); return false; }
 
-                        if (!TryAppendVal(1, (dest << 4) | (a_sizecode << 2) | 1)) return false;
+                        if (!TryAppendVal(1, (dest << 4) | (a_sizecode << 2) | (dest_high ? 2 : 0ul))) return false;
+                        if (!TryAppendVal(1, (2 << 4))) return false;
                         if (!TryAppendAddress(a, b, ptr_base)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
                     }
                     // reg, imm
@@ -2386,7 +2399,8 @@ namespace CSX64
 
                         b_sizecode = _b_sizecode == -1 ? a_sizecode : (UInt64)_b_sizecode;
 
-                        if (!TryAppendVal(1, (dest << 4) | (a_sizecode << 2) | 0)) return false;
+                        if (!TryAppendVal(1, (dest << 4) | (a_sizecode << 2) | (dest_high ? 2 : 0ul))) return false;
+                        if (!TryAppendVal(1, (1 << 4))) return false;
                         if (!TryAppendExpr(Size(b_sizecode), imm)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
                     }
                 }
@@ -2394,14 +2408,14 @@ namespace CSX64
                 else if (TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out a_sizecode, out bool explicit_size))
                 {
                     // mem, reg
-                    if (TryParseRegister(args[1], out UInt64 src, out b_sizecode))
+                    if (TryParseRegister(args[1], out UInt64 src, out b_sizecode, out bool src_high))
                     {
                         if ((Size(b_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified data size"); return false; }
 
                         if (explicit_size && a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Argument size missmatch"); return false; }
 
-                        if (!TryAppendVal(1, (b_sizecode << 2) | 2)) return false;
-                        if (!TryAppendVal(1, 16 | src)) return false;
+                        if (!TryAppendVal(1, (b_sizecode << 2) | (src_high ? 1 : 0ul))) return false; // uses b_sizecode because address may not define it
+                        if (!TryAppendVal(1, (3 << 4) | src)) return false;
                         if (!TryAppendAddress(a, b, ptr_base)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; };
                     }
                     // mem, mem
@@ -2418,9 +2432,10 @@ namespace CSX64
 
                         b_sizecode = _b_sizecode == -1 ? a_sizecode : (UInt64)_b_sizecode;
 
-                        if (!TryAppendVal(1, (a_sizecode << 2) | 3)) return false;
-                        if (!TryAppendExpr(Size(b_sizecode), imm)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                        if (!TryAppendVal(1, a_sizecode << 2)) return false;
+                        if (!TryAppendVal(1, 4 << 4)) return false;
                         if (!TryAppendAddress(a, b, ptr_base)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                        if (!TryAppendExpr(Size(b_sizecode), imm)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
                     }
                 }
                 // imm, *
@@ -2439,11 +2454,11 @@ namespace CSX64
                 UInt64 a_sizecode;
 
                 // reg
-                if (TryParseRegister(args[0], out UInt64 reg, out a_sizecode))
+                if (TryParseRegister(args[0], out UInt64 reg, out a_sizecode, out bool reg_high))
                 {
                     if ((Size(a_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
                     
-                    if (!TryAppendVal(1, (reg << 4) | (a_sizecode << 2) | 0)) return false;
+                    if (!TryAppendVal(1, (reg << 4) | (a_sizecode << 2) | (reg_high ? 2 : 0ul))) return false;
                 }
                 // mem
                 else if (TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out a_sizecode, out bool explicit_size))
@@ -2471,11 +2486,11 @@ namespace CSX64
                 UInt64 a_sizecode;
 
                 // reg
-                if (TryParseRegister(args[0], out UInt64 reg, out a_sizecode))
+                if (TryParseRegister(args[0], out UInt64 reg, out a_sizecode, out bool reg_high))
                 {
                     if ((Size(a_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
 
-                    if (!TryAppendVal(1, (reg << 4) | (a_sizecode << 2) | 1)) return false;
+                    if (!TryAppendVal(1, (reg << 4) | (a_sizecode << 2) | (reg_high ? 1 : 0ul))) return false;
                 }
                 // mem
                 else if (TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out a_sizecode, out bool explicit_size))
@@ -2484,7 +2499,7 @@ namespace CSX64
 
                     if ((Size(a_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
 
-                    if (!TryAppendVal(1, (a_sizecode << 2) | 2)) return false;
+                    if (!TryAppendVal(1, (a_sizecode << 2) | 3)) return false;
                     if (!TryAppendAddress(a, b, ptr_base)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
                 }
                 // imm
@@ -2492,7 +2507,7 @@ namespace CSX64
                 {
                     if (!TryParseImm(args[0], out Expr imm)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as a register, memory value, or imm\n-> {res.ErrorMsg}"); return false; }
 
-                    if (!TryAppendVal(1, (imm_sizecode << 2) | 0)) return false;
+                    if (!TryAppendVal(1, (imm_sizecode << 2) | 2)) return false;
                     if (!TryAppendExpr(Size(imm_sizecode), imm)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
                 }
 
@@ -2509,6 +2524,7 @@ namespace CSX64
 
                 return true;
             }
+
             public bool TryProcessXCHG(OPCode op)
             {
                 if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 2 args"); return false; }
@@ -2518,23 +2534,23 @@ namespace CSX64
                 UInt64 a_sizecode, b_sizecode;
 
                 // reg, *
-                if (TryParseRegister(args[0], out UInt64 reg, out a_sizecode))
+                if (TryParseRegister(args[0], out UInt64 reg, out a_sizecode, out bool reg_high))
                 {
                     // reg, reg
-                    if (TryParseRegister(args[1], out UInt64 src, out b_sizecode))
+                    if (TryParseRegister(args[1], out UInt64 src, out b_sizecode, out bool src_high))
                     {
                         if (a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Argument size missmatch"); return false; }
 
-                        if (!TryAppendVal(1, (reg << 4) | (a_sizecode << 2) | 0)) return false;
-                        if (!TryAppendVal(1, src)) return false;
+                        if (!TryAppendVal(1, (reg << 4) | (a_sizecode << 2) | (reg_high ? 2 : 0ul) | 0)) return false;
+                        if (!TryAppendVal(1, (src_high ? 128 : 0ul) | src)) return false;
                     }
                     // reg, mem
                     else if (TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out b_sizecode, out bool explicit_size))
                     {
                         if (explicit_size && a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Argument size missmatch"); return false; }
 
-                        if (!TryAppendVal(1, (reg << 4) | (a_sizecode << 2) | 1)) return false;
-                        if (!TryAppendAddress(a, b, ptr_base)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                        if (!TryAppendVal(1, (reg << 4) | (a_sizecode << 2) | (reg_high ? 2 : 0ul) | 1)) return false;
+                        if (!TryAppendAddress(a, b, ptr_base)) return false;
                     }
                     // reg, imm
                     else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Cannot use {op} with an imm"); return false; }
@@ -2543,12 +2559,12 @@ namespace CSX64
                 else if (TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out a_sizecode, out bool explicit_size))
                 {
                     // mem, reg
-                    if (TryParseRegister(args[1], out reg, out b_sizecode))
+                    if (TryParseRegister(args[1], out reg, out b_sizecode, out reg_high))
                     {
                         if (explicit_size && a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Argument size missmatch"); return false; }
 
-                        if (!TryAppendVal(1, (reg << 4) | (a_sizecode << 2) | 1)) return false;
-                        if (!TryAppendAddress(a, b, ptr_base)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                        if (!TryAppendVal(1, (reg << 4) | (a_sizecode << 2) | (reg_high ? 2 : 0ul) | 1)) return false;
+                        if (!TryAppendAddress(a, b, ptr_base)) return false;
                     }
                     // mem, mem
                     else if (TryParseAddress(args[1], out UInt64 _a, out UInt64 _b, out Expr _ptr_base, out UInt64 _sc, out bool _exp_sz))
@@ -2565,7 +2581,9 @@ namespace CSX64
             {
                 if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 2 args"); return false; }
 
-                if (!TryParseRegister(args[0], out UInt64 dest, out UInt64 a_sizecode)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} expecetd register as first arg\n-> {res.ErrorMsg}"); return false; }
+                if (!TryParseRegister(args[0], out UInt64 dest, out UInt64 a_sizecode, out bool dest_high)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} expecetd register as first arg\n-> {res.ErrorMsg}"); return false; }
+                if (a_sizecode == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not allow 8-bit addressing"); return false; }
+
                 if (!TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out UInt64 b_sizecode, out bool explicit_size)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} expected address as second arg\n-> {res.ErrorMsg}"); return false; }
 
                 if (explicit_size && a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Argument size missmatch"); return false; }
@@ -2576,14 +2594,28 @@ namespace CSX64
 
                 return true;
             }
-            public bool TryProcessReg(OPCode op)
+            public bool TryProcessPOP(OPCode op)
             {
                 if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 1 arg"); return false; }
 
-                if (!TryParseRegister(args[0], out UInt64 reg, out UInt64 a_sizecode)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} expected register as second arg\n-> {res.ErrorMsg}"); return false; }
+                UInt64 a_sizecode;
 
-                if (!TryAppendVal(1, (UInt64)op)) return false;
-                if (!TryAppendVal(1, (reg << 4) | (a_sizecode << 2))) return false;
+                // reg
+                if (TryParseRegister(args[0], out UInt64 reg, out a_sizecode, out bool a_high))
+                {
+                    if (a_sizecode == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support 8-bit operands"); return false; }
+
+                    if (!TryAppendVal(1, (reg << 4) | (a_sizecode << 2) | (a_high ? 2 : 0ul))) return false;
+                }
+                // mem
+                else if (TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out a_sizecode, out bool explicit_size))
+                {
+                    if (a_sizecode == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support 8-bit operands"); return false; }
+
+                    if (!TryAppendVal(1, (a_sizecode << 2) | 1)) return false;
+                    if (!TryAppendAddress(a, b, ptr_base)) return false;
+                }
+                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} expected a register or memory argument"); return false; }
 
                 return true;
             }
@@ -2681,7 +2713,7 @@ namespace CSX64
 
                 last_nonlocal_label = null,
 
-                res = default(AssembleResult),
+                res = default(AssembleResult)
             };
 
             // create the table of predefined symbols
@@ -2828,57 +2860,57 @@ namespace CSX64
 
                         case "XCHG": if (!args.TryProcessXCHG(OPCode.XCHG)) return args.res; break;
 
-                        case "JMP": if (!args.TryProcessIMMRM(OPCode.JMP)) return args.res; break;
+                        case "JMP": if (!args.TryProcessIMMRM(OPCode.JMP, false, 0, 14)) return args.res; break;
 
-                        case "JZ": case "JE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.z)) return args.res; break;
-                        case "JNZ": case "JNE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.nz)) return args.res; break;
-                        case "JS": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.s)) return args.res; break;
-                        case "JNS": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.ns)) return args.res; break;
-                        case "JP": case "JPE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.p)) return args.res; break;
-                        case "JNP": case "JPO": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.np)) return args.res; break;
-                        case "JO": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.o)) return args.res; break;
-                        case "JNO": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.no)) return args.res; break;
-                        case "JC": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.c)) return args.res; break;
-                        case "JNC": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.nc)) return args.res; break;
+                        case "JZ": case "JE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.z, 14)) return args.res; break;
+                        case "JNZ": case "JNE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.nz, 14)) return args.res; break;
+                        case "JS": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.s, 14)) return args.res; break;
+                        case "JNS": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.ns, 14)) return args.res; break;
+                        case "JP": case "JPE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.p, 14)) return args.res; break;
+                        case "JNP": case "JPO": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.np, 14)) return args.res; break;
+                        case "JO": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.o, 14)) return args.res; break;
+                        case "JNO": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.no, 14)) return args.res; break;
+                        case "JC": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.c, 14)) return args.res; break;
+                        case "JNC": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.nc, 14)) return args.res; break;
 
-                        case "JA": case "JNBE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.a)) return args.res; break;
-                        case "JAE": case "JNB": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.ae)) return args.res; break;
-                        case "JB": case "JNAE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.b)) return args.res; break;
-                        case "JBE": case "JNA": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.be)) return args.res; break;
+                        case "JA": case "JNBE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.a, 14)) return args.res; break;
+                        case "JAE": case "JNB": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.ae, 14)) return args.res; break;
+                        case "JB": case "JNAE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.b, 14)) return args.res; break;
+                        case "JBE": case "JNA": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.be, 14)) return args.res; break;
 
-                        case "JG": case "JNLE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.g)) return args.res; break;
-                        case "JGE": case "JNL": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.ge)) return args.res; break;
-                        case "JL": case "JNGE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.l)) return args.res; break;
-                        case "JLE": case "JNG": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.le)) return args.res; break;
+                        case "JG": case "JNLE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.g, 14)) return args.res; break;
+                        case "JGE": case "JNL": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.ge, 14)) return args.res; break;
+                        case "JL": case "JNGE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.l, 14)) return args.res; break;
+                        case "JLE": case "JNG": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.le, 14)) return args.res; break;
 
-                        case "LOOP": if (!args.TryProcessIMMRM(OPCode.LOOP)) return args.res; break;
+                        case "LOOP": if (!args.TryProcessIMMRM(OPCode.LOOP, false, 0, 14)) return args.res; break;
 
-                        case "LOOPZ": case "LOOPE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.z)) return args.res; break;
-                        case "LOOPNZ": case "LOOPNE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.nz)) return args.res; break;
-                        case "LOOPS": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.s)) return args.res; break;
-                        case "LOOPNS": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.ns)) return args.res; break;
-                        case "LOOPP": case "LOOPPE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.p)) return args.res; break;
-                        case "LOOPNP": case "LOOPPO": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.np)) return args.res; break;
-                        case "LOOPO": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.o)) return args.res; break;
-                        case "LOOPNO": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.no)) return args.res; break;
-                        case "LOOPC": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.c)) return args.res; break;
-                        case "LOOPNC": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.nc)) return args.res; break;
+                        case "LOOPZ": case "LOOPE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.z, 14)) return args.res; break;
+                        case "LOOPNZ": case "LOOPNE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.nz, 14)) return args.res; break;
+                        case "LOOPS": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.s, 14)) return args.res; break;
+                        case "LOOPNS": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.ns, 14)) return args.res; break;
+                        case "LOOPP": case "LOOPPE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.p, 14)) return args.res; break;
+                        case "LOOPNP": case "LOOPPO": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.np, 14)) return args.res; break;
+                        case "LOOPO": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.o, 14)) return args.res; break;
+                        case "LOOPNO": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.no, 14)) return args.res; break;
+                        case "LOOPC": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.c, 14)) return args.res; break;
+                        case "LOOPNC": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.nc, 14)) return args.res; break;
 
-                        case "LOOPA": case "LOOPNBE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.a)) return args.res; break;
-                        case "LOOPAE": case "LOOPNB": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.ae)) return args.res; break;
-                        case "LOOPB": case "LOOPNAE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.b)) return args.res; break;
-                        case "LOOPBE": case "LOOPNA": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.be)) return args.res; break;
+                        case "LOOPA": case "LOOPNBE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.a, 14)) return args.res; break;
+                        case "LOOPAE": case "LOOPNB": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.ae, 14)) return args.res; break;
+                        case "LOOPB": case "LOOPNAE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.b, 14)) return args.res; break;
+                        case "LOOPBE": case "LOOPNA": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.be, 14)) return args.res; break;
 
-                        case "LOOPG": case "LOOPNLE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.g)) return args.res; break;
-                        case "LOOPGE": case "LOOPNL": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.ge)) return args.res; break;
-                        case "LOOPL": case "LOOPNGE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.l)) return args.res; break;
-                        case "LOOPLE": case "LOOPNG": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.le)) return args.res; break;
+                        case "LOOPG": case "LOOPNLE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.g, 14)) return args.res; break;
+                        case "LOOPGE": case "LOOPNL": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.ge, 14)) return args.res; break;
+                        case "LOOPL": case "LOOPNGE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.l, 14)) return args.res; break;
+                        case "LOOPLE": case "LOOPNG": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.le, 14)) return args.res; break;
 
-                        case "CALL": if (!args.TryProcessIMMRM(OPCode.CALL)) return args.res; break;
+                        case "CALL": if (!args.TryProcessIMMRM(OPCode.CALL, false, 0, 14)) return args.res; break;
                         case "RET": if (!args.TryProcessNoArgOp(OPCode.RET)) return args.res; break;
 
-                        case "PUSH": if (!args.TryProcessIMMRM(OPCode.PUSH)) return args.res; break;
-                        case "POP": if (!args.TryProcessReg(OPCode.POP)) return args.res; break;
+                        case "PUSH": if (!args.TryProcessIMMRM(OPCode.PUSH, false, 0, 14)) return args.res; break;
+                        case "POP": if (!args.TryProcessPOP(OPCode.POP)) return args.res; break;
 
                         case "LEA": if (!args.TryProcessLEA(OPCode.LEA)) return args.res; break;
 
@@ -2926,53 +2958,7 @@ namespace CSX64
                             // otherwise normal binary
                             else if (!args.TryProcessBinaryOp(OPCode.CMP)) return args.res;
                             break;
-                        case "FCMP":
-                            // if there are 2 args and the second one is an instant 0, we can make this an FCMPZ instruction
-                            if (args.args.Length == 2 && args.TryParseInstantImm(args.args[1], out a, out floating) && a == 0)
-                            {
-                                // set new args for the unary version
-                                args.args = new string[] { args.args[0] };
-                                if (!args.TryProcessUnaryOp(OPCode.FCMPZ, false, 0, 12)) return args.res;
-                            }
-                            // otherwise normal binary
-                            else if (!args.TryProcessBinaryOp(OPCode.FCMP, false, 0, 12, -1)) return args.res;
-                            break;
                         case "TEST": if (!args.TryProcessBinaryOp(OPCode.TEST)) return args.res; break;
-
-                        case "FADD": if (!args.TryProcessBinaryOp(OPCode.FADD, false, 0, 12)) return args.res; break;
-                        case "FSUB": if (!args.TryProcessBinaryOp(OPCode.FSUB, false, 0, 12)) return args.res; break;
-                        case "FSUBR": if (!args.TryProcessBinaryOp(OPCode.FSUBR, false, 0, 12)) return args.res; break;
-
-                        case "FMUL": if (!args.TryProcessBinaryOp(OPCode.FMUL, false, 0, 12)) return args.res; break;
-                        case "FDIV": if (!args.TryProcessBinaryOp(OPCode.FDIV, false, 0, 12)) return args.res; break;
-                        case "FDIVR": if (!args.TryProcessBinaryOp(OPCode.FDIVR, false, 0, 12)) return args.res; break;
-
-                        case "FPOW": if (!args.TryProcessBinaryOp(OPCode.FPOW, false, 0, 12)) return args.res; break;
-                        case "FPOWR": if (!args.TryProcessBinaryOp(OPCode.FPOWR, false, 0, 12)) return args.res; break;
-                        case "FLOG": if (!args.TryProcessBinaryOp(OPCode.FLOG, false, 0, 12)) return args.res; break;
-                        case "FLOGR": if (!args.TryProcessBinaryOp(OPCode.FLOGR, false, 0, 12)) return args.res; break;
-
-                        case "FSQRT": if (!args.TryProcessUnaryOp(OPCode.FSQRT, false, 0, 12)) return args.res; break;
-                        case "FNEG": if (!args.TryProcessUnaryOp(OPCode.FNEG, false, 0, 12)) return args.res; break;
-                        case "FABS": if (!args.TryProcessUnaryOp(OPCode.FABS, false, 0, 12)) return args.res; break;
-
-                        case "FFLOOR": if (!args.TryProcessUnaryOp(OPCode.FFLOOR, false, 0, 12)) return args.res; break;
-                        case "FCEIL": if (!args.TryProcessUnaryOp(OPCode.FCEIL, false, 0, 12)) return args.res; break;
-                        case "FROUND": if (!args.TryProcessUnaryOp(OPCode.FROUND, false, 0, 12)) return args.res; break;
-                        case "FTRUNC": if (!args.TryProcessUnaryOp(OPCode.FTRUNC, false, 0, 12)) return args.res; break;
-
-                        case "FSIN": if (!args.TryProcessUnaryOp(OPCode.FSIN, false, 0, 12)) return args.res; break;
-                        case "FCOS": if (!args.TryProcessUnaryOp(OPCode.FCOS, false, 0, 12)) return args.res; break;
-                        case "FTAN": if (!args.TryProcessUnaryOp(OPCode.FTAN, false, 0, 12)) return args.res; break;
-
-                        case "FSINH": if (!args.TryProcessUnaryOp(OPCode.FSINH, false, 0, 12)) return args.res; break;
-                        case "FCOSH": if (!args.TryProcessUnaryOp(OPCode.FCOSH, false, 0, 12)) return args.res; break;
-                        case "FTANH": if (!args.TryProcessUnaryOp(OPCode.FTANH, false, 0, 12)) return args.res; break;
-
-                        case "FASIN": if (!args.TryProcessUnaryOp(OPCode.FASIN, false, 0, 12)) return args.res; break;
-                        case "FACOS": if (!args.TryProcessUnaryOp(OPCode.FACOS, false, 0, 12)) return args.res; break;
-                        case "FATAN": if (!args.TryProcessUnaryOp(OPCode.FATAN, false, 0, 12)) return args.res; break;
-                        case "FATAN2": if (!args.TryProcessBinaryOp(OPCode.FATAN2, false, 0, 12)) return args.res; break;
 
                         case "BSWAP": if (!args.TryProcessUnaryOp(OPCode.BSWAP)) return args.res; break;
                         case "BEXTR": if (!args.TryProcessBinaryOp(OPCode.BEXTR, false, 0, 15, 1)) return args.res; break;
@@ -3086,11 +3072,11 @@ namespace CSX64
             // create data segments (we don't know how large the resulting file will be, so it needs to be expandable) (write header to text segment)
             List<byte> text = new List<byte>()
             {
-                (byte)OPCode.CALL, 0x0c, 0, 0, 0, 0, 0, 0, 0, 0, // call    main         ; call main function
-                (byte)OPCode.MOV, 0x1e, 0x00,                    // mov     $1, $0       ; mov ret value to $1 for sys_exit
-                (byte)OPCode.XOR, 0x0e, 0x00,                    // xor     $0, $0       ; clear $0
-                (byte)OPCode.MOV, 0x00, (byte)SyscallCode.Exit,  // mov:8   $0, sys_exit ; load sys_exit (bypasses endianness by only using low byte)
-                (byte)OPCode.SYSCALL                             // syscall              ; perform sys_exit to set error code and stop execution
+                (byte)OPCode.CALL, 0x0e, 0, 0, 0, 0, 0, 0, 0, 0,      // call main         ; call main function
+                (byte)OPCode.MOV, 0x1c, 0x00,                         // mov  rbx, rax     ; mov ret value to rbx for sys_exit
+                (byte)OPCode.XOR, 0x0c, 0x00,                         // xor  rax, rax     ; clear rax
+                (byte)OPCode.MOV, 0x00, 0x10, (byte)SyscallCode.Exit, // mov  al, sys_exit ; load sys_exit (bypasses endianness by only using low byte)
+                (byte)OPCode.SYSCALL                                  // syscall           ; perform sys_exit to set error code and stop execution
             };
             List<byte> rodata = new List<byte>();
             List<byte> data = new List<byte>();

@@ -35,7 +35,7 @@ namespace CSX64
                 // if we got nothing but it's interactive
                 if (n == 0 && fd.Interactive)
                 {
-                    --Pos;                // await further data by repeating the syscall
+                    --RIP;                // await further data by repeating the syscall
                     SuspendedRead = true; // suspend execution until there's more data
                 }
                 // otherwise return num chars read from file

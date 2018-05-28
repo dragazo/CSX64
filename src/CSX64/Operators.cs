@@ -45,95 +45,195 @@ namespace CSX64
             }
         }
 
-        private bool FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b,
-            bool get_a = true, int _a_sizecode = -1, int _b_sizecode = -1, bool allow_b_mem = true)
+        /*
+        [4: dest][2: size][1:dh][1: mem]   [size: imm]
+            mem = 0: [1: sh][3:][4: src]
+                dest <- f(reg, imm)
+            mem = 1: [address]
+                dest <- f(M[address], imm)
+            (dh and sh mark AH, BH, CH, or DH for dest or src)
+        */
+        private bool FetchTernaryOpFormat(out UInt64 s, out UInt64 a, out UInt64 b)
         {
-            // read settings
-            if (!GetMemAdv(1, out s)) { m = a = b = 0; return false; }
-
-            // if they requested an explicit size for a, change it in the settings byte
-            if (_a_sizecode != -1) s = (s & 0xf3) | ((UInt64)_a_sizecode << 2);
-
-            UInt64 a_sizecode = (s >> 2) & 3;
-            UInt64 b_sizecode = _b_sizecode == -1 ? a_sizecode : (UInt64)_b_sizecode;
-
-            a = m = 0; // zero a and m (for get_a logic and so compiler won't complain)
-
-            // switch through mode
-            switch (s & 3)
-            {
-                case 0:
-                    if (get_a) a = Registers[s >> 4][a_sizecode];
-                    if (!GetMemAdv(Size(b_sizecode), out b)) return false;
-                    return true;
-                case 1:
-                    if (!allow_b_mem) { b = 0; Terminate(ErrorCode.UndefinedBehavior); return false; }
-
-                    if (get_a) a = Registers[s >> 4][a_sizecode];
-                    if (!GetAddressAdv(out b) || !GetMemRaw(b, Size(b_sizecode), out b)) return false;
-                    return true;
-                case 2:
-                    if (!GetMemAdv(1, out b)) return false;
-                    switch ((b >> 4) & 1)
-                    {
-                        case 0:
-                            if (get_a) a = Registers[s >> 4][a_sizecode];
-                            b = Registers[b & 15][b_sizecode];
-                            return true;
-                        case 1:
-                            if (!GetAddressAdv(out m) || get_a && !GetMemRaw(m, Size(a_sizecode), out a)) return false;
-                            b = Registers[b & 15][b_sizecode];
-                            s |= 256; // mark as memory path of mode 2
-                            return true;
-
-                        default: return true; // this should never happen but compiler is complainy
-                    }
-                case 3:
-                    if (!GetMemAdv(Size(b_sizecode), out b)) return false;
-                    if (!GetAddressAdv(out m) || get_a && !GetMemRaw(m, Size(a_sizecode), out a)) return false;
-                    return true;
-
-                default: b = 0; return true; // this should never happen but compiler is complainy
-            }
-        }
-        private bool StoreBinaryOpFormat(UInt64 s, UInt64 m, UInt64 res)
-        {
+            if (!GetMemAdv(1, out s)) { a = b = 0; return false; }
             UInt64 sizecode = (s >> 2) & 3;
 
-            // switch through mode
-            switch (s & 3)
-            {
-                case 0:
-                case 1:
-                    Registers[s >> 4][sizecode] = res;
-                    return true;
-                case 2:
-                    if (s < 256) goto case 1; else goto case 3;
-                case 3:
-                    return SetMemRaw(m, Size(sizecode), res);
-            }
+            // make sure dest will be valid for storing (high flag)
+            if ((s & 2) != 0 && ((s & 0xc0) != 0 || sizecode != 0)) { Terminate(ErrorCode.UndefinedBehavior); a = b = 0; return false; }
 
+            // get b (imm)
+            if (!GetMemAdv(Size(sizecode), out b)) { a = 0; return false; }
+
+            // get a (reg or mem)
+            if ((s & 1) == 0)
+            {
+                if (!GetMemAdv(1, out a)) return false;
+                if ((a & 128) != 0)
+                {
+                    if ((a & 0x0c) != 0 || sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+                    a = Registers[a & 15].x8h;
+                }
+                else a = Registers[a & 15][sizecode];
+                return true;
+            }
+            else return GetAddressAdv(out a) && GetMemRaw(a, Size(sizecode), out a);
+        }
+        private bool StoreTernaryOPFormat(UInt64 s, UInt64 res)
+        {
+            if ((s & 2) != 0) Registers[s >> 4].x8h = (byte)res;
+            else Registers[s >> 4][(s >> 2) & 3] = res;
             return true;
         }
 
+        /*
+        [4: dest][2: size][1:dh][1: sh]   [4: mode][4: src]
+            Mode = 0:                           dest <- f(dest, src)
+            Mode = 1: [size: imm]               dest <- f(dest, imm)
+            Mode = 2: [address]                 dest <- f(dest, M[address])
+            Mode = 3: [address]                 M[address] <- f(M[address], src)
+            Mode = 4: [address]   [size: imm]   M[address] <- f(M[address], imm)
+            Else UND
+            (dh and sh mark AH, BH, CH, or DH for dest or src)
+        */
+        private bool FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b,
+            bool get_a = true, int _a_sizecode = -1, int _b_sizecode = -1, bool allow_b_mem = true)
+        {
+            m = a = b = 0; // zero the things (compiler is annoying me)
+
+            // read settings
+            if (!GetMemAdv(1, out s1) || !GetMemAdv(1, out s2)) { s2 = 0; return false; }
+
+            // if they requested an explicit size for a, change it in the settings byte
+            if (_a_sizecode != -1) s1 = (s1 & 0xf3) | ((UInt64)_a_sizecode << 2);
+
+            // get size codes
+            UInt64 a_sizecode = (s1 >> 2) & 3;
+            UInt64 b_sizecode = _b_sizecode == -1 ? a_sizecode : (UInt64)_b_sizecode;
+
+            // switch through mode
+            switch (s2 >> 4)
+            {
+                case 0:
+                    // if dh is flagged
+                    if ((s1 & 2) != 0)
+                    {
+                        // make sure we're in registers 0-3 and 8-bit mode
+                        if ((s1 & 0xc0) != 0 || a_sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+                        if (get_a) a = Registers[s1 >> 4].x8h;
+                    }
+                    else if (get_a) a = Registers[s1 >> 4][a_sizecode];
+                    // if sh is flagged
+                    if ((s1 & 1) != 0)
+                    {
+                        // make sure we're in registers 0-3 and 8-bit mode
+                        if ((s2 & 0x0c) != 0 || b_sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+                        b = Registers[s2 & 15].x8h;
+                    }
+                    else b = Registers[s2 & 15][b_sizecode];
+                    return true;
+
+                case 1:
+                    // if dh is flagged
+                    if ((s1 & 2) != 0)
+                    {
+                        // make sure we're in registers 0-3 and 8-bit mode
+                        if ((s1 & 0xc0) != 0 || a_sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+                        if (get_a) a = Registers[s1 >> 4].x8h;
+                    }
+                    else if (get_a) a = Registers[s1 >> 4][a_sizecode];
+                    // get imm
+                    return GetMemAdv(Size(b_sizecode), out b);
+
+                case 2:
+                    // handle allow_b_mem case
+                    if (!allow_b_mem) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+
+                    // if dh is flagged
+                    if ((s1 & 2) != 0)
+                    {
+                        // make sure we're in registers 0-3 and 8-bit mode
+                        if ((s1 & 0xc0) != 0 || a_sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+                        if (get_a) a = Registers[s1 >> 4].x8h;
+                    }
+                    else if (get_a) a = Registers[s1 >> 4][a_sizecode];
+                    // get mem
+                    return GetAddressAdv(out m) && GetMemRaw(m, Size(b_sizecode), out b);
+
+                case 3:
+                    // get mem
+                    if (!GetAddressAdv(out m) || get_a && !GetMemRaw(m, Size(a_sizecode), out a)) return false;
+                    // if sh is flagged
+                    if ((s1 & 1) != 0)
+                    {
+                        // make sure we're in registers 0-3 and 8-bit mode
+                        if ((s2 & 0x0c) != 0 || b_sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+                        b = Registers[s2 & 15].x8h;
+                    }
+                    else b = Registers[s2 & 15][b_sizecode];
+                    return true;
+
+                case 4:
+                    // get mem
+                    if (!GetAddressAdv(out m) || get_a && !GetMemRaw(m, Size(a_sizecode), out a)) return false;
+                    // get imm
+                    return GetMemAdv(Size(b_sizecode), out b);
+
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
+            }
+        }
+        private bool StoreBinaryOpFormatNew(UInt64 s1, UInt64 s2, UInt64 m, UInt64 res)
+        {
+            UInt64 sizecode = (s1 >> 2) & 3;
+
+            // switch through mode
+            switch (s2 >> 4)
+            {
+                case 0:
+                case 1:
+                case 2:
+                    if ((s1 & 2) != 0) Registers[s1 >> 4].x8h = (byte)res;
+                    else Registers[s1 >> 4][sizecode] = res;
+                    return true;
+
+                case 3:
+                case 4:
+                    return SetMemRaw(m, Size(sizecode), res);
+
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
+            }
+        }
+
+        /*
+        [4: dest][2: size][1: h][1: mem]
+            mem = 0:             dest <- f(dest)
+            mem = 1: [address]   M[address] <- f(M[address])
+        */
         private bool FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, bool get_a = true, int _a_sizecode = -1)
         {
+            m = a = 0; // zero a and m (for get_a logic and so compiler won't complain)
+
             // read settings
-            if (!GetMemAdv(1, out s)) { m = a = 0; return false; }
+            if (!GetMemAdv(1, out s)) return false;
 
             // if they requested an explicit size for a, change it in the settings byte
             if (_a_sizecode != -1) s = (s & 0xf3) | ((UInt64)_a_sizecode << 2);
 
             UInt64 a_sizecode = (s >> 2) & 3;
-
-            a = m = 0; // zero a and m (for get_a logic and so compiler won't complain)
 
             // switch through mode
             switch (s & 1)
             {
                 case 0:
-                    if (get_a) a = Registers[s >> 4][a_sizecode];
+                    // if h is flagged
+                    if ((s & 2) != 0)
+                    {
+                        // make sure we're in registers 0-3 and 8-bit mode
+                        if ((s & 0xc0) != 0 || a_sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+                        if (get_a) a = Registers[s >> 4].x8h;
+                    }
+                    else if (get_a) a = Registers[s >> 4][a_sizecode];
                     return true;
+
                 case 1:
                     return GetAddressAdv(out m) && (!get_a || GetMemRaw(m, Size(a_sizecode), out a));
 
@@ -148,43 +248,61 @@ namespace CSX64
             switch (s & 1)
             {
                 case 0:
-                    Registers[s >> 4][sizecode] = res;
+                    if ((s & 2) != 0) Registers[s >> 4].x8h = (byte)res;
+                    else Registers[s >> 4][sizecode] = res;
                     return true;
+
                 case 1:
                     return SetMemRaw(m, Size(sizecode), res);
 
-                default: return true; // this should never happen but compiler is complainy
+                default: return true; // this can't happen but compiler is stupid
             }
         }
 
+        /*
+        [4: reg][2: size][2: mode]
+            mode = 0:               reg
+            mode = 1:               h reg (AH, BH, CH, or DH)
+            mode = 2: [size: imm]   imm
+            mode = 3: [address],    M[address]
+        */
         private bool FetchIMMRMFormat(out UInt64 s, out UInt64 a, int _a_sizecode = -1)
         {
-            if (!GetMemAdv(1, out s)) { a = 0; return false; }
+            a = 0; // so compiler won't complain
 
+            if (!GetMemAdv(1, out s)) return false;
+            
             UInt64 a_sizecode = _a_sizecode == -1 ? (s >> 2) & 3 : (UInt64)_a_sizecode;
 
             // get the value into b
             switch (s & 3)
             {
-                case 0: if (!GetMemAdv(Size((s >> 2) & 3), out a)) return false; break;
-                case 1: a = Registers[s >> 4][(s >> 2) & 3]; break;
-                case 2: if (!GetAddressAdv(out a) || !GetMemRaw(a, Size((s >> 2) & 3), out a)) return false; break;
-                default: Terminate(ErrorCode.UndefinedBehavior); { a = 0; return false; }
+                case 0:
+                    a = Registers[s >> 4][a_sizecode];
+                    return true;
+
+                case 1:
+                    if ((s & 0xc0) != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+                    a = Registers[s >> 4].x8h;
+                    return true;
+
+                case 2: return GetMemAdv(Size(a_sizecode), out a);
+
+                case 3: return GetAddressAdv(out a) && GetMemRaw(a, Size(a_sizecode), out a);
             }
 
             return true;
         }
 
         // updates the flags for integral ops (identical for most integral ops)
-        private void UpdateFlagsInt(UInt64 value, UInt64 sizecode)
+        private void UpdateFlagsZSP(UInt64 value, UInt64 sizecode)
         {
             ZF = value == 0;
             SF = Negative(value, sizecode);
 
             // compute parity flag (only of low 8 bits)
             bool parity = true;
-            for (int i = 0; i < 8; ++i)
-                if (((value >> i) & 1) != 0) parity = !parity;
+            for (UInt64 i = 128; i != 0; i >>= 1) if ((value & i) != 0) parity = !parity;
             PF = parity;
         }
         // updates the flags for floating point ops
@@ -250,56 +368,82 @@ namespace CSX64
 
         private bool ProcessMOV(bool apply = true)
         {
-            if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b, false)) return false;
+            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b, false)) return false;
 
-            return !apply || StoreBinaryOpFormat(s, m, b);
+            return !apply || StoreBinaryOpFormatNew(s1, s2, m, b);
         }
+
+        /*
+        [4: r1][2: size][1: r1h][1: mem]
+	        mem = 0: [1: r2h][3:][4: r2]
+		        r1 <- r2
+		        r2 <- r1
+	        mem = 1: [address]
+		        r1         <- M[address]
+		        M[address] <- r1
+            (r1h and r2h mark AH, BH, CH, or DH for r1 or r2)
+        */
         private bool ProcessXCHG()
         {
-            UInt64 a, b, c, d;
+            UInt64 a, b, temp_1, temp_2;
 
             if (!GetMemAdv(1, out a)) return false;
-            switch (a & 1)
+            UInt64 sizecode = (a >> 2) & 3;
+
+            // if a is high
+            if ((a & 2) != 0)
             {
-                case 0:
-                    if (!GetMemAdv(1, out b)) return false;
-                    c = Registers[a >> 4].x64;
-                    Registers[a >> 4][(a >> 2) & 3] = Registers[b & 15].x64;
-                    Registers[b & 15][(a >> 2) & 3] = c;
-                    break;
-                case 1:
-                    if (!GetAddressAdv(out b) || !GetMemRaw(b, Size((a >> 2) & 3), out c)) return false;
-                    d = Registers[a >> 4].x64;
-                    Registers[a >> 4][(a >> 2) & 3] = c;
-                    if (!SetMemRaw(b, Size((a >> 2) & 3), d)) return false;
-                    break;
+                if ((a & 0xc0) != 0 || sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+                temp_1 = Registers[a >> 4].x8h;
             }
+            else temp_1 = Registers[a >> 4][sizecode];
+
+            // if b is reg
+            if ((a & 1) == 0)
+            {
+                if (!GetMemAdv(1, out b)) return false;
+
+                // if b is high
+                if ((b & 128) != 0)
+                {
+                    if ((b & 0x0c) != 0 || sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+                    temp_2 = Registers[b & 15].x8h;
+                    Registers[b & 15].x8h = (byte)temp_1;
+                }
+                else
+                {
+                    temp_2 = Registers[b & 15][sizecode];
+                    Registers[b & 15][sizecode] = temp_1;
+                }
+            }
+            // otherwise b is mem
+            else
+            {
+                // get mem value into temp_2 (address in b)
+                if (!GetAddressAdv(out b) || !GetMemRaw(b, Size(sizecode), out temp_2)) return false;
+                // store b result
+                if (!SetMemRaw(b, Size(sizecode), temp_1)) return false;
+            }
+
+            // store a's result (b's was handled internally above)
+            if ((a & 2) != 0) Registers[a >> 4].x8h = (byte)temp_2;
+            else Registers[a >> 4][sizecode] = temp_2;
 
             return true;
         }
 
         private bool ProcessJMP(bool apply, ref UInt64 aft)
         {
-            if (!GetMemAdv(1, out UInt64 s)) return false;
+            if (!FetchIMMRMFormat(out UInt64 s, out UInt64 val)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
-            UInt64 val = 0;
-            switch (s & 3)
-            {
-                case 0: if (!GetMemAdv(Size(sizecode), out val)) return false; break;
-                case 1: val = Registers[s >> 4][sizecode]; break;
-                case 2: if (!GetAddressAdv(out val) || !GetMemRaw(val, Size(sizecode), out val)) return false; break;
-                case 3:
-                    UInt64 tempPos = Pos - 2; // hold initial pos (-2 to account for op code and settings bytes that were already read)
-                    if (!GetMemAdv(Size(sizecode), out val)) return false;
-                    val = tempPos + SignExtend(val, sizecode); // offset from temp pos
-                    break;
-            }
+            // 8-bit addressing not allowed
+            if (sizecode == 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
 
-            aft = Pos; // record point immediately after reading (for CALL return address)
+            aft = RIP; // record point immediately after reading (for CALL return address)
 
-            if (apply) Pos = val; // jump
-
+            if (apply) RIP = val; // jump
+            
             return true;
         }
 
@@ -309,49 +453,74 @@ namespace CSX64
 
             return PushRaw(Size((s >> 2) & 3), a);
         }
+        /*
+        [4: reg][2: size][1: reg_h][1: mem]
+            mem = 0:             reg
+            mem = 1: [address]   M[address]
+        */
         private bool ProcessPOP()
         {
-            if (!GetMemAdv(1, out UInt64 s) || !PopRaw(Size((s >> 2) & 3), out UInt64 val)) return false;
+            if (!GetMemAdv(1, out UInt64 s)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
 
-            Registers[s >> 4][(s >> 2) & 3] = val;
-            return true;
+            // get the value
+            if (!PopRaw(Size(sizecode), out UInt64 val)) return false;
+
+            // if register
+            if ((s & 1) == 0)
+            {
+                // if high
+                if ((s & 2) != 0)
+                {
+                    if ((s & 0xc0) != 0 || sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+                    Registers[s >> 4].x8h = (byte)val;
+                }
+                else Registers[s >> 4][sizecode] = val;
+                return true;
+            }
+            // otherwise is memory
+            else return GetAddressAdv(out s) && SetMemRaw(s, Size(sizecode), val);
         }
 
         private bool ProcessLEA()
         {
             if (!GetMemAdv(1, out UInt64 s) || !GetAddressAdv(out UInt64 address)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
 
-            Registers[s >> 4][(s >> 2) & 3] = address;
+            // LEA doesn't allow 8-bit addressing
+            if (sizecode == 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+
+            Registers[s >> 4][sizecode] = address;
             return true;
         }
 
         private bool ProcessADD()
         {
-            if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
-            UInt64 sizecode = (s >> 2) & 3;
+            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
+            UInt64 sizecode = (s1 >> 2) & 3;
 
             UInt64 res = Truncate(a + b, sizecode);
 
-            UpdateFlagsInt(res, sizecode);
+            UpdateFlagsZSP(res, sizecode);
             CF = res < a && res < b; // if overflow is caused, some of one value must go toward it, so the truncated result must necessarily be less than both args
             AF = (res & 0xf) < (a & 0xf) && (res & 0xf) < (b & 0xf); // AF is just like CF but only the low nibble
             OF = Positive(a, sizecode) == Positive(b, sizecode) && Positive(a, sizecode) != Positive(res, sizecode);
 
-            return StoreBinaryOpFormat(s, m, res);
+            return StoreBinaryOpFormatNew(s1, s2, m, res);
         }
         private bool ProcessSUB(bool apply = true)
         {
-            if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
-            UInt64 sizecode = (s >> 2) & 3;
+            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
+            UInt64 sizecode = (s1 >> 2) & 3;
 
             UInt64 res = Truncate(a - b, sizecode);
 
-            UpdateFlagsInt(res, sizecode);
+            UpdateFlagsZSP(res, sizecode);
             CF = a < b; // if a < b, a borrow was taken from the highest bit
             AF = (a & 0xf) < (b & 0xf); // AF is just like CF but only the low nibble
             OF = Positive(a, sizecode) != Positive(b, sizecode) && Positive(a, sizecode) != Positive(res, sizecode);
 
-            return !apply || StoreBinaryOpFormat(s, m, res);
+            return !apply || StoreBinaryOpFormatNew(s1, s2, m, res);
         }
 
         private bool ProcessMUL()
@@ -451,8 +620,8 @@ namespace CSX64
         }
         private bool ProcessBinary_IMUL()
         {
-            if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 _a, out UInt64 _b)) return false;
-            UInt64 sizecode = (s >> 2) & 3;
+            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 _a, out UInt64 _b)) return false;
+            UInt64 sizecode = (s1 >> 2) & 3;
 
             // get vals as sign extended
             Int64 a = (Int64)SignExtend(_a, sizecode);
@@ -488,23 +657,12 @@ namespace CSX64
             AF = Rand.NextBool();
             PF = Rand.NextBool();
 
-            return StoreBinaryOpFormat(s, m, (UInt64)res);
+            return StoreBinaryOpFormatNew(s1, s2, m, (UInt64)res);
         }
         private bool ProcessTernary_IMUL()
         {
-            if (!GetMemAdv(1, out UInt64 s)) return false;
+            if (!FetchTernaryOpFormat(out UInt64 s, out UInt64 _a, out UInt64 _b)) return false;
             UInt64 sizecode = (s >> 2) & 3;
-
-            // read raw vals
-            UInt64 _a;
-            if ((s & 1) == 0)
-            {
-                if (!GetMemAdv(1, out _a)) return false;
-                _a = Registers[s & 15][sizecode];
-            }
-            else if (!GetAddressAdv(out _a) || !GetMemRaw(_a, Size(sizecode), out _a)) return false;
-
-            if (!GetMemAdv(Size(sizecode), out UInt64 _b)) return false;
 
             // get vals as signed
             Int64 a = (Int64)SignExtend(_a, sizecode);
@@ -540,8 +698,7 @@ namespace CSX64
             AF = Rand.NextBool();
             PF = Rand.NextBool();
 
-            Registers[s >> 4][sizecode] = (UInt64)res;
-            return true;
+            return StoreTernaryOPFormat(s, (UInt64)res);
         }
 
         private bool ProcessDIV()
@@ -645,8 +802,8 @@ namespace CSX64
 
         private bool ProcessSHL()
         {
-            if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 0)) return false;
-            UInt64 sizecode = (s >> 2) & 3;
+            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 0)) return false;
+            UInt64 sizecode = (s1 >> 2) & 3;
 
             UInt16 sh = (UInt16)(b & (sizecode == 3 ? 0x3ful : 0x1ful)); // mask shift val to 6 bits on 64-bit op, otherwise to 5 bits
 
@@ -655,19 +812,19 @@ namespace CSX64
             {
                 UInt64 res = Truncate(a << sh, sizecode);
 
-                UpdateFlagsInt(res, sizecode);
+                UpdateFlagsZSP(res, sizecode);
                 CF = sh < SizeBits(sizecode) ? ((a >> ((UInt16)SizeBits(sizecode) - sh)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
                 OF = sh == 1 ? Negative(res, sizecode) != CF : Rand.NextBool(); // OF is 1 if top 2 bits of original value were different (UND for sh != 1)
                 AF = Rand.NextBool(); // AF is undefined
 
-                return StoreBinaryOpFormat(s, m, res);
+                return StoreBinaryOpFormatNew(s1, s2, m, res);
             }
             else return true;
         }
         private bool ProcessSHR()
         {
-            if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 0)) return false;
-            UInt64 sizecode = (s >> 2) & 3;
+            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 0)) return false;
+            UInt64 sizecode = (s1 >> 2) & 3;
 
             UInt16 sh = (UInt16)(b & (sizecode == 3 ? 0x3ful : 0x1ful)); // mask shift val to 6 bits on 64-bit op, otherwise to 5 bits
 
@@ -676,20 +833,20 @@ namespace CSX64
             {
                 UInt64 res = a >> sh;
 
-                UpdateFlagsInt(res, sizecode);
+                UpdateFlagsZSP(res, sizecode);
                 CF = sh < SizeBits(sizecode) ? ((a >> (sh - 1)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
                 OF = sh == 1 ? Negative(a, sizecode) : Rand.NextBool(); // OF is high bit of original value (UND for sh != 1)
                 AF = Rand.NextBool(); // AF is undefined
 
-                return StoreBinaryOpFormat(s, m, res);
+                return StoreBinaryOpFormatNew(s1, s2, m, res);
             }
             else return true;
         }
 
         private bool ProcessSAL()
         {
-            if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 0)) return false;
-            UInt64 sizecode = (s >> 2) & 3;
+            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 0)) return false;
+            UInt64 sizecode = (s1 >> 2) & 3;
 
             UInt16 sh = (UInt16)(b & (sizecode == 3 ? 0x3ful : 0x1ful)); // mask shift val to 6 bits on 64-bit op, otherwise to 5 bits
 
@@ -698,19 +855,19 @@ namespace CSX64
             {
                 UInt64 res = Truncate((UInt64)((Int64)SignExtend(a, sizecode) << sh), sizecode);
 
-                UpdateFlagsInt(res, sizecode);
+                UpdateFlagsZSP(res, sizecode);
                 CF = sh < SizeBits(sizecode) ? ((a >> ((UInt16)SizeBits(sizecode) - sh)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
                 OF = sh == 1 ? Negative(res, sizecode) != CF : Rand.NextBool(); // OF is 1 if top 2 bits of original value were different (UND for sh != 1)
                 AF = Rand.NextBool(); // AF is undefined
 
-                return StoreBinaryOpFormat(s, m, res);
+                return StoreBinaryOpFormatNew(s1, s2, m, res);
             }
             else return true;
         }
         private bool ProcessSAR()
         {
-            if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 0)) return false;
-            UInt64 sizecode = (s >> 2) & 3;
+            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 0)) return false;
+            UInt64 sizecode = (s1 >> 2) & 3;
 
             UInt16 sh = (UInt16)(b & (sizecode == 3 ? 0x3ful : 0x1ful)); // mask shift val to 6 bits on 64-bit op, otherwise to 5 bits
 
@@ -719,20 +876,20 @@ namespace CSX64
             {
                 UInt64 res = Truncate((UInt64)((Int64)SignExtend(a, sizecode) >> sh), sizecode);
 
-                UpdateFlagsInt(res, sizecode);
+                UpdateFlagsZSP(res, sizecode);
                 CF = sh < SizeBits(sizecode) ? ((a >> (sh - 1)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
                 OF = sh == 1 ? false : Rand.NextBool(); // OF is cleared (UND for sh != 1)
                 AF = Rand.NextBool(); // AF is undefined
 
-                return StoreBinaryOpFormat(s, m, res);
+                return StoreBinaryOpFormatNew(s1, s2, m, res);
             }
             else return false;
         }
 
         private bool ProcessROL()
         {
-            if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 0)) return false;
-            UInt64 sizecode = (s >> 2) & 3;
+            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 0)) return false;
+            UInt64 sizecode = (s1 >> 2) & 3;
 
             UInt16 sh = (UInt16)(b % SizeBits(sizecode)); // rotate performed modulo-n
 
@@ -744,14 +901,14 @@ namespace CSX64
                 CF = ((a >> ((UInt16)SizeBits(sizecode) - sh)) & 1) == 1; // CF holds last bit shifted around
                 OF = sh == 1 ? CF ^ Negative(res, sizecode) : Rand.NextBool(); // OF is xor of CF (after rotate) and high bit of result (UND if sh != 1)
 
-                return StoreBinaryOpFormat(s, m, res);
+                return StoreBinaryOpFormatNew(s1, s2, m, res);
             }
             else return true;
         }
         private bool ProcessROR()
         {
-            if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 0)) return false;
-            UInt64 sizecode = (s >> 2) & 3;
+            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 0)) return false;
+            UInt64 sizecode = (s1 >> 2) & 3;
 
             UInt16 sh = (UInt16)(b % SizeBits(sizecode)); // rotate performed modulo-n
 
@@ -763,49 +920,49 @@ namespace CSX64
                 CF = ((a >> (sh - 1)) & 1) == 1; // CF holds last bit shifted around
                 OF = sh == 1 ? Negative(res, sizecode) ^ (((res >> ((8 << (ushort)sizecode) - 2)) & 1) != 0) : Rand.NextBool(); // OF is xor of 2 highest bits of result
 
-                return StoreBinaryOpFormat(s, m, res);
+                return StoreBinaryOpFormatNew(s1, s2, m, res);
             }
             else return true;
         }
 
         private bool ProcessAND(bool apply = true)
         {
-            if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
-            UInt64 sizecode = (s >> 2) & 3;
+            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
+            UInt64 sizecode = (s1 >> 2) & 3;
 
             UInt64 res = a & b;
 
-            UpdateFlagsInt(res, sizecode);
+            UpdateFlagsZSP(res, sizecode);
             OF = CF = false;
             AF = Rand.NextBool();
 
-            return !apply || StoreBinaryOpFormat(s, m, res);
+            return !apply || StoreBinaryOpFormatNew(s1, s2, m, res);
         }
         private bool ProcessOR()
         {
-            if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
-            UInt64 sizecode = (s >> 2) & 3;
+            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
+            UInt64 sizecode = (s1 >> 2) & 3;
 
             UInt64 res = a | b;
 
-            UpdateFlagsInt(res, sizecode);
+            UpdateFlagsZSP(res, sizecode);
             OF = CF = false;
             AF = Rand.NextBool();
 
-            return StoreBinaryOpFormat(s, m, res);
+            return StoreBinaryOpFormatNew(s1, s2, m, res);
         }
         private bool ProcessXOR()
         {
-            if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
-            UInt64 sizecode = (s >> 2) & 3;
+            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
+            UInt64 sizecode = (s1 >> 2) & 3;
 
             UInt64 res = a ^ b;
 
-            UpdateFlagsInt(res, sizecode);
+            UpdateFlagsZSP(res, sizecode);
             OF = CF = false;
             AF = Rand.NextBool();
 
-            return StoreBinaryOpFormat(s, m, res);
+            return StoreBinaryOpFormatNew(s1, s2, m, res);
         }
 
         private bool ProcessINC()
@@ -815,7 +972,7 @@ namespace CSX64
 
             UInt64 res = Truncate(a + 1, sizecode);
 
-            UpdateFlagsInt(res, sizecode);
+            UpdateFlagsZSP(res, sizecode);
             AF = (res & 0xf) == 0; // low nibble of 0 was a nibble overflow (TM)
             OF = Positive(a, sizecode) && Negative(res, sizecode); // + -> - is overflow
 
@@ -828,7 +985,7 @@ namespace CSX64
 
             UInt64 res = Truncate(a - 1, sizecode);
 
-            UpdateFlagsInt(res, sizecode);
+            UpdateFlagsZSP(res, sizecode);
             AF = (a & 0xf) == 0; // nibble a = 0 results in borrow from the low nibble
             OF = Negative(a, sizecode) && Positive(res, sizecode); // - -> + is overflow
 
@@ -841,7 +998,7 @@ namespace CSX64
 
             UInt64 res = Truncate(0 - a, sizecode);
 
-            UpdateFlagsInt(res, sizecode);
+            UpdateFlagsZSP(res, sizecode);
             CF = 0 < a; // if 0 < a, a borrow was taken from the highest bit (see SUB code where a=0, b=a)
             AF = 0 < (a & 0xf); // AF is just like CF but only the low nibble
             OF = Negative(a, sizecode) && Negative(res, sizecode);
@@ -863,681 +1020,10 @@ namespace CSX64
             if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
-            UpdateFlagsInt(a, sizecode);
+            UpdateFlagsZSP(a, sizecode);
             CF = OF = AF = false;
 
             return true;
-        }
-        private bool ProcessFCMPZ()
-        {
-            if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
-
-            switch ((s >> 2) & 3)
-            {
-                case 3:
-                    {
-                        double res = AsDouble(a);
-
-                        UpdateFlagsDouble(res);
-
-                        return true;
-                    }
-                case 2:
-                    {
-                        float res = AsFloat(a);
-
-                        UpdateFlagsFloat(res);
-
-                        return true;
-                    }
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-
-        private bool ProcessFADD()
-        {
-            if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
-
-            switch ((s >> 2) & 3)
-            {
-                case 3:
-                    {
-                        double res = AsDouble(a) + AsDouble(b);
-
-                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
-                    }
-                case 2:
-                    {
-                        float res = AsFloat(a) + AsFloat(b);
-
-                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
-                    }
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-        private bool ProcessFSUB(bool apply = true)
-        {
-            if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
-
-            switch ((s >> 2) & 3)
-            {
-                case 3:
-                    {
-                        double res = AsDouble(a) - AsDouble(b);
-
-                        // if applying change, is FSUB
-                        if (apply) return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
-                        // otherwise is an FCMP
-                        else
-                        {
-                            // update flags
-                            UpdateFlagsDouble(res);
-                            return true;
-                        }
-                    }
-                case 2:
-                    {
-                        float res = AsFloat(a) - AsFloat(b);
-
-                        // if applying change, is FSUB
-                        if (apply) return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
-                        // otherwise is an FCMP
-                        else
-                        {
-                            // update flags
-                            UpdateFlagsFloat(res);
-                            return true;
-                        }
-                    }
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-        private bool ProcessFSUBR()
-        {
-            if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
-
-            switch ((s >> 2) & 3)
-            {
-                case 3:
-                    {
-                        double res = AsDouble(b) - AsDouble(a);
-
-                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
-                    }
-                case 2:
-                    {
-                        float res = AsFloat(b) - AsFloat(a);
-
-                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
-                    }
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-
-        private bool ProcessFMUL()
-        {
-            if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
-
-            switch ((s >> 2) & 3)
-            {
-                case 3:
-                    {
-                        double res = AsDouble(a) * AsDouble(b);
-
-                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
-                    }
-                case 2:
-                    {
-                        float res = AsFloat(a) * AsFloat(b);
-
-                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
-                    }
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-
-        private bool ProcessFDIV()
-        {
-            if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
-
-            switch ((s >> 2) & 3)
-            {
-                case 3:
-                    {
-                        double res = AsDouble(a) / AsDouble(b);
-
-                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
-                    }
-                case 2:
-                    {
-                        float res = AsFloat(a) / AsFloat(b);
-
-                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
-                    }
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-        private bool ProcessFDIVR()
-        {
-            if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
-
-            switch ((s >> 2) & 3)
-            {
-                case 3:
-                    {
-                        double res = AsDouble(b) / AsDouble(a);
-
-                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
-                    }
-                case 2:
-                    {
-                        float res = AsFloat(b) / AsFloat(a);
-
-                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
-                    }
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-
-        private bool ProcessFPOW()
-        {
-            if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
-
-            switch ((s >> 2) & 3)
-            {
-                case 3:
-                    {
-                        double res = Math.Pow(AsDouble(a), AsDouble(b));
-
-                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
-                    }
-                case 2:
-                    {
-                        float res = (float)Math.Pow(AsFloat(a), AsFloat(b));
-
-                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
-                    }
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-        private bool ProcessFPOWR()
-        {
-            if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
-
-            switch ((s >> 2) & 3)
-            {
-                case 3:
-                    {
-                        double res = Math.Pow(AsDouble(b), AsDouble(a));
-
-                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
-                    }
-                case 2:
-                    {
-                        float res = (float)Math.Pow(AsFloat(b), AsFloat(a));
-
-                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
-                    }
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-
-        private bool ProcessFLOG()
-        {
-            if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
-
-            switch ((s >> 2) & 3)
-            {
-                case 3:
-                    {
-                        double res = Math.Log(AsDouble(a), AsDouble(b));
-
-                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
-                    }
-                case 2:
-                    {
-                        float res = (float)Math.Log(AsFloat(a), AsFloat(b));
-
-                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
-                    }
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-        private bool ProcessFLOGR()
-        {
-            if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
-
-            switch ((s >> 2) & 3)
-            {
-                case 3:
-                    {
-                        double res = Math.Log(AsDouble(b), AsDouble(a));
-
-                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
-                    }
-                case 2:
-                    {
-                        float res = (float)Math.Log(AsFloat(b), AsFloat(a));
-
-                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
-                    }
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-
-        private bool ProcessFSQRT()
-        {
-            if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
-
-            switch ((s >> 2) & 3)
-            {
-                case 3:
-                    {
-                        double res = Math.Sqrt(AsDouble(a));
-
-                        return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
-                    }
-                case 2:
-                    {
-                        float res = (float)Math.Sqrt(AsFloat(a));
-
-                        return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
-                    }
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-        private bool ProcessFNEG()
-        {
-            if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
-
-            switch ((s >> 2) & 3)
-            {
-                case 3:
-                    {
-                        double res = -AsDouble(a);
-
-                        return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
-                    }
-                case 2:
-                    {
-                        float res = -AsFloat(a);
-
-                        return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
-                    }
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-        private bool ProcessFABS()
-        {
-            if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
-
-            switch ((s >> 2) & 3)
-            {
-                case 3:
-                    {
-                        double res = Math.Abs(AsDouble(a));
-
-                        return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
-                    }
-                case 2:
-                    {
-                        float res = Math.Abs(AsFloat(a));
-
-                        return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
-                    }
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-
-        private bool ProcessFFLOOR()
-        {
-            if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
-
-            switch ((s >> 2) & 3)
-            {
-                case 3:
-                    {
-                        double res = Math.Floor(AsDouble(a));
-
-                        return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
-                    }
-                case 2:
-                    {
-                        float res = (float)Math.Floor(AsFloat(a));
-
-                        return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
-                    }
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-        private bool ProcessFCEIL()
-        {
-            if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
-
-            switch ((s >> 2) & 3)
-            {
-                case 3:
-                    {
-                        double res = Math.Ceiling(AsDouble(a));
-
-                        return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
-                    }
-                case 2:
-                    {
-                        float res = (float)Math.Ceiling(AsFloat(a));
-
-                        return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
-                    }
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-        private bool ProcessFROUND()
-        {
-            if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
-
-            switch ((s >> 2) & 3)
-            {
-                case 3:
-                    {
-                        double res = Math.Round(AsDouble(a));
-
-                        return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
-                    }
-                case 2:
-                    {
-                        float res = (float)Math.Round(AsFloat(a));
-
-                        return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
-                    }
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-        private bool ProcessFTRUNC()
-        {
-            if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
-
-            switch ((s >> 2) & 3)
-            {
-                case 3:
-                    {
-                        double res = Math.Truncate(AsDouble(a));
-
-                        return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
-                    }
-                case 2:
-                    {
-                        float res = (float)Math.Truncate(AsFloat(a));
-
-                        return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
-                    }
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-
-        private bool ProcessFSIN()
-        {
-            if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
-
-            switch ((s >> 2) & 3)
-            {
-                case 3:
-                    {
-                        double res = Math.Sin(AsDouble(a));
-
-                        return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
-                    }
-                case 2:
-                    {
-                        float res = (float)Math.Sin(AsFloat(a));
-
-                        return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
-                    }
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-        private bool ProcessFCOS()
-        {
-            if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
-
-            switch ((s >> 2) & 3)
-            {
-                case 3:
-                    {
-                        double res = Math.Cos(AsDouble(a));
-
-                        return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
-                    }
-                case 2:
-                    {
-                        float res = (float)Math.Cos(AsFloat(a));
-
-                        return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
-                    }
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-        private bool ProcessFTAN()
-        {
-            if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
-
-            switch ((s >> 2) & 3)
-            {
-                case 3:
-                    {
-                        double res = Math.Tan(AsDouble(a));
-
-                        return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
-                    }
-                case 2:
-                    {
-                        float res = (float)Math.Tan(AsFloat(a));
-
-                        return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
-                    }
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-
-        private bool ProcessFSINH()
-        {
-            if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
-
-            switch ((s >> 2) & 3)
-            {
-                case 3:
-                    {
-                        double res = Math.Sinh(AsDouble(a));
-
-                        return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
-                    }
-                case 2:
-                    {
-                        float res = (float)Math.Sinh(AsFloat(a));
-
-                        return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
-                    }
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-        private bool ProcessFCOSH()
-        {
-            if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
-
-            switch ((s >> 2) & 3)
-            {
-                case 3:
-                    {
-                        double res = Math.Cosh(AsDouble(a));
-
-                        return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
-                    }
-                case 2:
-                    {
-                        float res = (float)Math.Cosh(AsFloat(a));
-
-                        return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
-                    }
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-        private bool ProcessFTANH()
-        {
-            if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
-
-            switch ((s >> 2) & 3)
-            {
-                case 3:
-                    {
-                        double res = Math.Tanh(AsDouble(a));
-
-                        return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
-                    }
-                case 2:
-                    {
-                        float res = (float)Math.Tanh(AsFloat(a));
-
-                        return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
-                    }
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-
-        private bool ProcessFASIN()
-        {
-            if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
-
-            switch ((s >> 2) & 3)
-            {
-                case 3:
-                    {
-                        double res = Math.Asin(AsDouble(a));
-
-                        return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
-                    }
-                case 2:
-                    {
-                        float res = (float)Math.Asin(AsFloat(a));
-
-                        return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
-                    }
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-        private bool ProcessFACOS()
-        {
-            if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
-
-            switch ((s >> 2) & 3)
-            {
-                case 3:
-                    {
-                        double res = Math.Acos(AsDouble(a));
-
-                        return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
-                    }
-                case 2:
-                    {
-                        float res = (float)Math.Acos(AsFloat(a));
-
-                        return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
-                    }
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-        private bool ProcessFATAN()
-        {
-            if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
-
-            switch ((s >> 2) & 3)
-            {
-                case 3:
-                    {
-                        double res = Math.Atan(AsDouble(a));
-
-                        return StoreUnaryOpFormat(s, m, DoubleAsUInt64(res));
-                    }
-                case 2:
-                    {
-                        float res = (float)Math.Atan(AsFloat(a));
-
-                        return StoreUnaryOpFormat(s, m, FloatAsUInt64(res));
-                    }
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-        private bool ProcessFATAN2()
-        {
-            if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
-
-            switch ((s >> 2) & 3)
-            {
-                case 3:
-                    {
-                        double res = Math.Atan2(AsDouble(a), AsDouble(b));
-
-                        return StoreBinaryOpFormat(s, m, DoubleAsUInt64(res));
-                    }
-                case 2:
-                    {
-                        float res = (float)Math.Atan2(AsFloat(a), AsFloat(b));
-
-                        return StoreBinaryOpFormat(s, m, FloatAsUInt64(res));
-                    }
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-
-        private bool ProcessFTOI()
-        {
-            if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
-
-            switch ((s >> 2) & 3)
-            {
-                case 3: return StoreUnaryOpFormat(s, m, (UInt64)(Int64)AsDouble(a));
-                case 2: return StoreUnaryOpFormat(s, m, (UInt64)(Int64)AsFloat(a));
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-        private bool ProcessITOF()
-        {
-            if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
-
-            switch ((s >> 2) & 3)
-            {
-                case 3: return StoreUnaryOpFormat(s, m, DoubleAsUInt64((Int64)a));
-                case 2: return StoreUnaryOpFormat(s, m, FloatAsUInt64((Int64)SignExtend(a, 2)));
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
         }
 
         private bool ProcessBSWAP()
@@ -1560,8 +1046,8 @@ namespace CSX64
         }
         private bool ProcessBEXTR()
         {
-            if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 1)) return false;
-            UInt64 sizecode = (s >> 2) & 3;
+            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 1)) return false;
+            UInt64 sizecode = (s1 >> 2) & 3;
 
             ushort pos = (ushort)((b >> 8) % SizeBits(sizecode));
             ushort len = (ushort)((b & 0xff) % SizeBits(sizecode));
@@ -1574,7 +1060,7 @@ namespace CSX64
             SF = Rand.NextBool();
             PF = Rand.NextBool();
 
-            return StoreBinaryOpFormat(s, m, res);
+            return StoreBinaryOpFormatNew(s1, s2, m, res);
         }
         private bool ProcessBLSI()
         {
@@ -1625,8 +1111,8 @@ namespace CSX64
         }
         private bool ProcessANDN()
         {
-            if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
-            UInt64 sizecode = (s >> 2) & 3;
+            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
+            UInt64 sizecode = (s1 >> 2) & 3;
 
             UInt64 res = a & ~b;
 
@@ -1636,17 +1122,17 @@ namespace CSX64
             AF = Rand.NextBool();
             PF = Rand.NextBool();
 
-            return StoreBinaryOpFormat(s, m, res);
+            return StoreBinaryOpFormatNew(s1, s2, m, res);
         }
 
         private bool ProcessBT()
         {
             if (!GetMemAdv(1, out UInt64 ext)) return false;
 
-            if (!FetchBinaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 0, false)) return false;
-            UInt64 sizecode = (s >> 2) & 3;
+            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 0, false)) return false;
+            UInt64 sizecode = (s1 >> 2) & 3;
 
-            UInt64 mask = 1ul << (UInt16)(b % SizeBits(sizecode));
+            UInt64 mask = 1ul << (UInt16)(b % SizeBits(sizecode)); // performed modulo-n
 
             CF = (a & mask) != 0;
             OF = Rand.NextBool();
@@ -1657,9 +1143,57 @@ namespace CSX64
             switch (ext)
             {
                 case 0: return true;
-                case 1: return StoreBinaryOpFormat(s, m, a | mask);
-                case 2: return StoreBinaryOpFormat(s, m, a & ~mask);
-                case 3: return StoreBinaryOpFormat(s, m, a ^ mask);
+                case 1: return StoreBinaryOpFormatNew(s1, s2, m, a | mask);
+                case 2: return StoreBinaryOpFormatNew(s1, s2, m, a & ~mask);
+                case 3: return StoreBinaryOpFormatNew(s1, s2, m, a ^ mask);
+
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
+            }
+        }
+
+        // -- floating point stuff -- //
+
+        private bool PushFPU(double val)
+        {
+            // decrepment top and wrap
+            --FPU_TOP;
+            if (FPU_TOP < 0) FPU_TOP += FPURegisters.Length;
+
+            // if this fpu reg is in use, it's an error
+            if (FPURegisters[FPU_TOP].InUse) { Terminate(ErrorCode.FPUStackOverflow); return false; }
+
+            // store the value
+            FPURegisters[FPU_TOP].Float = val;
+            return true;
+        }
+        private bool PopFPU(out double val)
+        {
+            // if this register is not in use, it's an error
+            if (!FPURegisters[FPU_TOP].InUse) { Terminate(ErrorCode.FPUStackUnderflow); val = 0; return false; }
+
+            // record value
+            val = FPURegisters[FPU_TOP].Float;
+
+            // increment top and wrap
+            ++FPU_TOP;
+            if (FPU_TOP >= FPURegisters.Length) FPU_TOP -= FPURegisters.Length;
+
+            return true;
+        }
+
+        private bool ProcessFLD_constant()
+        {
+            if (!GetMemAdv(1, out UInt64 ext)) return false;
+
+            switch (ext)
+            {
+                case 0: return PushFPU(1);
+                case 1: return PushFPU(Math.Log(10, 2));
+                case 2: return PushFPU(Math.Log(Math.E, 2));
+                case 3: return PushFPU(Math.PI);
+                case 4: return PushFPU(Math.Log10(2));
+                case 5: return PushFPU(Math.Log(2));
+                case 6: return PushFPU(0);
 
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }

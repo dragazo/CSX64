@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using static CSX64.Utility;
 
 // -- Types -- //
 
@@ -8,7 +9,8 @@ namespace CSX64
     public enum ErrorCode
     {
         None, OutOfBounds, UnhandledSyscall, UndefinedBehavior, ArithmeticError, Abort,
-        IOFailure, FSDisabled, AccessViolation, InsufficientFDs, FDNotInUse, NotImplemented, StackOverflow
+        IOFailure, FSDisabled, AccessViolation, InsufficientFDs, FDNotInUse, NotImplemented, StackOverflow,
+        FPUStackOverflow, FPUStackUnderflow, FPUError
     }
     public enum OPCode
     {
@@ -30,19 +32,9 @@ namespace CSX64
         AND, OR, XOR,
         INC, DEC, NEG, NOT,
 
-        CMP, FCMP, TEST, CMPZ, FCMPZ,
+        CMP, TEST, CMPZ,
 
-        FADD, FSUB, FSUBR,
-        FMUL, FDIV, FDIVR,
-        FPOW, FPOWR, FLOG, FLOGR,
-        FSQRT, FNEG, FABS,
-        FFLOOR, FCEIL, FROUND, FTRUNC,
-        FSIN, FCOS, FTAN,
-        FSINH, FCOSH, FTANH,
-        FASIN, FACOS, FATAN, FATAN2,
-
-        BSWAP, BEXTR, BLSI, BLSMSK, BLSR, ANDN,
-        BT
+        BSWAP, BEXTR, BLSI, BLSMSK, BLSR, ANDN, BT
     }
     public enum SyscallCode
     {
@@ -118,6 +110,17 @@ namespace CSX64
             get => (((1ul << (8 << (ushort)sizecode)) & ~1ul) - 1) & x64;
             set => x64 = ~(((1ul << (8 << (ushort)sizecode)) & ~1ul) - 1) & x64 | (((1ul << (8 << (ushort)sizecode)) & ~1ul) - 1) & value;
         }
+    }
+
+    /// <summary>
+    /// Represents an FPU register
+    /// </summary>
+    public struct FPURegister
+    {
+        public double Float;
+        public UInt64 Value { get => DoubleAsUInt64(Float); set => Float = AsDouble(value); }
+
+        public bool InUse;
     }
 
     /// <summary>

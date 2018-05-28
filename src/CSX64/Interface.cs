@@ -36,10 +36,6 @@ namespace CSX64
         protected Random Rand = new Random();
 
         /// <summary>
-        /// The current execution positon (executed on next tick)
-        /// </summary>
-        public UInt64 Pos { get; protected set; }
-        /// <summary>
         /// Flag marking if the program is still executing (still true even in halted state)
         /// </summary>
         public bool Running { get; protected set; }
@@ -125,8 +121,13 @@ namespace CSX64
             // set public flags: make sure flag 1 is set (from Intel x86_64 standard)
             EFLAGS = 2;
 
+            // free FPU registers
+            for (int i = 0; i < FPURegisters.Length; ++i) FPURegisters[i].InUse = false;
+            // set FPU_TOP
+            FPU_TOP = 0;
+
             // set execution state
-            Pos = 0;
+            RIP = 0;
             Running = true;
             SuspendedRead = false;
             Error = ErrorCode.None;
@@ -290,7 +291,7 @@ namespace CSX64
             bool flag;
 
             // make sure we're in in the text segment
-            if (Pos >= ExeBarrier) { Terminate(ErrorCode.AccessViolation); return false; }
+            if (RIP >= ExeBarrier) { Terminate(ErrorCode.AccessViolation); return false; }
 
             // fetch the instruction
             if (!GetMemAdv(1, out op)) return false;
@@ -318,7 +319,7 @@ namespace CSX64
                 case OPCode.LOOP: return ProcessJMP(--Registers[0].x64 != 0, ref op);
                 case OPCode.LOOPcc: if (!GetMemAdv(1, out op) || !TryGet_cc((ccOPCode)op, out flag)) { Terminate(ErrorCode.UndefinedBehavior); return false; } return ProcessJMP(--Registers[0].x64 != 0 && flag, ref op);
                 case OPCode.CALL: return ProcessJMP(true, ref op) && PushRaw(8, op);
-                case OPCode.RET: if (!PopRaw(8, out op)) return false; Pos = op; return true;
+                case OPCode.RET: if (!PopRaw(8, out op)) return false; RIP = op; return true;
 
                 case OPCode.PUSH: return ProcessPUSH();
                 case OPCode.POP: return ProcessPOP();
@@ -350,45 +351,8 @@ namespace CSX64
                 case OPCode.NOT: return ProcessNOT();
 
                 case OPCode.CMP: return ProcessSUB(false);
-                case OPCode.FCMP: return ProcessFSUB(false);
                 case OPCode.TEST: return ProcessAND(false);
                 case OPCode.CMPZ: return ProcessCMPZ();
-                case OPCode.FCMPZ: return ProcessFCMPZ();
-
-                case OPCode.FADD: return ProcessFADD();
-                case OPCode.FSUB: return ProcessFSUB();
-                case OPCode.FSUBR: return ProcessFSUBR();
-
-                case OPCode.FMUL: return ProcessFMUL();
-                case OPCode.FDIV: return ProcessFDIV();
-                case OPCode.FDIVR: return ProcessFDIVR();
-
-                case OPCode.FPOW: return ProcessFPOW();
-                case OPCode.FPOWR: return ProcessFPOWR();
-                case OPCode.FLOG: return ProcessFLOG();
-                case OPCode.FLOGR: return ProcessFLOGR();
-
-                case OPCode.FSQRT: return ProcessFSQRT();
-                case OPCode.FNEG: return ProcessFNEG();
-                case OPCode.FABS: return ProcessFABS();
-
-                case OPCode.FFLOOR: return ProcessFFLOOR();
-                case OPCode.FCEIL: return ProcessFCEIL();
-                case OPCode.FROUND: return ProcessFROUND();
-                case OPCode.FTRUNC: return ProcessFTRUNC();
-
-                case OPCode.FSIN: return ProcessFSIN();
-                case OPCode.FCOS: return ProcessFCOS();
-                case OPCode.FTAN: return ProcessFTAN();
-
-                case OPCode.FSINH: return ProcessFSINH();
-                case OPCode.FCOSH: return ProcessFCOSH();
-                case OPCode.FTANH: return ProcessFTANH();
-
-                case OPCode.FASIN: return ProcessFASIN();
-                case OPCode.FACOS: return ProcessFACOS();
-                case OPCode.FATAN: return ProcessFATAN();
-                case OPCode.FATAN2: return ProcessFATAN2();
 
                 case OPCode.BSWAP: return ProcessBSWAP();
                 case OPCode.BEXTR: return ProcessBEXTR();
