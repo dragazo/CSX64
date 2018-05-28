@@ -91,8 +91,9 @@ namespace CSX64
         private Register _RFLAGS;
         private Register _RIP;
         private Register[] Registers = new Register[16];
+
         private FPURegister[] FPURegisters = new FPURegister[8];
-        private int FPU_TOP;
+        private UInt16 FPU_status;
 
         public UInt64 RFLAGS { get => _RFLAGS.x64; set => _RFLAGS.x64 = value; }
         public UInt32 EFLAGS { get => _RFLAGS.x32; set => _RFLAGS.x32 = value; }
@@ -175,22 +176,52 @@ namespace CSX64
         public byte CH { get => Registers[2].x8h; set => Registers[2].x8h = value; }
         public byte DH { get => Registers[3].x8h; set => Registers[3].x8h = value; }
 
-        public UInt64 ST0 { get => FPURegisters[(FPU_TOP + 0) & 7].Value; set => FPURegisters[(FPU_TOP + 0) & 7].Value = value; }
-        public UInt64 ST1 { get => FPURegisters[(FPU_TOP + 1) & 7].Value; set => FPURegisters[(FPU_TOP + 1) & 7].Value = value; }
-        public UInt64 ST2 { get => FPURegisters[(FPU_TOP + 2) & 7].Value; set => FPURegisters[(FPU_TOP + 2) & 7].Value = value; }
-        public UInt64 ST3 { get => FPURegisters[(FPU_TOP + 3) & 7].Value; set => FPURegisters[(FPU_TOP + 3) & 7].Value = value; }
-        public UInt64 ST4 { get => FPURegisters[(FPU_TOP + 4) & 7].Value; set => FPURegisters[(FPU_TOP + 4) & 7].Value = value; }
-        public UInt64 ST5 { get => FPURegisters[(FPU_TOP + 5) & 7].Value; set => FPURegisters[(FPU_TOP + 5) & 7].Value = value; }
-        public UInt64 ST6 { get => FPURegisters[(FPU_TOP + 6) & 7].Value; set => FPURegisters[(FPU_TOP + 6) & 7].Value = value; }
-        public UInt64 ST7 { get => FPURegisters[(FPU_TOP + 7) & 7].Value; set => FPURegisters[(FPU_TOP + 7) & 7].Value = value; }
+        // source : http://www.website.masmforum.com/tutorials/fptute/fpuchap1.htm
+        public bool C0
+        {
+            get => (FPU_status & 0x0100) != 0;
+            set => FPU_status = (UInt16)((FPU_status & ~0x0100) | (value ? 0x0100 : 0));
+        }
+        public bool C1
+        {
+            get => (FPU_status & 0x0200) != 0;
+            set => FPU_status = (UInt16)((FPU_status & ~0x0200) | (value ? 0x0200 : 0));
+        }
+        public bool C2
+        {
+            get => (FPU_status & 0x0400) != 0;
+            set => FPU_status = (UInt16)((FPU_status & ~0x0400) | (value ? 0x0400 : 0));
+        }
+        public bool C3
+        {
+            get => (FPU_status & 0x4000) != 0;
+            set => FPU_status = (UInt16)((FPU_status & ~0x4000) | (value ? 0x4000 : 0));
+        }
 
-        public UInt64 MM0 { get => FPURegisters[(FPU_TOP + 0) & 7].Value; set => FPURegisters[(FPU_TOP + 0) & 7].Value = value; }
-        public UInt64 MM1 { get => FPURegisters[(FPU_TOP + 1) & 7].Value; set => FPURegisters[(FPU_TOP + 1) & 7].Value = value; }
-        public UInt64 MM2 { get => FPURegisters[(FPU_TOP + 2) & 7].Value; set => FPURegisters[(FPU_TOP + 2) & 7].Value = value; }
-        public UInt64 MM3 { get => FPURegisters[(FPU_TOP + 3) & 7].Value; set => FPURegisters[(FPU_TOP + 3) & 7].Value = value; }
-        public UInt64 MM4 { get => FPURegisters[(FPU_TOP + 4) & 7].Value; set => FPURegisters[(FPU_TOP + 4) & 7].Value = value; }
-        public UInt64 MM5 { get => FPURegisters[(FPU_TOP + 5) & 7].Value; set => FPURegisters[(FPU_TOP + 5) & 7].Value = value; }
-        public UInt64 MM6 { get => FPURegisters[(FPU_TOP + 6) & 7].Value; set => FPURegisters[(FPU_TOP + 6) & 7].Value = value; }
-        public UInt64 MM7 { get => FPURegisters[(FPU_TOP + 7) & 7].Value; set => FPURegisters[(FPU_TOP + 7) & 7].Value = value; }
+        public byte TOP
+        {
+            get => (byte)((FPU_status & 0x3800) >> 11);
+            set => FPU_status = (byte)(FPU_status & ~0x3800 | ((value & 7) << 11));
+        }
+
+        public UInt64 ST0 { get => FPURegisters[(TOP + 0) & 7].Value; set => FPURegisters[(TOP + 0) & 7].Value = value; }
+        public UInt64 ST1 { get => FPURegisters[(TOP + 1) & 7].Value; set => FPURegisters[(TOP + 1) & 7].Value = value; }
+        public UInt64 ST2 { get => FPURegisters[(TOP + 2) & 7].Value; set => FPURegisters[(TOP + 2) & 7].Value = value; }
+        public UInt64 ST3 { get => FPURegisters[(TOP + 3) & 7].Value; set => FPURegisters[(TOP + 3) & 7].Value = value; }
+        public UInt64 ST4 { get => FPURegisters[(TOP + 4) & 7].Value; set => FPURegisters[(TOP + 4) & 7].Value = value; }
+        public UInt64 ST5 { get => FPURegisters[(TOP + 5) & 7].Value; set => FPURegisters[(TOP + 5) & 7].Value = value; }
+        public UInt64 ST6 { get => FPURegisters[(TOP + 6) & 7].Value; set => FPURegisters[(TOP + 6) & 7].Value = value; }
+        public UInt64 ST7 { get => FPURegisters[(TOP + 7) & 7].Value; set => FPURegisters[(TOP + 7) & 7].Value = value; }
+
+        public UInt64 MM0 { get => FPURegisters[(TOP + 0) & 7].Value; set => FPURegisters[(TOP + 0) & 7].Value = value; }
+        public UInt64 MM1 { get => FPURegisters[(TOP + 1) & 7].Value; set => FPURegisters[(TOP + 1) & 7].Value = value; }
+        public UInt64 MM2 { get => FPURegisters[(TOP + 2) & 7].Value; set => FPURegisters[(TOP + 2) & 7].Value = value; }
+        public UInt64 MM3 { get => FPURegisters[(TOP + 3) & 7].Value; set => FPURegisters[(TOP + 3) & 7].Value = value; }
+        public UInt64 MM4 { get => FPURegisters[(TOP + 4) & 7].Value; set => FPURegisters[(TOP + 4) & 7].Value = value; }
+        public UInt64 MM5 { get => FPURegisters[(TOP + 5) & 7].Value; set => FPURegisters[(TOP + 5) & 7].Value = value; }
+        public UInt64 MM6 { get => FPURegisters[(TOP + 6) & 7].Value; set => FPURegisters[(TOP + 6) & 7].Value = value; }
+        public UInt64 MM7 { get => FPURegisters[(TOP + 7) & 7].Value; set => FPURegisters[(TOP + 7) & 7].Value = value; }
+
+
     }
 }

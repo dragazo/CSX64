@@ -123,8 +123,8 @@ namespace CSX64
 
             // free FPU registers
             for (int i = 0; i < FPURegisters.Length; ++i) FPURegisters[i].InUse = false;
-            // set FPU_TOP
-            FPU_TOP = 0;
+            // set TOP
+            TOP = 0;
 
             // set execution state
             RIP = 0;
@@ -296,6 +296,10 @@ namespace CSX64
             // fetch the instruction
             if (!GetMemAdv(1, out op)) return false;
 
+            for (int i = 0; i < 8; ++i)
+                Console.WriteLine($"st{i}: {FPURegisters[(TOP + i) & 7].Float}");
+            Console.WriteLine($"{RIP:x8} - {(OPCode)op}\n");
+
             // switch through the opcodes
             switch ((OPCode)op)
             {
@@ -316,8 +320,10 @@ namespace CSX64
 
                 case OPCode.JMP: return ProcessJMP(true, ref op);
                 case OPCode.Jcc: if (!GetMemAdv(1, out op) || !TryGet_cc((ccOPCode)op, out flag)) { Terminate(ErrorCode.UndefinedBehavior); return false; } return ProcessJMP(flag, ref op);
-                case OPCode.LOOP: return ProcessJMP(--Registers[0].x64 != 0, ref op);
-                case OPCode.LOOPcc: if (!GetMemAdv(1, out op) || !TryGet_cc((ccOPCode)op, out flag)) { Terminate(ErrorCode.UndefinedBehavior); return false; } return ProcessJMP(--Registers[0].x64 != 0 && flag, ref op);
+                case OPCode.LOOP: return ProcessLOOP(true);
+                case OPCode.LOOPe: return ProcessLOOP(ZF);
+                case OPCode.LOOPne: return ProcessLOOP(!ZF);
+
                 case OPCode.CALL: return ProcessJMP(true, ref op) && PushRaw(8, op);
                 case OPCode.RET: if (!PopRaw(8, out op)) return false; RIP = op; return true;
 
@@ -360,8 +366,11 @@ namespace CSX64
                 case OPCode.BLSMSK: return ProcessBLSMSK();
                 case OPCode.BLSR: return ProcessBLSR();
                 case OPCode.ANDN: return ProcessANDN();
-
                 case OPCode.BT: return ProcessBT();
+
+                // x87 instructions
+
+                case OPCode.FLD_const: return ProcessFLD_const();
 
                 // otherwise, unknown opcode
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;

@@ -22,7 +22,7 @@ namespace CSX64
         MOV, MOVcc,
         XCHG,
 
-        JMP, Jcc, LOOP, LOOPcc, CALL, RET,
+        JMP, Jcc, LOOP, LOOPe, LOOPne, CALL, RET,
         PUSH, POP,
         LEA,
 
@@ -34,7 +34,9 @@ namespace CSX64
 
         CMP, TEST, CMPZ,
 
-        BSWAP, BEXTR, BLSI, BLSMSK, BLSR, ANDN, BT
+        BSWAP, BEXTR, BLSI, BLSMSK, BLSR, ANDN, BT,
+
+        FLD_const
     }
     public enum SyscallCode
     {

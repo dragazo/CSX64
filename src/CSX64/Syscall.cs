@@ -16,7 +16,7 @@ namespace CSX64
         private bool Sys_Read()
         {
             // get fd index
-            UInt64 fd_index = Registers[1].x64;
+            UInt64 fd_index = RBX;
             if (fd_index >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
 
             // get fd
@@ -27,10 +27,10 @@ namespace CSX64
             try
             {
                 // make sure we're not in the readonly segment
-                if (Registers[2].x64 < ReadonlyBarrier) { Terminate(ErrorCode.AccessViolation); return false; }
+                if (RCX < ReadonlyBarrier) { Terminate(ErrorCode.AccessViolation); return false; }
 
                 // read from the file
-                int n = fd.BaseStream.Read(Memory, (int)Registers[2].x64, (int)Registers[3].x64);
+                int n = fd.BaseStream.Read(Memory, (int)RCX, (int)RDX);
                 
                 // if we got nothing but it's interactive
                 if (n == 0 && fd.Interactive)
@@ -39,7 +39,7 @@ namespace CSX64
                     SuspendedRead = true; // suspend execution until there's more data
                 }
                 // otherwise return num chars read from file
-                else ZF = (Registers[0].x64 = (UInt64)n) == 0;
+                else ZF = (RAX = (UInt64)n) == 0;
 
                 return true;
             }
@@ -82,18 +82,18 @@ namespace CSX64
             if (fd == null) { Terminate(ErrorCode.InsufficientFDs); return false; }
 
             // get path
-            if (!GetCString(Registers[1].x64, out string path)) return false;
+            if (!GetCString(RBX, out string path)) return false;
 
             FileStream f; // resulting stream
 
             // attempt to open the file
-            try { f = new FileStream(path, (FileMode)Registers[2].x64, (FileAccess)Registers[3].x64); }
+            try { f = new FileStream(path, (FileMode)RCX, (FileAccess)RDX); }
             catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
 
             // store in the file descriptor
             fd.Open(f, true, false);
             // return file descriptor index
-            Registers[0].x64 = fd_index;
+            RAX = fd_index;
 
             return true;
         }
@@ -105,7 +105,7 @@ namespace CSX64
         private bool Sys_Close()
         {
             // get fd index
-            UInt64 fd_index = Registers[1].x64;
+            UInt64 fd_index = RBX;
             if (fd_index >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
 
             // get fd
@@ -123,7 +123,7 @@ namespace CSX64
         private bool Sys_Flush()
         {
             // get fd index
-            UInt64 fd_index = Registers[1].x64;
+            UInt64 fd_index = RBX;
             if (fd_index >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
 
             // get fd
@@ -144,7 +144,7 @@ namespace CSX64
         private bool Sys_Seek()
         {
             // get fd index
-            UInt64 fd_index = Registers[1].x64;
+            UInt64 fd_index = RBX;
             if (fd_index >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
 
             // get fd
@@ -152,7 +152,7 @@ namespace CSX64
             if (!fd.InUse) { Terminate(ErrorCode.FDNotInUse); return false; }
 
             // attempt to seek in the file
-            try { fd.BaseStream.Seek((long)Registers[2].x64, (SeekOrigin)Registers[3].x64); return true; }
+            try { fd.BaseStream.Seek((long)RCX, (SeekOrigin)RDX); return true; }
             catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
         }
         /// <summary>
@@ -163,7 +163,7 @@ namespace CSX64
         private bool Sys_Tell()
         {
             // get fd index
-            UInt64 fd_index = Registers[1].x64;
+            UInt64 fd_index = RBX;
             if (fd_index >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
 
             // get fd
@@ -171,7 +171,7 @@ namespace CSX64
             if (!fd.InUse) { Terminate(ErrorCode.FDNotInUse); return false; }
 
             // attempt to read from memory to the file
-            try { Registers[0].x64 = (UInt64)fd.BaseStream.Position; return true; }
+            try { RAX = (UInt64)fd.BaseStream.Position; return true; }
             catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
         }
 
@@ -186,7 +186,7 @@ namespace CSX64
             if (!FSF) { Terminate(ErrorCode.FSDisabled); return false; }
 
             // get the paths
-            if (!GetCString(Registers[1].x64, out string from) || !GetCString(Registers[2].x64, out string to)) return false;
+            if (!GetCString(RBX, out string from) || !GetCString(RCX, out string to)) return false;
 
             // attempt the move operation
             try { File.Move(from, to); return true; }
@@ -203,7 +203,7 @@ namespace CSX64
             if (!FSF) { Terminate(ErrorCode.FSDisabled); return false; }
 
             // get the path
-            if (!GetCString(Registers[1].x64, out string path)) return false;
+            if (!GetCString(RBX, out string path)) return false;
 
             // attempt the move operation
             try { File.Delete(path); return true; }
@@ -220,7 +220,7 @@ namespace CSX64
             if (!FSF) { Terminate(ErrorCode.FSDisabled); return false; }
 
             // get the path
-            if (!GetCString(Registers[1].x64, out string path)) return false;
+            if (!GetCString(RBX, out string path)) return false;
 
             // attempt the move operation
             try { Directory.CreateDirectory(path); return true; }
@@ -236,7 +236,7 @@ namespace CSX64
             if (!FSF) { Terminate(ErrorCode.FSDisabled); return false; }
 
             // get the path
-            if (!GetCString(Registers[1].x64, out string path)) return false;
+            if (!GetCString(RBX, out string path)) return false;
 
             // attempt the move operation
             try { Directory.Delete(path, RecursiveRmdir); return true; }

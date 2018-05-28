@@ -446,15 +446,39 @@ namespace CSX64
             
             return true;
         }
+        private bool ProcessLOOP(bool continue_flag)
+        {
+            if (!FetchIMMRMFormat(out UInt64 s, out UInt64 val)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
+
+            UInt64 count;
+            switch (sizecode)
+            {
+                case 3: count = --RCX; break;
+                case 2: count = --ECX; break;
+                case 1: count = --CX; break;
+                case 0: Terminate(ErrorCode.UndefinedBehavior); return false; // 8-bit not allowed
+
+                default: return true; // this can't happen but compiler is stupid
+            }
+
+            if (count != 0 && continue_flag) RIP = val; // jump if nonzero count and continue flag set
+
+            return true;
+        }
 
         private bool ProcessPUSH()
         {
             if (!FetchIMMRMFormat(out UInt64 s, out UInt64 a)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
 
-            return PushRaw(Size((s >> 2) & 3), a);
+            // 8-bit push not allowed
+            if (sizecode == 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+
+            return PushRaw(Size(sizecode), a);
         }
         /*
-        [4: reg][2: size][1: reg_h][1: mem]
+        [4: reg][2: size][1:][1: mem]
             mem = 0:             reg
             mem = 1: [address]   M[address]
         */
@@ -463,19 +487,16 @@ namespace CSX64
             if (!GetMemAdv(1, out UInt64 s)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
+            // 8-bit pop not allowed
+            if (sizecode == 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+
             // get the value
             if (!PopRaw(Size(sizecode), out UInt64 val)) return false;
 
             // if register
             if ((s & 1) == 0)
             {
-                // if high
-                if ((s & 2) != 0)
-                {
-                    if ((s & 0xc0) != 0 || sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
-                    Registers[s >> 4].x8h = (byte)val;
-                }
-                else Registers[s >> 4][sizecode] = val;
+                Registers[s >> 4][sizecode] = val;
                 return true;
             }
             // otherwise is memory
@@ -1155,33 +1176,31 @@ namespace CSX64
 
         private bool PushFPU(double val)
         {
-            // decrepment top and wrap
-            --FPU_TOP;
-            if (FPU_TOP < 0) FPU_TOP += FPURegisters.Length;
+            // decrement top (wraps automatically as a 3-bit unsigned value)
+            --TOP;
 
             // if this fpu reg is in use, it's an error
-            if (FPURegisters[FPU_TOP].InUse) { Terminate(ErrorCode.FPUStackOverflow); return false; }
+            if (FPURegisters[TOP].InUse) { Terminate(ErrorCode.FPUStackOverflow); return false; }
 
             // store the value
-            FPURegisters[FPU_TOP].Float = val;
+            FPURegisters[TOP].Float = val;
             return true;
         }
         private bool PopFPU(out double val)
         {
             // if this register is not in use, it's an error
-            if (!FPURegisters[FPU_TOP].InUse) { Terminate(ErrorCode.FPUStackUnderflow); val = 0; return false; }
+            if (!FPURegisters[TOP].InUse) { Terminate(ErrorCode.FPUStackUnderflow); val = 0; return false; }
 
             // record value
-            val = FPURegisters[FPU_TOP].Float;
+            val = FPURegisters[TOP].Float;
 
-            // increment top and wrap
-            ++FPU_TOP;
-            if (FPU_TOP >= FPURegisters.Length) FPU_TOP -= FPURegisters.Length;
-
+            // increment top (wraps automatically as a 3-bit unsigned value)
+            ++TOP;
+            
             return true;
         }
 
-        private bool ProcessFLD_constant()
+        private bool ProcessFLD_const()
         {
             if (!GetMemAdv(1, out UInt64 ext)) return false;
 

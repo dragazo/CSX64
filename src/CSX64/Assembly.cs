@@ -1068,20 +1068,20 @@ namespace CSX64
             "__heap__"
         };
         
-        private static readonly string[] AddressPrefixes = // must be in correct binary order (size code)
+        private static readonly string[] AddressPrefixes = // the explicit address expression size prefixes (must be in correct binary (size code) order)
         {
             "BYTEPTR", "WORDPTR", "DWORDPTR", "QWORDPTR"
         };
 
-        private static readonly string[] AddressRegs = // must be in correct register id order
+        private static readonly string[] AddressRegs = // the registers allowed in address expressions (must be in correct register id order)
         {
             "RAX", "RBX", "RCX", "RDX", "RSI", "RDI", "RBP", "RSP", "R8", "R9", "R10", "R11", "R12", "R13", "R14", "R15"
         };
 
         /// <summary>
-        /// Maps register names (all caps) to tules of (id, sizecode, high)
+        /// Maps CPU register names (all caps) to tuples of (id, sizecode, high)
         /// </summary>
-        private static readonly Dictionary<string, Tuple<byte, byte, bool>> RegisterData = new Dictionary<string, Tuple<byte, byte, bool>>()
+        private static readonly Dictionary<string, Tuple<byte, byte, bool>> CPURegisterInfo = new Dictionary<string, Tuple<byte, byte, bool>>()
         {
             ["RAX"] = new Tuple<byte, byte, bool>(0, 3, false),
             ["RBX"] = new Tuple<byte, byte, bool>(1, 3, false),
@@ -1155,6 +1155,21 @@ namespace CSX64
             ["BH"] = new Tuple<byte, byte, bool>(1, 0, true),
             ["CH"] = new Tuple<byte, byte, bool>(2, 0, true),
             ["DH"] = new Tuple<byte, byte, bool>(3, 0, true)
+        };
+        /// <summary>
+        /// Maps FPU register names (all caps) to their ids
+        /// </summary>
+        private static readonly Dictionary<string, byte> FPURegisterInfo = new Dictionary<string, byte>()
+        {
+            ["ST"] = 0,
+            ["ST(0)"] = 0,
+            ["ST(1)"] = 1,
+            ["ST(2)"] = 2,
+            ["ST(3)"] = 3,
+            ["ST(4)"] = 4,
+            ["ST(5)"] = 5,
+            ["ST(6)"] = 6,
+            ["ST(7)"] = 7,
         };
 
         /// <summary>
@@ -1785,22 +1800,36 @@ namespace CSX64
                 return true;
             }
 
-            public bool TryParseRegister(string token, out UInt64 reg, out UInt64 sizecode, out bool high)
+            public bool TryParseCPURegister(string token, out UInt64 reg, out UInt64 sizecode, out bool high)
             {
                 // copy data if we can parse it
-                if (RegisterData.TryGetValue(token.ToUpper(), out var data))
+                if (CPURegisterInfo.TryGetValue(token.ToUpper(), out var info))
                 {
-                    reg = data.Item1;
-                    sizecode = data.Item2;
-                    high = data.Item3;
+                    reg = info.Item1;
+                    sizecode = info.Item2;
+                    high = info.Item3;
                     return true;
                 }
                 // otherwise is not a register
                 else
                 {
-                    res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{token}\" as a register");
+                    res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{token}\" as a cpu register");
                     reg = sizecode = 0;
                     high = false;
+                    return false;
+                }
+            }
+            public bool TryParseFPURegister(string token, out UInt64 reg)
+            {
+                if (FPURegisterInfo.TryGetValue(token.ToUpper(), out var info))
+                {
+                    reg = info;
+                    return true;
+                }
+                else
+                {
+                    res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{token}\" as an fpu register");
+                    reg = 0;
                     return false;
                 }
             }
@@ -2038,7 +2067,7 @@ namespace CSX64
                 }
 
                 // if it still contains any registers they weren't 64-bit
-                foreach (var entry in RegisterData)
+                foreach (var entry in CPURegisterInfo)
                     if (hole.Find(entry.Key, true) != null) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to use register {entry.Key} in an address expression. Only 64-bit registers are allowed."); return false; }
 
                 // make sure only one register is negative
@@ -2132,7 +2161,7 @@ namespace CSX64
                     if (!IsValidName(label_def, ref err)) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: {err}"); return false; }
 
                     // can't name same as a register (could be problematic) (not in IsValidName() because then address parser would fail if address contained a register)
-                    if (RegisterData.ContainsKey(label_def.ToUpper())) { res = new AssembleResult(AssembleError.InvalidLabel, $"Symbol \"{label_def}\" is reserved"); return false; }
+                    if (CPURegisterInfo.ContainsKey(label_def.ToUpper())) { res = new AssembleResult(AssembleError.InvalidLabel, $"Symbol \"{label_def}\" is reserved"); return false; }
 
                     // ensure we don't redefine a symbol
                     if (file.Symbols.ContainsKey(label_def)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Symbol \"{label_def}\" was already defined"); return false; }
@@ -2328,7 +2357,7 @@ namespace CSX64
                 if (!TryAppendVal(1, (UInt64)op)) return false;
                 if (has_ext_op) { if (!TryAppendVal(1, ext_op)) return false; }
 
-                if (!TryParseRegister(args[0], out UInt64 dest, out UInt64 a_sizecode, out bool dest_high)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} expected a register as the first argument"); return false; }
+                if (!TryParseCPURegister(args[0], out UInt64 dest, out UInt64 a_sizecode, out bool dest_high)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} expected a register as the first argument"); return false; }
                 if (!TryParseImm(args[2], out Expr imm)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} expected an imm as the third argument"); return false; }
 
                 if ((Size(a_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
@@ -2336,7 +2365,7 @@ namespace CSX64
                 UInt64 b_sizecode; // only used for ensuring no size conflicts (machine code only uses a_sizecode)
 
                 // reg
-                if (TryParseRegister(args[1], out UInt64 reg, out b_sizecode, out bool reg_high))
+                if (TryParseCPURegister(args[1], out UInt64 reg, out b_sizecode, out bool reg_high))
                 {
                     if (a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Argument size missmatch"); return false; }
 
@@ -2369,12 +2398,12 @@ namespace CSX64
                 UInt64 a_sizecode, b_sizecode;
 
                 // reg, *
-                if (TryParseRegister(args[0], out UInt64 dest, out a_sizecode, out bool dest_high))
+                if (TryParseCPURegister(args[0], out UInt64 dest, out a_sizecode, out bool dest_high))
                 {
                     if ((Size(a_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
                     
                     // reg, reg
-                    if (TryParseRegister(args[1], out UInt64 src, out b_sizecode, out bool src_high))
+                    if (TryParseCPURegister(args[1], out UInt64 src, out b_sizecode, out bool src_high))
                     {
                         if (a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Argument size missmatch"); return false; }
 
@@ -2408,7 +2437,7 @@ namespace CSX64
                 else if (TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out a_sizecode, out bool explicit_size))
                 {
                     // mem, reg
-                    if (TryParseRegister(args[1], out UInt64 src, out b_sizecode, out bool src_high))
+                    if (TryParseCPURegister(args[1], out UInt64 src, out b_sizecode, out bool src_high))
                     {
                         if ((Size(b_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified data size"); return false; }
 
@@ -2454,7 +2483,7 @@ namespace CSX64
                 UInt64 a_sizecode;
 
                 // reg
-                if (TryParseRegister(args[0], out UInt64 reg, out a_sizecode, out bool reg_high))
+                if (TryParseCPURegister(args[0], out UInt64 reg, out a_sizecode, out bool reg_high))
                 {
                     if ((Size(a_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
                     
@@ -2486,7 +2515,7 @@ namespace CSX64
                 UInt64 a_sizecode;
 
                 // reg
-                if (TryParseRegister(args[0], out UInt64 reg, out a_sizecode, out bool reg_high))
+                if (TryParseCPURegister(args[0], out UInt64 reg, out a_sizecode, out bool reg_high))
                 {
                     if ((Size(a_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
 
@@ -2534,10 +2563,10 @@ namespace CSX64
                 UInt64 a_sizecode, b_sizecode;
 
                 // reg, *
-                if (TryParseRegister(args[0], out UInt64 reg, out a_sizecode, out bool reg_high))
+                if (TryParseCPURegister(args[0], out UInt64 reg, out a_sizecode, out bool reg_high))
                 {
                     // reg, reg
-                    if (TryParseRegister(args[1], out UInt64 src, out b_sizecode, out bool src_high))
+                    if (TryParseCPURegister(args[1], out UInt64 src, out b_sizecode, out bool src_high))
                     {
                         if (a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Argument size missmatch"); return false; }
 
@@ -2559,11 +2588,11 @@ namespace CSX64
                 else if (TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out a_sizecode, out bool explicit_size))
                 {
                     // mem, reg
-                    if (TryParseRegister(args[1], out reg, out b_sizecode, out reg_high))
+                    if (TryParseCPURegister(args[1], out reg, out b_sizecode, out reg_high))
                     {
                         if (explicit_size && a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Argument size missmatch"); return false; }
 
-                        if (!TryAppendVal(1, (reg << 4) | (a_sizecode << 2) | (reg_high ? 2 : 0ul) | 1)) return false;
+                        if (!TryAppendVal(1, (reg << 4) | (b_sizecode << 2) | (reg_high ? 2 : 0ul) | 1)) return false;
                         if (!TryAppendAddress(a, b, ptr_base)) return false;
                     }
                     // mem, mem
@@ -2581,7 +2610,7 @@ namespace CSX64
             {
                 if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 2 args"); return false; }
 
-                if (!TryParseRegister(args[0], out UInt64 dest, out UInt64 a_sizecode, out bool dest_high)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} expecetd register as first arg\n-> {res.ErrorMsg}"); return false; }
+                if (!TryParseCPURegister(args[0], out UInt64 dest, out UInt64 a_sizecode, out bool dest_high)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} expecetd register as first arg\n-> {res.ErrorMsg}"); return false; }
                 if (a_sizecode == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not allow 8-bit addressing"); return false; }
 
                 if (!TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out UInt64 b_sizecode, out bool explicit_size)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} expected address as second arg\n-> {res.ErrorMsg}"); return false; }
@@ -2601,15 +2630,17 @@ namespace CSX64
                 UInt64 a_sizecode;
 
                 // reg
-                if (TryParseRegister(args[0], out UInt64 reg, out a_sizecode, out bool a_high))
+                if (TryParseCPURegister(args[0], out UInt64 reg, out a_sizecode, out bool a_high))
                 {
                     if (a_sizecode == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support 8-bit operands"); return false; }
 
-                    if (!TryAppendVal(1, (reg << 4) | (a_sizecode << 2) | (a_high ? 2 : 0ul))) return false;
+                    if (!TryAppendVal(1, (reg << 4) | (a_sizecode << 2))) return false;
                 }
                 // mem
                 else if (TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out a_sizecode, out bool explicit_size))
                 {
+                    if (!explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce data size"); return false; }
+
                     if (a_sizecode == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support 8-bit operands"); return false; }
 
                     if (!TryAppendVal(1, (a_sizecode << 2) | 1)) return false;
@@ -2884,27 +2915,8 @@ namespace CSX64
                         case "JLE": case "JNG": if (!args.TryProcessIMMRM(OPCode.Jcc, true, (UInt64)ccOPCode.le, 14)) return args.res; break;
 
                         case "LOOP": if (!args.TryProcessIMMRM(OPCode.LOOP, false, 0, 14)) return args.res; break;
-
-                        case "LOOPZ": case "LOOPE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.z, 14)) return args.res; break;
-                        case "LOOPNZ": case "LOOPNE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.nz, 14)) return args.res; break;
-                        case "LOOPS": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.s, 14)) return args.res; break;
-                        case "LOOPNS": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.ns, 14)) return args.res; break;
-                        case "LOOPP": case "LOOPPE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.p, 14)) return args.res; break;
-                        case "LOOPNP": case "LOOPPO": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.np, 14)) return args.res; break;
-                        case "LOOPO": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.o, 14)) return args.res; break;
-                        case "LOOPNO": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.no, 14)) return args.res; break;
-                        case "LOOPC": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.c, 14)) return args.res; break;
-                        case "LOOPNC": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.nc, 14)) return args.res; break;
-
-                        case "LOOPA": case "LOOPNBE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.a, 14)) return args.res; break;
-                        case "LOOPAE": case "LOOPNB": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.ae, 14)) return args.res; break;
-                        case "LOOPB": case "LOOPNAE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.b, 14)) return args.res; break;
-                        case "LOOPBE": case "LOOPNA": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.be, 14)) return args.res; break;
-
-                        case "LOOPG": case "LOOPNLE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.g, 14)) return args.res; break;
-                        case "LOOPGE": case "LOOPNL": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.ge, 14)) return args.res; break;
-                        case "LOOPL": case "LOOPNGE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.l, 14)) return args.res; break;
-                        case "LOOPLE": case "LOOPNG": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, (UInt64)ccOPCode.le, 14)) return args.res; break;
+                        case "LOOPZ": case "LOOPE": if (!args.TryProcessIMMRM(OPCode.LOOPe, false, 0, 14)) return args.res; break;
+                        case "LOOPNZ": case "LOOPNE": if (!args.TryProcessIMMRM(OPCode.LOOPne, false, 0, 14)) return args.res; break;
 
                         case "CALL": if (!args.TryProcessIMMRM(OPCode.CALL, false, 0, 14)) return args.res; break;
                         case "RET": if (!args.TryProcessNoArgOp(OPCode.RET)) return args.res; break;
@@ -2971,6 +2983,16 @@ namespace CSX64
                         case "BTS": if (!args.TryProcessBinaryOp(OPCode.BT, true, 1, 15, 0, false)) return args.res; break;
                         case "BTR": if (!args.TryProcessBinaryOp(OPCode.BT, true, 2, 15, 0, false)) return args.res; break;
                         case "BTC": if (!args.TryProcessBinaryOp(OPCode.BT, true, 3, 15, 0, false)) return args.res; break;
+
+                        // x87 instructions
+
+                        case "FLD1": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 0)) return args.res; break;
+                        case "FLDL2T": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 1)) return args.res; break;
+                        case "FLDL2E": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 2)) return args.res; break;
+                        case "FLDPI": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 3)) return args.res; break;
+                        case "FLDLG2": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 4)) return args.res; break;
+                        case "FLDLN2": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 4)) return args.res; break;
+                        case "FLDZ": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 5)) return args.res; break;
 
                         default: return new AssembleResult(AssembleError.UnknownOp, $"line {args.line}: Unknown operation \"{args.op}\"");
                     }
