@@ -2678,7 +2678,7 @@ namespace CSX64
                     // no args is st(1) <- f(st(1), st(0)), pop
                     if (!pop) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: No args requires a pop operation"); return false; }
 
-                    if (!TryAppendVal(1, 0x91)) return false;
+                    if (!TryAppendVal(1, 0x12)) return false;
                 }
                 else if (args.Length == 1)
                 {
@@ -2690,12 +2690,12 @@ namespace CSX64
                     // 32-bit
                     if (sizecode == 2)
                     {
-                        if (!TryAppendVal(1, integral ? 4 : 2ul)) return false;
+                        if (!TryAppendVal(1, integral ? 5 : 3ul)) return false;
                     }
                     // 64-bit
                     else if (sizecode == 3)
                     {
-                        if (!TryAppendVal(1, integral ? 5 : 3ul)) return false;
+                        if (!TryAppendVal(1, integral ? 6 : 4ul)) return false;
                     }
                     else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} requires 32 or 64-bit operands"); return false; }
 
@@ -2707,23 +2707,117 @@ namespace CSX64
                     if (!TryParseFPURegister(args[0], out UInt64 a) || !TryParseFPURegister(args[1], out UInt64 b))
                     { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} with 2 args requires both args be fpu registers"); return false; }
 
-                    // binary pop requires b be st(0)
-                    if (pop && b != 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Popping {op} requires arg 2 be st(0)"); return false; }
+                    // if b is st(0) (do this one first since it handles the pop form)
+                    if (b == 0)
+                    {
+                        // while popping the dest is legal, it's probably not what the programmer intended
+                        if (pop && a == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Attempt to pop the destination"); return false; }
 
-                    // if a is st(0)
-                    if (a == 0)
-                    {
-                        if (!TryAppendVal(1, (pop ? 128 : 0ul) | (b << 4) | 0)) return false;
+                        if (!TryAppendVal(1, (a << 4) | (pop ? 2 : 1ul))) return false;
                     }
-                    // if b is st(0)
-                    else if (b == 0)
+                    // if a is st(0)
+                    else if (a == 0)
                     {
-                        if (!TryAppendVal(1, (pop ? 128 : 0ul) | (a << 4) | 1)) return false;
+                        if (pop) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Popping {op} requires arg 2 be st(0)"); return false; }
+
+                        if (!TryAppendVal(1, b << 4)) return false;
                     }
                     // x87 requires one of them be st(0)
                     else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} with 2 args requires one of the registers be st(0)"); return false; }
                 }
                 else { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected between 0 and 2 args"); return false; }
+
+                return true;
+            }
+
+            public bool TryProcessFLD(OPCode op, bool integral)
+            {
+                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 1 arg"); return false; }
+
+                // write op code
+                if (!TryAppendVal(1, (UInt64)op)) return false;
+
+                // pushing st(i)
+                if (TryParseFPURegister(args[0], out UInt64 reg))
+                {
+                    if (!TryAppendVal(1, reg << 4)) return false;
+                }
+                // pushing memory value
+                else if (TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out UInt64 sizecode, out bool explicit_size))
+                {
+                    if (!explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce operand size"); return false; }
+
+                    // handle integral cases
+                    if (integral)
+                    {
+                        if (sizecode == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Instruction does not support 8-bit integral operands"); return false; }
+
+                        if (!TryAppendVal(1, sizecode + 2)) return false;
+                    }
+                    // otherwise floating-point
+                    else
+                    {
+                        if (sizecode != 2 && sizecode != 3) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Instruction only supports 32 or 64-bit floating-point operands"); return false; }
+
+                        if (!TryAppendVal(1, sizecode - 1)) return false;
+                    }
+
+                    // and write the address
+                    if (!TryAppendAddress(a, b, ptr_base)) return false;
+                }
+                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected an FPU register or a memory value"); return false; }
+
+                return true;
+            }
+            public bool TryProcessFST(OPCode op, bool integral, bool pop)
+            {
+                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 1 arg"); return false; }
+
+                // write the op code
+                if (!TryAppendVal(1, (UInt64)op)) return false;
+
+                // if it's an fpu register
+                if (TryParseFPURegister(args[0], out UInt64 reg))
+                {
+                    // can't be an integral op
+                    if (integral) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Attempt to use integral {op} on an fpu register"); return false; }
+
+                    // while it's legal to store a register to itself (or even to pop afterwards), it's probably not what the programmer intended
+                    if (reg == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Attempt to store st(0) to st(0)"); return false; }
+
+                    if (!TryAppendVal(1, (reg << 4) | (pop ? 1 : 0ul))) return false;
+                }
+                // if it's a memory destination
+                else if (TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out UInt64 sizecode, out bool explicit_size))
+                {
+                    if (!explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce operand size"); return false; }
+
+                    // if this is integral (i.e. truncation store)
+                    if (integral)
+                    {
+                        if (sizecode == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Integral {op} does not allow 8-bit operands"); return false; }
+                        else if (sizecode == 1) { if (!TryAppendVal(1, pop ? 7 : 6ul)) return false; }
+                        else if (sizecode == 2) { if (!TryAppendVal(1, pop ? 9 : 8ul)) return false; }
+                        else if (sizecode == 3)
+                        {
+                            // there isn't a non-popping 64-bit int store
+                            if (!pop) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: 64-bit integral {op} must be a popping operation"); return false; }
+
+                            if (!TryAppendVal(1, 10)) return false;
+                        }
+                    }
+                    // otherwise is floating-point
+                    else
+                    {
+                        if (sizecode == 2) { if (!TryAppendVal(1, pop ? 3 : 2ul)) return false; }
+                        else if (sizecode == 3) { if (!TryAppendVal(1, pop ? 5 : 4ul)) return false; }
+                        else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Attempt to store to unsupported floating-point size"); return false; }
+                    }
+
+                    // and write the address
+                    if (!TryAppendAddress(a, b, ptr_base)) return false;
+                }
+                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected an fpu register or memory value"); return false; }
 
                 return true;
             }
@@ -3070,6 +3164,14 @@ namespace CSX64
                         case "FLDLG2": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 4)) return args.res; break;
                         case "FLDLN2": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 4)) return args.res; break;
                         case "FLDZ": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 5)) return args.res; break;
+
+                        case "FLD": if (!args.TryProcessFLD(OPCode.FLD, false)) return args.res; break;
+                        case "FILD": if (!args.TryProcessFLD(OPCode.FLD, true)) return args.res; break;
+
+                        case "FST": if (!args.TryProcessFST(OPCode.FST, false, false)) return args.res; break;
+                        case "FIST": if (!args.TryProcessFST(OPCode.FST, true, false)) return args.res; break;
+                        case "FSTP": if (!args.TryProcessFST(OPCode.FST, false, true)) return args.res; break;
+                        case "FISTP": if (!args.TryProcessFST(OPCode.FST, true, true)) return args.res; break;
 
                         case "FADD": if (!args.TryProcessFPUBinaryOp(OPCode.FADD, false, false)) return args.res; break;
                         case "FADDP": if (!args.TryProcessFPUBinaryOp(OPCode.FADD, false, true)) return args.res; break;

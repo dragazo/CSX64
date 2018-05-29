@@ -1175,13 +1175,14 @@ namespace CSX64
         // -- floating point stuff -- //
 
         /*
-        [1: pop][3: i][1:][3: mode]
+        [1:][3: i][1:][3: mode]
             mode = 0: st(0) <- f(st(0), st(i))
             mode = 1: st(i) <- f(st(i), st(0))
-            mode = 2: st(i) <- f(st(i), fp32M)
-            mode = 3: st(i) <- f(st(i), fp64M)
-            mode = 4: st(i) <- f(st(i), int32M)
-            mode = 5: st(i) <- f(st(i), int64M)
+            mode = 2: || + pop
+            mode = 3: st(0) <- f(st(0), fp32M)
+            mode = 4: st(0) <- f(st(0), fp64M)
+            mode = 5: st(0) <- f(st(0), int32M)
+            mode = 6: st(0) <- f(st(0), int64M)
             else UND
         */
         private bool FetchFPUBinaryFormat(out UInt64 s, out double a, out double b)
@@ -1195,6 +1196,7 @@ namespace CSX64
                     if (!FPURegisters[TOP].InUse || !FPURegisters[(TOP + (s >> 4)) & 7].InUse) { Terminate(ErrorCode.FPUAccessViolation); a = b = 0; return false; }
                     a = FPURegisters[TOP].Float; b = FPURegisters[(TOP + (s >> 4)) & 7].Float; return true;
                 case 1:
+                case 2:
                     if (!FPURegisters[TOP].InUse || !FPURegisters[(TOP + (s >> 4)) & 7].InUse) { Terminate(ErrorCode.FPUAccessViolation); a = b = 0; return false; }
                     b = FPURegisters[TOP].Float; a = FPURegisters[(TOP + (s >> 4)) & 7].Float; return true;
                 
@@ -1204,10 +1206,10 @@ namespace CSX64
                     if (!GetAddressAdv(out UInt64 m)) return false;
                     switch (s & 7)
                     {
-                        case 2: if (!GetMemRaw(m, 4, out m)) return false; b = AsFloat(m); return true;
-                        case 3: if (!GetMemRaw(m, 8, out m)) return false; b = AsDouble(m); return true;
-                        case 4: if (!GetMemRaw(m, 4, out m)) return false; b = (Int64)SignExtend(m, 2); return true;
-                        case 5: if (!GetMemRaw(m, 8, out m)) return false; b = (Int64)m; return true;
+                        case 3: if (!GetMemRaw(m, 4, out m)) return false; b = AsFloat(m); return true;
+                        case 4: if (!GetMemRaw(m, 8, out m)) return false; b = AsDouble(m); return true;
+                        case 5: if (!GetMemRaw(m, 4, out m)) return false; b = (Int64)SignExtend(m, 2); return true;
+                        case 6: if (!GetMemRaw(m, 8, out m)) return false; b = (Int64)m; return true;
 
                         default: Terminate(ErrorCode.UndefinedBehavior); return false;
                     }
@@ -1215,14 +1217,13 @@ namespace CSX64
         }
         private bool StoreFPUBinaryFormat(UInt64 s, double res)
         {
-            // record result
-            if ((s & 7) == 1) FPURegisters[(TOP + (s >> 4)) & 7].Float = res;
-            else FPURegisters[TOP].Float = res;
+            switch (s & 7)
+            {
+                case 1: FPURegisters[(TOP + (s >> 4)) & 7].Float = res; return true;
+                case 2: FPURegisters[(TOP + (s >> 4)) & 7].Float = res; return PopFPU(out res);
 
-            // if popping, pop
-            if ((s & 128) != 0) return PopFPU(out res);
-
-            return true;
+                default: FPURegisters[TOP].Float = res; return true;
+            }
         }
 
         private bool PushFPU(double val)
@@ -1258,6 +1259,11 @@ namespace CSX64
         {
             if (!GetMemAdv(1, out UInt64 ext)) return false;
 
+            C0 = Rand.NextBool();
+            C1 = Rand.NextBool();
+            C2 = Rand.NextBool();
+            C3 = Rand.NextBool();
+
             switch (ext)
             {
                 case 0: return PushFPU(1);
@@ -1269,6 +1275,105 @@ namespace CSX64
                 case 6: return PushFPU(0);
 
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
+            }
+        }
+        /*
+        [1:][3: i][1:][3: mode]
+            mode = 0: push st(i)
+            mode = 1: push fp32M
+            mode = 2: push fp64M
+            mode = 3: push int16M
+            mode = 4: push int32M
+            mode = 5: push int64M
+            else UND
+        */
+        private bool ProcessFLD()
+        {
+            if (!GetMemAdv(1, out UInt64 s)) return false;
+
+            C0 = Rand.NextBool();
+            C1 = Rand.NextBool();
+            C2 = Rand.NextBool();
+            C3 = Rand.NextBool();
+
+            // switch through mode
+            switch (s & 7)
+            {
+                case 0:
+                    if (!FPURegisters[(TOP + (s >> 4)) & 7].InUse) { Terminate(ErrorCode.FPUAccessViolation); return false; }
+                    return PushFPU(FPURegisters[(TOP + (s >> 4)) & 7].Float);
+
+                default:
+                    if (!GetAddressAdv(out UInt64 m)) return false;
+                    switch (s & 7)
+                    {
+                        case 1: if (!GetMemRaw(m, 4, out m)) return false; return PushFPU(AsFloat(m));
+                        case 2: if (!GetMemRaw(m, 8, out m)) return false; return PushFPU(AsDouble(m));
+
+                        case 3: if (!GetMemRaw(m, 2, out m)) return false; return PushFPU((Int64)SignExtend(m, 1));
+                        case 4: if (!GetMemRaw(m, 4, out m)) return false; return PushFPU((Int64)SignExtend(m, 2));
+                        case 5: if (!GetMemRaw(m, 8, out m)) return false; return PushFPU((Int64)SignExtend(m, 3));
+
+                        default: Terminate(ErrorCode.UndefinedBehavior); return false;
+                    }
+            }
+        }
+        /*
+        [1:][3: i][4: mode]
+            mode = 0: st(i) <- st(0)
+            mode = 1: || + pop
+            mode = 2: fp32M <- st(0)
+            mode = 3: || + pop
+            mode = 4: fp64M <- st(0)
+            mode = 5: || + pop
+            mode = 6: int16M <- st(0)
+            mode = 7: || + pop
+            mode = 8: int32M <- st(0)
+            mode = 9: || + pop
+            mode = 10: int64M <- st(0) + pop
+            else UND
+        */
+        private bool ProcessFST()
+        {
+            Console.WriteLine("here!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+            if (!GetMemAdv(1, out UInt64 s)) return false;
+
+            C0 = Rand.NextBool();
+            C1 = Rand.NextBool();
+            C2 = Rand.NextBool();
+            C3 = Rand.NextBool();
+
+            switch (s & 15)
+            {
+                case 0:
+                case 1:
+                    // make sure we can read the value
+                    if (!FPURegisters[TOP].InUse) { Terminate(ErrorCode.FPUAccessViolation); return false; }
+                    // record the value (is allowed to be not in use)
+                    FPURegisters[(TOP + (s >> 4)) & 7].Float = FPURegisters[TOP].Float;
+                    FPURegisters[(TOP + (s >> 4)) & 7].InUse = true;
+                    break;
+
+                default:
+                    if (!FPURegisters[TOP].InUse) { Terminate(ErrorCode.FPUAccessViolation); return false; }
+                    if (!GetAddressAdv(out UInt64 m)) return false;
+                    switch (s & 15)
+                    {
+                        case 2: case 3: if (!SetMemRaw(m, 4, FloatAsUInt64((float)FPURegisters[TOP].Float))) return false; break;
+                        case 4: case 5: if (!SetMemRaw(m, 8, DoubleAsUInt64(FPURegisters[TOP].Float))) return false; break;
+                        case 6: case 7: if (!SetMemRaw(m, 2, (UInt64)(Int64)FPURegisters[TOP].Float)) return false; break;
+                        case 8: case 9: if (!SetMemRaw(m, 4, (UInt64)(Int64)FPURegisters[TOP].Float)) return false; break;
+                        case 10: if (!SetMemRaw(m, 8, (UInt64)(Int64)FPURegisters[TOP].Float)) return false; break;
+
+                        default: Terminate(ErrorCode.UndefinedBehavior); return false;
+                    }
+                    break;
+            }
+
+            switch (s & 15)
+            {
+                case 1: case 3: case 5: case 7: case 9: return PopFPU(out double temp);
+                default: return true;
             }
         }
 

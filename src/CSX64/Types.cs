@@ -36,7 +36,7 @@ namespace CSX64
 
         BSWAP, BEXTR, BLSI, BLSMSK, BLSR, ANDN, BT,
 
-        FLD_const,
+        FLD_const, FLD, FST,
 
         FADD, FSUB, FSUBR,
         FMUL, FDIV, FDIVR

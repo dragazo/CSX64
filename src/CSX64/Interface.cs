@@ -297,7 +297,7 @@ namespace CSX64
             if (!GetMemAdv(1, out op)) return false;
 
             for (int i = 0; i < 8; ++i)
-                Console.WriteLine($"st{i}: {FPURegisters[(TOP + i) & 7].Float}");
+                Console.WriteLine($"st{i}: {(FPURegisters[(TOP + i) & 7].InUse ? FPURegisters[(TOP + i) & 7].Float.ToString() : "Not In Use")}");
             Console.WriteLine($"{RIP:x8} - {(OPCode)op}\n");
 
             // switch through the opcodes
@@ -371,6 +371,8 @@ namespace CSX64
                 // x87 instructions
 
                 case OPCode.FLD_const: return ProcessFLD_const();
+                case OPCode.FLD: return ProcessFLD();
+                case OPCode.FST: return ProcessFST();
 
                 case OPCode.FADD: return ProcessFADD();
                 case OPCode.FSUB: return ProcessFSUB();
