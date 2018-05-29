@@ -15,7 +15,7 @@ namespace CSX64
         /// </summary>
         /// <param name="computer">the flags object to examine</param>
         /// <param name="code">the code to extract</param>
-        public bool TryGet_cc(ccOPCode code, out bool res)
+        private bool TryGet_cc(ccOPCode code, out bool res)
         {
             switch (code)
             {
@@ -271,7 +271,7 @@ namespace CSX64
             a = 0; // so compiler won't complain
 
             if (!GetMemAdv(1, out s)) return false;
-            
+
             UInt64 a_sizecode = _a_sizecode == -1 ? (s >> 2) & 3 : (UInt64)_a_sizecode;
 
             // get the value into b
@@ -443,7 +443,7 @@ namespace CSX64
             aft = RIP; // record point immediately after reading (for CALL return address)
 
             if (apply) RIP = val; // jump
-            
+
             return true;
         }
         private bool ProcessLOOP(bool continue_flag)
@@ -1174,6 +1174,57 @@ namespace CSX64
 
         // -- floating point stuff -- //
 
+        /*
+        [1: pop][3: i][1:][3: mode]
+            mode = 0: st(0) <- f(st(0), st(i))
+            mode = 1: st(i) <- f(st(i), st(0))
+            mode = 2: st(i) <- f(st(i), fp32M)
+            mode = 3: st(i) <- f(st(i), fp64M)
+            mode = 4: st(i) <- f(st(i), int32M)
+            mode = 5: st(i) <- f(st(i), int64M)
+            else UND
+        */
+        private bool FetchFPUBinaryFormat(out UInt64 s, out double a, out double b)
+        {
+            if (!GetMemAdv(1, out s)) { a = b = 0; return false; }
+
+            // switch through mode
+            switch (s & 7)
+            {
+                case 0:
+                    if (!FPURegisters[TOP].InUse || !FPURegisters[(TOP + (s >> 4)) & 7].InUse) { Terminate(ErrorCode.FPUAccessViolation); a = b = 0; return false; }
+                    a = FPURegisters[TOP].Float; b = FPURegisters[(TOP + (s >> 4)) & 7].Float; return true;
+                case 1:
+                    if (!FPURegisters[TOP].InUse || !FPURegisters[(TOP + (s >> 4)) & 7].InUse) { Terminate(ErrorCode.FPUAccessViolation); a = b = 0; return false; }
+                    b = FPURegisters[TOP].Float; a = FPURegisters[(TOP + (s >> 4)) & 7].Float; return true;
+                
+                default:
+                    if (!FPURegisters[TOP].InUse) { Terminate(ErrorCode.FPUAccessViolation); a = b = 0; return false; }
+                    a = FPURegisters[TOP].Float; b = 0;
+                    if (!GetAddressAdv(out UInt64 m)) return false;
+                    switch (s & 7)
+                    {
+                        case 2: if (!GetMemRaw(m, 4, out m)) return false; b = AsFloat(m); return true;
+                        case 3: if (!GetMemRaw(m, 8, out m)) return false; b = AsDouble(m); return true;
+                        case 4: if (!GetMemRaw(m, 4, out m)) return false; b = (Int64)SignExtend(m, 2); return true;
+                        case 5: if (!GetMemRaw(m, 8, out m)) return false; b = (Int64)m; return true;
+
+                        default: Terminate(ErrorCode.UndefinedBehavior); return false;
+                    }
+            }
+        }
+        private bool StoreFPUBinaryFormat(UInt64 s, double res)
+        {
+            // record result
+            if ((s & 7) == 1) FPURegisters[(TOP + (s >> 4)) & 7].Float = res;
+            else FPURegisters[TOP].Float = res;
+
+            // if popping, pop
+            if ((s & 128) != 0) return PopFPU(out res);
+
+            return true;
+        }
+
         private bool PushFPU(double val)
         {
             // decrement top (wraps automatically as a 3-bit unsigned value)
@@ -1184,6 +1235,8 @@ namespace CSX64
 
             // store the value
             FPURegisters[TOP].Float = val;
+            FPURegisters[TOP].InUse = true;
+
             return true;
         }
         private bool PopFPU(out double val)
@@ -1191,8 +1244,9 @@ namespace CSX64
             // if this register is not in use, it's an error
             if (!FPURegisters[TOP].InUse) { Terminate(ErrorCode.FPUStackUnderflow); val = 0; return false; }
 
-            // record value
+            // extract the value
             val = FPURegisters[TOP].Float;
+            FPURegisters[TOP].InUse = false;
 
             // increment top (wraps automatically as a 3-bit unsigned value)
             ++TOP;
@@ -1216,6 +1270,86 @@ namespace CSX64
 
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
+        }
+
+        private bool ProcessFADD()
+        {
+            if (!FetchFPUBinaryFormat(out UInt64 s, out double a, out double b)) return false;
+
+            double res = a + b;
+
+            C0 = Rand.NextBool();
+            C1 = Rand.NextBool();
+            C2 = Rand.NextBool();
+            C3 = Rand.NextBool();
+
+            return StoreFPUBinaryFormat(s, res);
+        }
+        private bool ProcessFSUB()
+        {
+            if (!FetchFPUBinaryFormat(out UInt64 s, out double a, out double b)) return false;
+
+            double res = a - b;
+
+            C0 = Rand.NextBool();
+            C1 = Rand.NextBool();
+            C2 = Rand.NextBool();
+            C3 = Rand.NextBool();
+
+            return StoreFPUBinaryFormat(s, res);
+        }
+        private bool ProcessFSUBR()
+        {
+            if (!FetchFPUBinaryFormat(out UInt64 s, out double a, out double b)) return false;
+
+            double res = b - a;
+
+            C0 = Rand.NextBool();
+            C1 = Rand.NextBool();
+            C2 = Rand.NextBool();
+            C3 = Rand.NextBool();
+
+            return StoreFPUBinaryFormat(s, res);
+        }
+
+        private bool ProcessFMUL()
+        {
+            if (!FetchFPUBinaryFormat(out UInt64 s, out double a, out double b)) return false;
+
+            double res = a * b;
+
+            C0 = Rand.NextBool();
+            C1 = Rand.NextBool();
+            C2 = Rand.NextBool();
+            C3 = Rand.NextBool();
+
+            return StoreFPUBinaryFormat(s, res);
+        }
+        private bool ProcessFDIV()
+        {
+            if (!FetchFPUBinaryFormat(out UInt64 s, out double a, out double b)) return false;
+
+            double res = a / b;
+
+            C0 = Rand.NextBool();
+            C1 = Rand.NextBool();
+            C2 = Rand.NextBool();
+            C3 = Rand.NextBool();
+
+            return StoreFPUBinaryFormat(s, res);
+        }
+        private bool ProcessFDIVR()
+        {
+            if (!FetchFPUBinaryFormat(out UInt64 s, out double a, out double b)) return false;
+
+            double res = b / a;
+
+            C0 = Rand.NextBool();
+            C1 = Rand.NextBool();
+            C2 = Rand.NextBool();
+            C3 = Rand.NextBool();
+
+            return StoreFPUBinaryFormat(s, res);
         }
     }
 }

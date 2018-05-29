@@ -201,7 +201,7 @@ namespace CSX64
         public byte TOP
         {
             get => (byte)((FPU_status & 0x3800) >> 11);
-            set => FPU_status = (byte)(FPU_status & ~0x3800 | ((value & 7) << 11));
+            set => FPU_status = (UInt16)(FPU_status & ~0x3800 | ((value & 7) << 11));
         }
 
         public UInt64 ST0 { get => FPURegisters[(TOP + 0) & 7].Value; set => FPURegisters[(TOP + 0) & 7].Value = value; }

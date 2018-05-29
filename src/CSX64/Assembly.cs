@@ -1162,6 +1162,16 @@ namespace CSX64
         private static readonly Dictionary<string, byte> FPURegisterInfo = new Dictionary<string, byte>()
         {
             ["ST"] = 0,
+
+            ["ST0"] = 0,
+            ["ST1"] = 1,
+            ["ST2"] = 2,
+            ["ST3"] = 3,
+            ["ST4"] = 4,
+            ["ST5"] = 5,
+            ["ST6"] = 6,
+            ["ST7"] = 7,
+
             ["ST(0)"] = 0,
             ["ST(1)"] = 1,
             ["ST(2)"] = 2,
@@ -1169,7 +1179,7 @@ namespace CSX64
             ["ST(4)"] = 4,
             ["ST(5)"] = 5,
             ["ST(6)"] = 6,
-            ["ST(7)"] = 7,
+            ["ST(7)"] = 7
         };
 
         /// <summary>
@@ -2347,7 +2357,7 @@ namespace CSX64
                 return true;
             }
 
-            // -- op formats -- //
+            // -- x86 op formats -- //
             
             public bool TryProcessTernaryOp(OPCode op, bool has_ext_op = false, UInt64 ext_op = 0, UInt64 sizemask = 15)
             {
@@ -2647,6 +2657,73 @@ namespace CSX64
                     if (!TryAppendAddress(a, b, ptr_base)) return false;
                 }
                 else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} expected a register or memory argument"); return false; }
+
+                return true;
+            }
+
+            // -- x87 op formats -- //
+
+            public bool TryProcessFPUBinaryOp(OPCode op, bool integral, bool pop)
+            {
+                // write op code
+                if (!TryAppendVal(1, (UInt64)op)) return false;
+
+                // make sure the programmer doesn't pull any funny business due to our arg-count-based approach
+                if (integral && args.Length != 1) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Integral {op} requires 1 arg"); return false; }
+                if (pop && args.Length != 0 && args.Length != 2) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Popping {op} requires 0 or 2 args"); return false; }
+
+                // handle arg count cases
+                if (args.Length == 0)
+                {
+                    // no args is st(1) <- f(st(1), st(0)), pop
+                    if (!pop) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: No args requires a pop operation"); return false; }
+
+                    if (!TryAppendVal(1, 0x91)) return false;
+                }
+                else if (args.Length == 1)
+                {
+                    if (!TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out UInt64 sizecode, out bool explicit_size))
+                    { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected a memory value"); return false; }
+
+                    if (!explicit_size) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Could not deduce data size"); return false; }
+
+                    // 32-bit
+                    if (sizecode == 2)
+                    {
+                        if (!TryAppendVal(1, integral ? 4 : 2ul)) return false;
+                    }
+                    // 64-bit
+                    else if (sizecode == 3)
+                    {
+                        if (!TryAppendVal(1, integral ? 5 : 3ul)) return false;
+                    }
+                    else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} requires 32 or 64-bit operands"); return false; }
+
+                    // write the address
+                    if (!TryAppendAddress(a, b, ptr_base)) return false;
+                }
+                else if (args.Length == 2)
+                {
+                    if (!TryParseFPURegister(args[0], out UInt64 a) || !TryParseFPURegister(args[1], out UInt64 b))
+                    { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} with 2 args requires both args be fpu registers"); return false; }
+
+                    // binary pop requires b be st(0)
+                    if (pop && b != 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Popping {op} requires arg 2 be st(0)"); return false; }
+
+                    // if a is st(0)
+                    if (a == 0)
+                    {
+                        if (!TryAppendVal(1, (pop ? 128 : 0ul) | (b << 4) | 0)) return false;
+                    }
+                    // if b is st(0)
+                    else if (b == 0)
+                    {
+                        if (!TryAppendVal(1, (pop ? 128 : 0ul) | (a << 4) | 1)) return false;
+                    }
+                    // x87 requires one of them be st(0)
+                    else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} with 2 args requires one of the registers be st(0)"); return false; }
+                }
+                else { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected between 0 and 2 args"); return false; }
 
                 return true;
             }
@@ -2993,6 +3070,30 @@ namespace CSX64
                         case "FLDLG2": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 4)) return args.res; break;
                         case "FLDLN2": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 4)) return args.res; break;
                         case "FLDZ": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 5)) return args.res; break;
+
+                        case "FADD": if (!args.TryProcessFPUBinaryOp(OPCode.FADD, false, false)) return args.res; break;
+                        case "FADDP": if (!args.TryProcessFPUBinaryOp(OPCode.FADD, false, true)) return args.res; break;
+                        case "FIADD": if (!args.TryProcessFPUBinaryOp(OPCode.FADD, true, false)) return args.res; break;
+
+                        case "FSUB": if (!args.TryProcessFPUBinaryOp(OPCode.FSUB, false, false)) return args.res; break;
+                        case "FSUBP": if (!args.TryProcessFPUBinaryOp(OPCode.FSUB, false, true)) return args.res; break;
+                        case "FISUB": if (!args.TryProcessFPUBinaryOp(OPCode.FSUB, true, false)) return args.res; break;
+
+                        case "FSUBR": if (!args.TryProcessFPUBinaryOp(OPCode.FSUBR, false, false)) return args.res; break;
+                        case "FSUBRP": if (!args.TryProcessFPUBinaryOp(OPCode.FSUBR, false, true)) return args.res; break;
+                        case "FISUBR": if (!args.TryProcessFPUBinaryOp(OPCode.FSUBR, true, false)) return args.res; break;
+
+                        case "FMUL": if (!args.TryProcessFPUBinaryOp(OPCode.FMUL, false, false)) return args.res; break;
+                        case "FMULP": if (!args.TryProcessFPUBinaryOp(OPCode.FMUL, false, true)) return args.res; break;
+                        case "FIMUL": if (!args.TryProcessFPUBinaryOp(OPCode.FMUL, true, false)) return args.res; break;
+
+                        case "FDIV": if (!args.TryProcessFPUBinaryOp(OPCode.FDIV, false, false)) return args.res; break;
+                        case "FDIVP": if (!args.TryProcessFPUBinaryOp(OPCode.FDIV, false, true)) return args.res; break;
+                        case "FIDIV": if (!args.TryProcessFPUBinaryOp(OPCode.FDIV, true, false)) return args.res; break;
+
+                        case "FDIVR": if (!args.TryProcessFPUBinaryOp(OPCode.FDIVR, false, false)) return args.res; break;
+                        case "FDIVRP": if (!args.TryProcessFPUBinaryOp(OPCode.FDIVR, false, true)) return args.res; break;
+                        case "FIDIVR": if (!args.TryProcessFPUBinaryOp(OPCode.FDIVR, true, false)) return args.res; break;
 
                         default: return new AssembleResult(AssembleError.UnknownOp, $"line {args.line}: Unknown operation \"{args.op}\"");
                     }

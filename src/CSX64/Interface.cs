@@ -372,6 +372,14 @@ namespace CSX64
 
                 case OPCode.FLD_const: return ProcessFLD_const();
 
+                case OPCode.FADD: return ProcessFADD();
+                case OPCode.FSUB: return ProcessFSUB();
+                case OPCode.FSUBR: return ProcessFSUBR();
+
+                case OPCode.FMUL: return ProcessFMUL();
+                case OPCode.FDIV: return ProcessFDIV();
+                case OPCode.FDIVR: return ProcessFDIVR();
+
                 // otherwise, unknown opcode
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }

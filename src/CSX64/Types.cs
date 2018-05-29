@@ -10,7 +10,7 @@ namespace CSX64
     {
         None, OutOfBounds, UnhandledSyscall, UndefinedBehavior, ArithmeticError, Abort,
         IOFailure, FSDisabled, AccessViolation, InsufficientFDs, FDNotInUse, NotImplemented, StackOverflow,
-        FPUStackOverflow, FPUStackUnderflow, FPUError
+        FPUStackOverflow, FPUStackUnderflow, FPUError, FPUAccessViolation
     }
     public enum OPCode
     {
@@ -36,7 +36,10 @@ namespace CSX64
 
         BSWAP, BEXTR, BLSI, BLSMSK, BLSR, ANDN, BT,
 
-        FLD_const
+        FLD_const,
+
+        FADD, FSUB, FSUBR,
+        FMUL, FDIV, FDIVR
     }
     public enum SyscallCode
     {
