@@ -297,7 +297,7 @@ namespace CSX64
             if (!GetMemAdv(1, out op)) return false;
 
             for (int i = 0; i < 8; ++i)
-                Console.WriteLine($"st{i}: {(FPURegisters[(TOP + i) & 7].InUse ? FPURegisters[(TOP + i) & 7].Float.ToString() : "Not In Use")}");
+                Console.WriteLine($"st{i}: {(FPURegisters[(TOP + i) & 7].InUse ? FPURegisters[(TOP + i) & 7].Value.ToString() : "Not In Use")}");
             Console.WriteLine($"{RIP:x8} - {(OPCode)op}\n");
 
             // switch through the opcodes
@@ -373,6 +373,7 @@ namespace CSX64
                 case OPCode.FLD_const: return ProcessFLD_const();
                 case OPCode.FLD: return ProcessFLD();
                 case OPCode.FST: return ProcessFST();
+                case OPCode.FXCH: return ProcessFXCH();
 
                 case OPCode.FADD: return ProcessFADD();
                 case OPCode.FSUB: return ProcessFSUB();
@@ -381,6 +382,26 @@ namespace CSX64
                 case OPCode.FMUL: return ProcessFMUL();
                 case OPCode.FDIV: return ProcessFDIV();
                 case OPCode.FDIVR: return ProcessFDIVR();
+
+                case OPCode.F2XM1: return ProcessF2XM1();
+                case OPCode.FABS: return ProcessFABS();
+                case OPCode.FCHS: return ProcessFCHS();
+                case OPCode.FPREM: return ProcessFPREM();
+                case OPCode.FPREM1: return ProcessFPREM1();
+                case OPCode.FRNDINT: return ProcessFRNDINT();
+                case OPCode.FSQRT: return ProcessFSQRT();
+                case OPCode.FYL2X: return ProcessFYL2X();
+                case OPCode.FYL2XP1: return ProcessFYL2XP1();
+
+                case OPCode.FSIN: return ProcessFSIN();
+                case OPCode.FCOS: return ProcessFCOS();
+                case OPCode.FSINCOS: return ProcessFSINCOS();
+                case OPCode.FPTAN: return ProcessFPTAN();
+                case OPCode.FPATAN: return ProcessFPATAN();
+
+                case OPCode.FDECSTP: return ProcessFDECSTP();
+                case OPCode.FINCSTP: return ProcessFINCSTP();
+                case OPCode.FFREE: return ProcessFFREE();
 
                 // otherwise, unknown opcode
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;

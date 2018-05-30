@@ -36,10 +36,14 @@ namespace CSX64
 
         BSWAP, BEXTR, BLSI, BLSMSK, BLSR, ANDN, BT,
 
-        FLD_const, FLD, FST,
+        FLD_const, FLD, FST, FXCH,
 
         FADD, FSUB, FSUBR,
-        FMUL, FDIV, FDIVR
+        FMUL, FDIV, FDIVR,
+
+        F2XM1, FABS, FCHS, FPREM, FPREM1, FRNDINT, FSQRT, FYL2X, FYL2XP1,
+        FSIN, FCOS, FSINCOS, FPTAN, FPATAN,
+        FDECSTP, FINCSTP, FFREE
     }
     public enum SyscallCode
     {
@@ -122,9 +126,7 @@ namespace CSX64
     /// </summary>
     public struct FPURegister
     {
-        public double Float;
-        public UInt64 Value { get => DoubleAsUInt64(Float); set => Float = AsDouble(value); }
-
+        public double Value;
         public bool InUse;
     }
 

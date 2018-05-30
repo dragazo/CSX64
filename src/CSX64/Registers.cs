@@ -204,24 +204,13 @@ namespace CSX64
             set => FPU_status = (UInt16)(FPU_status & ~0x3800 | ((value & 7) << 11));
         }
 
-        public UInt64 ST0 { get => FPURegisters[(TOP + 0) & 7].Value; set => FPURegisters[(TOP + 0) & 7].Value = value; }
-        public UInt64 ST1 { get => FPURegisters[(TOP + 1) & 7].Value; set => FPURegisters[(TOP + 1) & 7].Value = value; }
-        public UInt64 ST2 { get => FPURegisters[(TOP + 2) & 7].Value; set => FPURegisters[(TOP + 2) & 7].Value = value; }
-        public UInt64 ST3 { get => FPURegisters[(TOP + 3) & 7].Value; set => FPURegisters[(TOP + 3) & 7].Value = value; }
-        public UInt64 ST4 { get => FPURegisters[(TOP + 4) & 7].Value; set => FPURegisters[(TOP + 4) & 7].Value = value; }
-        public UInt64 ST5 { get => FPURegisters[(TOP + 5) & 7].Value; set => FPURegisters[(TOP + 5) & 7].Value = value; }
-        public UInt64 ST6 { get => FPURegisters[(TOP + 6) & 7].Value; set => FPURegisters[(TOP + 6) & 7].Value = value; }
-        public UInt64 ST7 { get => FPURegisters[(TOP + 7) & 7].Value; set => FPURegisters[(TOP + 7) & 7].Value = value; }
-
-        public UInt64 MM0 { get => FPURegisters[(TOP + 0) & 7].Value; set => FPURegisters[(TOP + 0) & 7].Value = value; }
-        public UInt64 MM1 { get => FPURegisters[(TOP + 1) & 7].Value; set => FPURegisters[(TOP + 1) & 7].Value = value; }
-        public UInt64 MM2 { get => FPURegisters[(TOP + 2) & 7].Value; set => FPURegisters[(TOP + 2) & 7].Value = value; }
-        public UInt64 MM3 { get => FPURegisters[(TOP + 3) & 7].Value; set => FPURegisters[(TOP + 3) & 7].Value = value; }
-        public UInt64 MM4 { get => FPURegisters[(TOP + 4) & 7].Value; set => FPURegisters[(TOP + 4) & 7].Value = value; }
-        public UInt64 MM5 { get => FPURegisters[(TOP + 5) & 7].Value; set => FPURegisters[(TOP + 5) & 7].Value = value; }
-        public UInt64 MM6 { get => FPURegisters[(TOP + 6) & 7].Value; set => FPURegisters[(TOP + 6) & 7].Value = value; }
-        public UInt64 MM7 { get => FPURegisters[(TOP + 7) & 7].Value; set => FPURegisters[(TOP + 7) & 7].Value = value; }
-
-
+        public double ST0 { get => FPURegisters[(TOP + 0) & 7].Value; set => FPURegisters[(TOP + 0) & 7].Value = value; }
+        public double ST1 { get => FPURegisters[(TOP + 1) & 7].Value; set => FPURegisters[(TOP + 1) & 7].Value = value; }
+        public double ST2 { get => FPURegisters[(TOP + 2) & 7].Value; set => FPURegisters[(TOP + 2) & 7].Value = value; }
+        public double ST3 { get => FPURegisters[(TOP + 3) & 7].Value; set => FPURegisters[(TOP + 3) & 7].Value = value; }
+        public double ST4 { get => FPURegisters[(TOP + 4) & 7].Value; set => FPURegisters[(TOP + 4) & 7].Value = value; }
+        public double ST5 { get => FPURegisters[(TOP + 5) & 7].Value; set => FPURegisters[(TOP + 5) & 7].Value = value; }
+        public double ST6 { get => FPURegisters[(TOP + 6) & 7].Value; set => FPURegisters[(TOP + 6) & 7].Value = value; }
+        public double ST7 { get => FPURegisters[(TOP + 7) & 7].Value; set => FPURegisters[(TOP + 7) & 7].Value = value; }
     }
 }

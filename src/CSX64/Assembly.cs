@@ -2729,6 +2729,18 @@ namespace CSX64
 
                 return true;
             }
+            public bool TryProcessFPURegisterOp(OPCode op)
+            {
+                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 1 arg"); return false; }
+
+                if (!TryParseFPURegister(args[0], out UInt64 reg)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} requires a register operand"); return false; }
+
+                // write the stuff (just op code and the fpu register id)
+                if (!TryAppendVal(1, (UInt64)op)) return false;
+                if (!TryAppendVal(1, reg)) return false;
+
+                return true;
+            }
 
             public bool TryProcessFLD(OPCode op, bool integral)
             {
@@ -3157,6 +3169,10 @@ namespace CSX64
 
                         // x87 instructions
 
+                        case "FNOP": if (!args.TryProcessNoArgOp(OPCode.NOP)) return args.res; break; // no sense in wasting another opcode on no-op
+                        case "FWAIT": break; // allow FWAIT and WAIT but don't do anything (exceptions in CSX64 are immediate)
+                        case "WAIT": break;
+
                         case "FLD1": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 0)) return args.res; break;
                         case "FLDL2T": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 1)) return args.res; break;
                         case "FLDL2E": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 2)) return args.res; break;
@@ -3172,6 +3188,10 @@ namespace CSX64
                         case "FIST": if (!args.TryProcessFST(OPCode.FST, true, false)) return args.res; break;
                         case "FSTP": if (!args.TryProcessFST(OPCode.FST, false, true)) return args.res; break;
                         case "FISTP": if (!args.TryProcessFST(OPCode.FST, true, true)) return args.res; break;
+
+                        case "FXCH": // no arg version swaps st0 and st1
+                            if (args.args.Length == 0) { if (!args.TryProcessNoArgOp(OPCode.FXCH, true, 1)) return args.res; break; }
+                            else { if (!args.TryProcessFPURegisterOp(OPCode.FXCH)) return args.res; break; }
 
                         case "FADD": if (!args.TryProcessFPUBinaryOp(OPCode.FADD, false, false)) return args.res; break;
                         case "FADDP": if (!args.TryProcessFPUBinaryOp(OPCode.FADD, false, true)) return args.res; break;
@@ -3196,6 +3216,26 @@ namespace CSX64
                         case "FDIVR": if (!args.TryProcessFPUBinaryOp(OPCode.FDIVR, false, false)) return args.res; break;
                         case "FDIVRP": if (!args.TryProcessFPUBinaryOp(OPCode.FDIVR, false, true)) return args.res; break;
                         case "FIDIVR": if (!args.TryProcessFPUBinaryOp(OPCode.FDIVR, true, false)) return args.res; break;
+
+                        case "F2XM1": if (!args.TryProcessNoArgOp(OPCode.F2XM1)) return args.res; break;
+                        case "FABS": if (!args.TryProcessNoArgOp(OPCode.FABS)) return args.res; break;
+                        case "FCHS": if (!args.TryProcessNoArgOp(OPCode.FCHS)) return args.res; break;
+                        case "FPREM": if (!args.TryProcessNoArgOp(OPCode.FPREM)) return args.res; break;
+                        case "FPREM1": if (!args.TryProcessNoArgOp(OPCode.FPREM1)) return args.res; break;
+                        case "FRNDINT": if (!args.TryProcessNoArgOp(OPCode.FRNDINT)) return args.res; break;
+                        case "FSQRT": if (!args.TryProcessNoArgOp(OPCode.FSQRT)) return args.res; break;
+                        case "FYL2X": if (!args.TryProcessNoArgOp(OPCode.FYL2X)) return args.res; break;
+                        case "FYL2XP1": if (!args.TryProcessNoArgOp(OPCode.FYL2XP1)) return args.res; break;
+
+                        case "FSIN": if (!args.TryProcessNoArgOp(OPCode.FSIN)) return args.res; break;
+                        case "FCOS": if (!args.TryProcessNoArgOp(OPCode.FCOS)) return args.res; break;
+                        case "FSINCOS": if (!args.TryProcessNoArgOp(OPCode.FSINCOS)) return args.res; break;
+                        case "FPTAN": if (!args.TryProcessNoArgOp(OPCode.FPTAN)) return args.res; break;
+                        case "FPATAN": if (!args.TryProcessNoArgOp(OPCode.FPATAN)) return args.res; break;
+                        
+                        case "FDECSTP": if (!args.TryProcessNoArgOp(OPCode.FDECSTP)) return args.res; break;
+                        case "FINCSTP": if (!args.TryProcessNoArgOp(OPCode.FINCSTP)) return args.res; break;
+                        case "FFREE": if (!args.TryProcessFPURegisterOp(OPCode.FFREE)) return args.res; break;
 
                         default: return new AssembleResult(AssembleError.UnknownOp, $"line {args.line}: Unknown operation \"{args.op}\"");
                     }

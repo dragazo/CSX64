@@ -1194,15 +1194,15 @@ namespace CSX64
             {
                 case 0:
                     if (!FPURegisters[TOP].InUse || !FPURegisters[(TOP + (s >> 4)) & 7].InUse) { Terminate(ErrorCode.FPUAccessViolation); a = b = 0; return false; }
-                    a = FPURegisters[TOP].Float; b = FPURegisters[(TOP + (s >> 4)) & 7].Float; return true;
+                    a = FPURegisters[TOP].Value; b = FPURegisters[(TOP + (s >> 4)) & 7].Value; return true;
                 case 1:
                 case 2:
                     if (!FPURegisters[TOP].InUse || !FPURegisters[(TOP + (s >> 4)) & 7].InUse) { Terminate(ErrorCode.FPUAccessViolation); a = b = 0; return false; }
-                    b = FPURegisters[TOP].Float; a = FPURegisters[(TOP + (s >> 4)) & 7].Float; return true;
+                    b = FPURegisters[TOP].Value; a = FPURegisters[(TOP + (s >> 4)) & 7].Value; return true;
                 
                 default:
                     if (!FPURegisters[TOP].InUse) { Terminate(ErrorCode.FPUAccessViolation); a = b = 0; return false; }
-                    a = FPURegisters[TOP].Float; b = 0;
+                    a = FPURegisters[TOP].Value; b = 0;
                     if (!GetAddressAdv(out UInt64 m)) return false;
                     switch (s & 7)
                     {
@@ -1219,10 +1219,10 @@ namespace CSX64
         {
             switch (s & 7)
             {
-                case 1: FPURegisters[(TOP + (s >> 4)) & 7].Float = res; return true;
-                case 2: FPURegisters[(TOP + (s >> 4)) & 7].Float = res; return PopFPU(out res);
+                case 1: FPURegisters[(TOP + (s >> 4)) & 7].Value = res; return true;
+                case 2: FPURegisters[(TOP + (s >> 4)) & 7].Value = res; return PopFPU(out res);
 
-                default: FPURegisters[TOP].Float = res; return true;
+                default: FPURegisters[TOP].Value = res; return true;
             }
         }
 
@@ -1235,7 +1235,7 @@ namespace CSX64
             if (FPURegisters[TOP].InUse) { Terminate(ErrorCode.FPUStackOverflow); return false; }
 
             // store the value
-            FPURegisters[TOP].Float = val;
+            FPURegisters[TOP].Value = val;
             FPURegisters[TOP].InUse = true;
 
             return true;
@@ -1246,7 +1246,7 @@ namespace CSX64
             if (!FPURegisters[TOP].InUse) { Terminate(ErrorCode.FPUStackUnderflow); val = 0; return false; }
 
             // extract the value
-            val = FPURegisters[TOP].Float;
+            val = FPURegisters[TOP].Value;
             FPURegisters[TOP].InUse = false;
 
             // increment top (wraps automatically as a 3-bit unsigned value)
@@ -1301,7 +1301,7 @@ namespace CSX64
             {
                 case 0:
                     if (!FPURegisters[(TOP + (s >> 4)) & 7].InUse) { Terminate(ErrorCode.FPUAccessViolation); return false; }
-                    return PushFPU(FPURegisters[(TOP + (s >> 4)) & 7].Float);
+                    return PushFPU(FPURegisters[(TOP + (s >> 4)) & 7].Value);
 
                 default:
                     if (!GetAddressAdv(out UInt64 m)) return false;
@@ -1335,7 +1335,6 @@ namespace CSX64
         */
         private bool ProcessFST()
         {
-            Console.WriteLine("here!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
             if (!GetMemAdv(1, out UInt64 s)) return false;
 
             C0 = Rand.NextBool();
@@ -1350,7 +1349,7 @@ namespace CSX64
                     // make sure we can read the value
                     if (!FPURegisters[TOP].InUse) { Terminate(ErrorCode.FPUAccessViolation); return false; }
                     // record the value (is allowed to be not in use)
-                    FPURegisters[(TOP + (s >> 4)) & 7].Float = FPURegisters[TOP].Float;
+                    FPURegisters[(TOP + (s >> 4)) & 7].Value = FPURegisters[TOP].Value;
                     FPURegisters[(TOP + (s >> 4)) & 7].InUse = true;
                     break;
 
@@ -1359,11 +1358,11 @@ namespace CSX64
                     if (!GetAddressAdv(out UInt64 m)) return false;
                     switch (s & 15)
                     {
-                        case 2: case 3: if (!SetMemRaw(m, 4, FloatAsUInt64((float)FPURegisters[TOP].Float))) return false; break;
-                        case 4: case 5: if (!SetMemRaw(m, 8, DoubleAsUInt64(FPURegisters[TOP].Float))) return false; break;
-                        case 6: case 7: if (!SetMemRaw(m, 2, (UInt64)(Int64)FPURegisters[TOP].Float)) return false; break;
-                        case 8: case 9: if (!SetMemRaw(m, 4, (UInt64)(Int64)FPURegisters[TOP].Float)) return false; break;
-                        case 10: if (!SetMemRaw(m, 8, (UInt64)(Int64)FPURegisters[TOP].Float)) return false; break;
+                        case 2: case 3: if (!SetMemRaw(m, 4, FloatAsUInt64((float)FPURegisters[TOP].Value))) return false; break;
+                        case 4: case 5: if (!SetMemRaw(m, 8, DoubleAsUInt64(FPURegisters[TOP].Value))) return false; break;
+                        case 6: case 7: if (!SetMemRaw(m, 2, (UInt64)(Int64)FPURegisters[TOP].Value)) return false; break;
+                        case 8: case 9: if (!SetMemRaw(m, 4, (UInt64)(Int64)FPURegisters[TOP].Value)) return false; break;
+                        case 10: if (!SetMemRaw(m, 8, (UInt64)(Int64)FPURegisters[TOP].Value)) return false; break;
 
                         default: Terminate(ErrorCode.UndefinedBehavior); return false;
                     }
@@ -1375,6 +1374,24 @@ namespace CSX64
                 case 1: case 3: case 5: case 7: case 9: return PopFPU(out double temp);
                 default: return true;
             }
+        }
+        private bool ProcessFXCH()
+        {
+            if (!GetMemAdv(1, out UInt64 i)) return false;
+
+            // make sure they're both in use
+            if (!FPURegisters[TOP].InUse || !FPURegisters[(TOP + i) & 7].InUse) { Terminate(ErrorCode.FPUAccessViolation); return false; }
+
+            double temp = FPURegisters[TOP].Value;
+            FPURegisters[TOP].Value = FPURegisters[(TOP + i) & 7].Value;
+            FPURegisters[(TOP + i) & 7].Value = temp;
+
+            C0 = Rand.NextBool();
+            C1 = false;
+            C2 = Rand.NextBool();
+            C3 = Rand.NextBool();
+
+            return true;
         }
 
         private bool ProcessFADD()
@@ -1455,6 +1472,272 @@ namespace CSX64
             C3 = Rand.NextBool();
 
             return StoreFPUBinaryFormat(s, res);
+        }
+
+        private bool ProcessF2XM1()
+        {
+            if (!FPURegisters[TOP].InUse) { Terminate(ErrorCode.FPUAccessViolation); return false; }
+
+            // get the value
+            double val = FPURegisters[TOP].Value;
+            // val must be in range [-1, 1]
+            if (val < -1 || val > 1) { Terminate(ErrorCode.FPUError); return false; }
+
+            FPURegisters[TOP].Value = Math.Pow(2, val) - 1;
+
+            C0 = Rand.NextBool();
+            C1 = Rand.NextBool();
+            C2 = Rand.NextBool();
+            C3 = Rand.NextBool();
+
+            return true;
+        }
+        private bool ProcessFABS()
+        {
+            if (!FPURegisters[TOP].InUse) { Terminate(ErrorCode.FPUAccessViolation); return false; }
+
+            FPURegisters[TOP].Value = Math.Abs(FPURegisters[TOP].Value);
+
+            C0 = Rand.NextBool();
+            C1 = false;
+            C2 = Rand.NextBool();
+            C3 = Rand.NextBool();
+
+            return true;
+        }
+        private bool ProcessFCHS()
+        {
+            if (!FPURegisters[TOP].InUse) { Terminate(ErrorCode.FPUAccessViolation); return false; }
+
+            FPURegisters[TOP].Value = -FPURegisters[TOP].Value;
+
+            C0 = Rand.NextBool();
+            C1 = false;
+            C2 = Rand.NextBool();
+            C3 = Rand.NextBool();
+
+            return true;
+        }
+        private bool ProcessFPREM()
+        {
+            if (!FPURegisters[TOP].InUse || !FPURegisters[(TOP + 1) & 7].InUse) { Terminate(ErrorCode.FPUAccessViolation); return false; }
+
+            double a = FPURegisters[TOP].Value;
+            double b = FPURegisters[(TOP + 1) & 7].Value;
+
+            // compute remainder with truncated quotient
+            double res = a - (Int64)(a / b) * b;
+
+            // store value
+            FPURegisters[TOP].Value = res;
+
+            // get the bits
+            UInt64 bits = DoubleAsUInt64(res);
+
+            C0 = (bits & 4) != 0;
+            C1 = (bits & 1) != 0;
+            C2 = false;
+            C3 = (bits & 2) != 0;
+
+            return true;
+        }
+        private bool ProcessFPREM1()
+        {
+            if (!FPURegisters[TOP].InUse || !FPURegisters[(TOP + 1) & 7].InUse) { Terminate(ErrorCode.FPUAccessViolation); return false; }
+
+            double a = FPURegisters[TOP].Value;
+            double b = FPURegisters[(TOP + 1) & 7].Value;
+
+            // compute remainder with truncated quotient (IEEE)
+            double res = Math.IEEERemainder(a, b);
+
+            // store value
+            FPURegisters[TOP].Value = res;
+
+            // get the bits
+            UInt64 bits = DoubleAsUInt64(res);
+
+            C0 = (bits & 4) != 0;
+            C1 = (bits & 1) != 0;
+            C2 = false;
+            C3 = (bits & 2) != 0;
+            
+            return true;
+        }
+        private bool ProcessFRNDINT()
+        {
+            if (!FPURegisters[TOP].InUse) { Terminate(ErrorCode.FPUAccessViolation); return false; }
+
+            double val = FPURegisters[TOP].Value;
+            double res = (Int64)val;
+
+            FPURegisters[TOP].Value = res;
+
+            C0 = Rand.NextBool();
+            C1 = res > val;
+            C2 = Rand.NextBool();
+            C3 = Rand.NextBool();
+            
+            return true;
+        }
+        private bool ProcessFSQRT()
+        {
+            if (!FPURegisters[TOP].InUse) { Terminate(ErrorCode.FPUAccessViolation); return false; }
+
+            FPURegisters[TOP].Value = Math.Sqrt(FPURegisters[TOP].Value);
+
+            C0 = Rand.NextBool();
+            C1 = Rand.NextBool();
+            C2 = Rand.NextBool();
+            C3 = Rand.NextBool();
+
+            return true;
+        }
+        private bool ProcessFYL2X()
+        {
+            if (!FPURegisters[TOP].InUse || !FPURegisters[(TOP + 1) & 7].InUse) { Terminate(ErrorCode.FPUAccessViolation); return false; }
+
+            double a = FPURegisters[TOP].Value;
+            double b = FPURegisters[(TOP + 1) & 7].Value;
+
+            ++TOP; // pop stack and place in the new st(0)
+            FPURegisters[TOP].Value = b * Math.Log(a, 2);
+
+            C0 = Rand.NextBool();
+            C1 = Rand.NextBool();
+            C2 = Rand.NextBool();
+            C3 = Rand.NextBool();
+            
+            return true;
+        }
+        private bool ProcessFYL2XP1()
+        {
+            if (!FPURegisters[TOP].InUse || !FPURegisters[(TOP + 1) & 7].InUse) { Terminate(ErrorCode.FPUAccessViolation); return false; }
+
+            double a = FPURegisters[TOP].Value;
+            double b = FPURegisters[(TOP + 1) & 7].Value;
+
+            ++TOP; // pop stack and place in the new st(0)
+            FPURegisters[TOP].Value = b * Math.Log(a + 1, 2);
+
+            C0 = Rand.NextBool();
+            C1 = Rand.NextBool();
+            C2 = Rand.NextBool();
+            C3 = Rand.NextBool();
+
+            return true;
+        }
+
+        private bool ProcessFSIN()
+        {
+            if (!FPURegisters[TOP].InUse) { Terminate(ErrorCode.FPUAccessViolation); return false; }
+
+            FPURegisters[TOP].Value = Math.Sin(FPURegisters[TOP].Value);
+
+            C0 = Rand.NextBool();
+            C1 = Rand.NextBool();
+            C2 = false;
+            C3 = Rand.NextBool();
+
+            return true;
+        }
+        private bool ProcessFCOS()
+        {
+            if (!FPURegisters[TOP].InUse) { Terminate(ErrorCode.FPUAccessViolation); return false; }
+
+            FPURegisters[TOP].Value = Math.Cos(FPURegisters[TOP].Value);
+
+            C0 = Rand.NextBool();
+            C1 = Rand.NextBool();
+            C2 = false;
+            C3 = Rand.NextBool();
+
+            return true;
+        }
+        private bool ProcessFSINCOS()
+        {
+            if (!FPURegisters[TOP].InUse) { Terminate(ErrorCode.FPUAccessViolation); return false; }
+
+            C0 = Rand.NextBool();
+            C1 = Rand.NextBool();
+            C2 = false;
+            C3 = Rand.NextBool();
+
+            // get the value
+            double val = FPURegisters[TOP].Value;
+
+            // st(0) <- sin, push cos
+            FPURegisters[TOP].Value = Math.Sin(val);
+            return PushFPU(Math.Cos(val));
+        }
+        private bool ProcessFPTAN()
+        {
+            if (!FPURegisters[TOP].InUse) { Terminate(ErrorCode.FPUAccessViolation); return false; }
+
+            FPURegisters[TOP].Value = Math.Tan(FPURegisters[TOP].Value);
+
+            C0 = Rand.NextBool();
+            C1 = Rand.NextBool();
+            C2 = false;
+            C3 = Rand.NextBool();
+            
+            // also push 1 onto fpu stack
+            return PushFPU(1);
+        }
+        private bool ProcessFPATAN()
+        {
+            if (!FPURegisters[TOP].InUse || !FPURegisters[(TOP + 1) & 7].InUse) { Terminate(ErrorCode.FPUAccessViolation); return false; }
+
+            double a = FPURegisters[TOP].Value;
+            double b = FPURegisters[(TOP + 1) & 7].Value;
+
+            ++TOP; // pop stack and place in new st(0)
+            FPURegisters[TOP].Value = Math.Atan2(a, b);
+
+            C0 = Rand.NextBool();
+            C1 = Rand.NextBool();
+            C2 = false;
+            C3 = Rand.NextBool();
+
+            // also push 1 onto fpu stack
+            return PushFPU(1);
+        }
+
+        private bool ProcessFDECSTP()
+        {
+            --TOP; // does not modify tag word
+
+            C0 = Rand.NextBool();
+            C1 = false;
+            C2 = Rand.NextBool();
+            C3 = Rand.NextBool();
+
+            return true;
+        }
+        private bool ProcessFINCSTP()
+        {
+            ++TOP; // does not modify tag word
+
+            C0 = Rand.NextBool();
+            C1 = false;
+            C2 = Rand.NextBool();
+            C3 = Rand.NextBool();
+
+            return true;
+        }
+        private bool ProcessFFREE()
+        {
+            if (!GetMemAdv(1, out UInt64 i)) return false;
+
+            // mark as not in use
+            FPURegisters[(TOP + i) & 7].InUse = false;
+
+            C0 = Rand.NextBool();
+            C1 = Rand.NextBool();
+            C2 = Rand.NextBool();
+            C3 = Rand.NextBool();
+            
+            return true;
         }
     }
 }
