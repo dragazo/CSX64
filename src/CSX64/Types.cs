@@ -14,13 +14,14 @@ namespace CSX64
     }
     public enum OPCode
     {
+        // x86 instructions
+
         NOP,
         HLT, SYSCALL,
         PUSHF, POPF,
         SETcc,
 
-        MOV, MOVcc,
-        XCHG,
+        MOV, MOVcc, XCHG,
 
         JMP, Jcc, LOOP, LOOPe, LOOPne, CALL, RET,
         PUSH, POP,
@@ -35,13 +36,17 @@ namespace CSX64
         CMP, TEST, CMPZ,
 
         BSWAP, BEXTR, BLSI, BLSMSK, BLSR, ANDN, BT,
+        Cxy, MOVxX,
 
-        FLD_const, FLD, FST, FXCH,
+        // x87 instructions
+
+        FLD_const, FLD, FST, FXCH, FMOVcc,
 
         FADD, FSUB, FSUBR,
         FMUL, FDIV, FDIVR,
 
         F2XM1, FABS, FCHS, FPREM, FPREM1, FRNDINT, FSQRT, FYL2X, FYL2XP1,
+        FXAM, FTST, FCOM, FCOMI,
         FSIN, FCOS, FSINCOS, FPTAN, FPATAN,
         FDECSTP, FINCSTP, FFREE
     }
@@ -56,12 +61,6 @@ namespace CSX64
         Mkdir, Rmdir,
 
         Exit
-    }
-
-    public enum ccOPCode
-    {
-        z, nz, s, ns, p, np, o, no, c, nc,
-        a, ae, b, be, g, ge, l, le
     }
 
     /// <summary>

@@ -10,41 +10,6 @@ namespace CSX64
     {
         // -- op utilities -- //
 
-        /// <summary>
-        /// Attempts to extract the specified <see cref="ccOPCode"/> status flag. Returns true on success.
-        /// </summary>
-        /// <param name="computer">the flags object to examine</param>
-        /// <param name="code">the code to extract</param>
-        private bool TryGet_cc(ccOPCode code, out bool res)
-        {
-            switch (code)
-            {
-                case ccOPCode.z: res = ZF; return true;
-                case ccOPCode.nz: res = !ZF; return true;
-                case ccOPCode.s: res = SF; return true;
-                case ccOPCode.ns: res = !SF; return true;
-                case ccOPCode.p: res = PF; return true;
-                case ccOPCode.np: res = !PF; return true;
-                case ccOPCode.o: res = OF; return true;
-                case ccOPCode.no: res = !OF; return true;
-                case ccOPCode.c: res = CF; return true;
-                case ccOPCode.nc: res = !CF; return true;
-
-                case ccOPCode.a: res = a; return true;
-                case ccOPCode.ae: res = ae; return true;
-                case ccOPCode.b: res = b; return true;
-                case ccOPCode.be: res = be; return true;
-
-                case ccOPCode.g: res = g; return true;
-                case ccOPCode.ge: res = ge; return true;
-                case ccOPCode.l: res = l; return true;
-                case ccOPCode.le: res = le; return true;
-
-                // otherwise code unknown
-                default: return res = false;
-            }
-        }
-
         /*
         [4: dest][2: size][1:dh][1: mem]   [size: imm]
             mem = 0: [1: sh][3:][4: src]
@@ -357,20 +322,120 @@ namespace CSX64
             }
         }
 
+        /*
+        [op][cnd]
+            cnd = 0: Z
+            cnd = 1: NZ
+            cnd = 2: S
+            cnd = 3: NS
+            cnd = 4: P
+            cnd = 5: NP
+            cnd = 6: O
+            cnd = 7: NO
+            cnd = 8: C
+            cnd = 9: NC
+            cnd = 10: B
+            cnd = 11: BE
+            cnd = 12: A
+            cnd = 13: AE
+            cnd = 14: L
+            cnd = 15: LE
+            cnd = 16: G
+            cnd = 17: GE
+        */
         private bool ProcessSETcc()
         {
-            if (!GetMemAdv(1, out UInt64 ext) || !TryGet_cc((ccOPCode)ext, out bool flag)) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+            if (!GetMemAdv(1, out UInt64 ext)) return false;
+            if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 _dest, false, 0)) return false;
 
-            if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, false, 0)) return false;
+            // get the flag
+            bool flag;
+            switch (ext)
+            {
+                case 0: flag = ZF; break;
+                case 1: flag = !ZF; break;
+                case 2: flag = SF; break;
+                case 3: flag = !SF; break;
+                case 4: flag = PF; break;
+                case 5: flag = !PF; break;
+                case 6: flag = OF; break;
+                case 7: flag = !OF; break;
+                case 8: flag = CF; break;
+                case 9: flag = !CF; break;
+                case 10: flag = b; break;
+                case 11: flag = be; break;
+                case 12: flag = a; break;
+                case 13: flag = ae; break;
+                case 14: flag = l; break;
+                case 15: flag = le; break;
+                case 16: flag = g; break;
+                case 17: flag = ge; break;
+
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
+            }
 
             return StoreUnaryOpFormat(s, m, flag ? 1 : 0ul);
         }
 
-        private bool ProcessMOV(bool apply = true)
+        private bool ProcessMOV()
         {
             if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b, false)) return false;
 
-            return !apply || StoreBinaryOpFormatNew(s1, s2, m, b);
+            return StoreBinaryOpFormatNew(s1, s2, m, b);
+        }
+        /*
+        [op][cnd]
+            cnd = 0: Z
+            cnd = 1: NZ
+            cnd = 2: S
+            cnd = 3: NS
+            cnd = 4: P
+            cnd = 5: NP
+            cnd = 6: O
+            cnd = 7: NO
+            cnd = 8: C
+            cnd = 9: NC
+            cnd = 10: B
+            cnd = 11: BE
+            cnd = 12: A
+            cnd = 13: AE
+            cnd = 14: L
+            cnd = 15: LE
+            cnd = 16: G
+            cnd = 17: GE
+        */
+        private bool ProcessMOVcc()
+        {
+            if (!GetMemAdv(1, out UInt64 ext)) return false;
+            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 _dest, out UInt64 src, false)) return false;
+
+            // get the flag
+            bool flag;
+            switch (ext)
+            {
+                case 0: flag = ZF; break;
+                case 1: flag = !ZF; break;
+                case 2: flag = SF; break;
+                case 3: flag = !SF; break;
+                case 4: flag = PF; break;
+                case 5: flag = !PF; break;
+                case 6: flag = OF; break;
+                case 7: flag = !OF; break;
+                case 8: flag = CF; break;
+                case 9: flag = !CF; break;
+                case 10: flag = b; break;
+                case 11: flag = be; break;
+                case 12: flag = a; break;
+                case 13: flag = ae; break;
+                case 14: flag = l; break;
+                case 15: flag = le; break;
+                case 16: flag = g; break;
+                case 17: flag = ge; break;
+
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
+            }
+
+            return !flag || StoreBinaryOpFormatNew(s1, s2, m, src);
         }
 
         /*
@@ -432,7 +497,7 @@ namespace CSX64
             return true;
         }
 
-        private bool ProcessJMP(bool apply, ref UInt64 aft)
+        private bool ProcessJMP(ref UInt64 aft)
         {
             if (!FetchIMMRMFormat(out UInt64 s, out UInt64 val)) return false;
             UInt64 sizecode = (s >> 2) & 3;
@@ -441,8 +506,73 @@ namespace CSX64
             if (sizecode == 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
 
             aft = RIP; // record point immediately after reading (for CALL return address)
+            RIP = val; // jump
 
-            if (apply) RIP = val; // jump
+            return true;
+        }
+        /*
+        [op][cnd]
+            cnd = 0: Z
+            cnd = 1: NZ
+            cnd = 2: S
+            cnd = 3: NS
+            cnd = 4: P
+            cnd = 5: NP
+            cnd = 6: O
+            cnd = 7: NO
+            cnd = 8: C
+            cnd = 9: NC
+            cnd = 10: B
+            cnd = 11: BE
+            cnd = 12: A
+            cnd = 13: AE
+            cnd = 14: L
+            cnd = 15: LE
+            cnd = 16: G
+            cnd = 17: GE
+            cnd = 18: CXZ
+            cnd = 19: ECXZ
+            cnd = 20: RCXZ
+        */
+        private bool ProcessJcc()
+        {
+            if (!GetMemAdv(1, out UInt64 ext)) return false;
+            if (!FetchIMMRMFormat(out UInt64 s, out UInt64 val)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
+
+            // 8-bit addressing not allowed
+            if (sizecode == 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+
+            // get the flag
+            bool flag;
+            switch (ext)
+            {
+                case 0: flag = ZF; break;
+                case 1: flag = !ZF; break;
+                case 2: flag = SF; break;
+                case 3: flag = !SF; break;
+                case 4: flag = PF; break;
+                case 5: flag = !PF; break;
+                case 6: flag = OF; break;
+                case 7: flag = !OF; break;
+                case 8: flag = CF; break;
+                case 9: flag = !CF; break;
+                case 10: flag = b; break;
+                case 11: flag = be; break;
+                case 12: flag = a; break;
+                case 13: flag = ae; break;
+                case 14: flag = l; break;
+                case 15: flag = le; break;
+                case 16: flag = g; break;
+                case 17: flag = ge; break;
+                case 18: flag = CX == 0; break;
+                case 19: flag = ECX == 0; break;
+                case 20: flag = RCX == 0; break;
+
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
+            }
+
+            if (flag) RIP = val; // jump
 
             return true;
         }
@@ -1172,6 +1302,96 @@ namespace CSX64
             }
         }
 
+        /*
+        [8: ext]
+            ext = 0: CWD
+            ext = 0: CDQ
+            ext = 0: CQO
+        */
+        private bool ProcessCxy()
+        {
+            if (!GetMemAdv(1, out UInt64 ext)) return false;
+
+            switch (ext)
+            {
+                case 0: DX = (AX & 0x8000) == 0 ? (UInt16)0 : (UInt16)0xffff; return true;
+                case 1: EDX = (EAX & 0x80000000) == 0 ? 0u : 0xffffffff; return true;
+                case 2: RDX = (RAX & 0x8000000000000000) == 0 ? 0ul : 0xffffffffffffffff; return true;
+
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
+            }
+        }
+        /*
+        [4: dest][4: mode]   [1: mem][1: sh][2:][4: src]
+            mode = 0: 16 <- 8  Zero
+            mode = 1: 16 <- 8  Sign
+            mode = 2: 32 <- 8  Zero
+            mode = 3: 32 <- 16 Zero
+            mode = 4: 32 <- 8  Sign
+            mode = 5: 32 <- 16 Sign
+            mode = 6: 64 <- 8  Zero
+            mode = 7: 64 <- 16 Zero
+            mode = 8: 64 <- 8  Sign
+            mode = 9: 64 <- 16 Sign
+            else UND
+            (sh marks that source is (ABCD)H)
+        */
+        private bool ProcessMOVxX()
+        {
+            if (!GetMemAdv(1, out UInt64 s1) || !GetMemAdv(1, out UInt64 s2)) return false;
+
+            UInt64 src; // source value to be extended
+
+            // if source is register
+            if ((s2 & 128) == 0)
+            {
+                switch (s1 & 15)
+                {
+                    case 0: case 1: case 2: case 4: case 6: case 8:
+                        if ((s2 & 64) != 0) // if high register
+                        {
+                            // make sure we're in registers A-D
+                            if ((s2 & 0x0c) != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+                            src = Registers[s2 & 15].x8h;
+                        }
+                        else src = Registers[s2 & 15].x8;
+                        break;
+                    case 3: case 5: case 7: case 9: src = Registers[s2 & 15].x16; break;
+
+                    default: Terminate(ErrorCode.UndefinedBehavior); return false;
+                }
+            }
+            // otherwise is memory value
+            else
+            {
+                if (!GetAddressAdv(out src)) return false;
+                switch (s1 & 15)
+                {
+                    case 0: case 1: case 2: case 4: case 6: case 8: if (!GetMemRaw(src, 1, out src)) return false; break;
+                    case 3: case 5: case 7: case 9: if (!GetMemRaw(src, 2, out src)) return false; break;
+
+                    default: Terminate(ErrorCode.UndefinedBehavior); return false;
+                }
+            }
+
+            // store the value
+            switch (s1 & 15)
+            {
+                case 0: Registers[s1 >> 4].x16 = (UInt16)src; break;
+                case 1: Registers[s1 >> 4].x16 = (UInt16)SignExtend(src, 0); break;
+
+                case 2: case 3: Registers[s1 >> 4].x32 = (UInt32)src; break;
+                case 4: Registers[s1 >> 4].x32 = (UInt32)SignExtend(src, 0); break;
+                case 5: Registers[s1 >> 4].x32 = (UInt32)SignExtend(src, 1); break;
+
+                case 6: case 7: Registers[s1 >> 4].x64 = src; break;
+                case 8: Registers[s1 >> 4].x64 = SignExtend(src, 0); break;
+                case 9: Registers[s1 >> 4].x64 = SignExtend(src, 1); break;
+            }
+
+            return true;
+        }
+
         // -- floating point stuff -- //
 
         /*
@@ -1312,7 +1532,7 @@ namespace CSX64
 
                         case 3: if (!GetMemRaw(m, 2, out m)) return false; return PushFPU((Int64)SignExtend(m, 1));
                         case 4: if (!GetMemRaw(m, 4, out m)) return false; return PushFPU((Int64)SignExtend(m, 2));
-                        case 5: if (!GetMemRaw(m, 8, out m)) return false; return PushFPU((Int64)SignExtend(m, 3));
+                        case 5: if (!GetMemRaw(m, 8, out m)) return false; return PushFPU((Int64)m);
 
                         default: Terminate(ErrorCode.UndefinedBehavior); return false;
                     }
@@ -1388,6 +1608,51 @@ namespace CSX64
 
             C0 = Rand.NextBool();
             C1 = false;
+            C2 = Rand.NextBool();
+            C3 = Rand.NextBool();
+
+            return true;
+        }
+        /*
+        [1:][3: i][1:][3: cnd]
+            cnd = 0: E  (=Z)
+            cnd = 1: NE (=NZ)
+            cnd = 2: B
+            cnd = 3: BE
+            cnd = 4: A
+            cnd = 5: AE
+            cnd = 6: U  (=P)
+            cnd = 7: NU (=NP)
+        */
+        private bool ProcessFMOVcc()
+        {
+            if (!GetMemAdv(1, out UInt64 s)) return false;
+
+            // get the flag
+            bool flag;
+            switch (s & 7)
+            {
+                case 0: flag = ZF; break;
+                case 1: flag = !ZF; break;
+                case 2: flag = b; break;
+                case 3: flag = be; break;
+                case 4: flag = a; break;
+                case 5: flag = ae; break;
+                case 6: flag = PF; break;
+                case 7: flag = !PF; break;
+
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
+            }
+
+            // if flag is set, do the move
+            if (flag)
+            {
+                if (!FPURegisters[TOP].InUse || !FPURegisters[(TOP + (s >> 4)) & 7].InUse) { Terminate(ErrorCode.FPUAccessViolation); return false; }
+                FPURegisters[TOP].Value = FPURegisters[(TOP + (s >> 4)) & 7].Value;
+            }
+
+            C0 = Rand.NextBool();
+            C1 = Rand.NextBool();
             C2 = Rand.NextBool();
             C3 = Rand.NextBool();
 
@@ -1626,6 +1891,154 @@ namespace CSX64
             C3 = Rand.NextBool();
 
             return true;
+        }
+
+        private bool ProcessFXAM()
+        {
+            double val = FPURegisters[TOP].Value;
+            UInt64 bits = DoubleAsUInt64(val);
+
+            // C1 gets sign bit
+            C1 = (bits & 0x8000000000000000) != 0;
+
+            // empty
+            if (!FPURegisters[TOP].InUse) { C3 = true; C2 = false; C0 = true; }
+            // NaN
+            else if (double.IsNaN(val)) { C3 = false; C2 = false; C0 = true; }
+            // inf
+            else if (double.IsInfinity(val)) { C3 = false; C2 = true; C0 = true; }
+            // zero
+            else if (val == 0) { C3 = true; C2 = false; C0 = false; }
+            // denormalized
+            else if ((bits & 0x7ff0000000000000) == 0) { C3 = true; C2 = true; C0 = false; }
+            // normal
+            else { C3 = false; C2 = true; C0 = false; }
+
+            return true;
+        }
+        private bool ProcessFTST()
+        {
+            if (!FPURegisters[TOP].InUse) { Terminate(ErrorCode.FPUAccessViolation); return false; }
+
+            double a = FPURegisters[TOP].Value;
+
+            // for FTST, nan is an arithmetic error
+            if (double.IsNaN(a)) { Terminate(ErrorCode.ArithmeticError); return false; }
+
+            // do the comparison
+            if (a > 0) { C3 = false; C2 = false; C0 = false; }
+            else if (a < 0) { C3 = false; C2 = false; C0 = true; }
+            else { C3 = true; C2 = false; C0 = false; }
+
+            // C1 is cleared
+            C1 = false;
+
+            return true;
+        }
+
+        /*
+        [1:][3: i][4: mode]
+            mode = 0: cmp st(0), st(i)
+            mode = 1: || + pop
+            mode = 2: || + 2x pop
+            mode = 3: cmp st(0), fp32
+            mode = 4: || + pop
+            mode = 5: cmp st(0), fp64
+            mode = 6: || + pop
+            mode = 7: cmp st(0), int16
+            mode = 8: || + pop
+            mode = 9: cmp st(0), int32
+            mode = 10: || + pop
+            else UND
+        */
+        private bool ProcessFCOM()
+        {
+            if (!GetMemAdv(1, out UInt64 s)) return false;
+
+            double a, b;
+
+            // swith through mode
+            switch (s & 15)
+            {
+                case 0:
+                case 1:
+                case 2:
+                    if (!FPURegisters[TOP].InUse || !FPURegisters[(TOP + s >> 4) & 7].InUse) { Terminate(ErrorCode.FPUAccessViolation); return false; }
+                    a = FPURegisters[TOP].Value; b = FPURegisters[(TOP + s >> 4) & 7].Value;
+                    break;
+
+                default:
+                    if (!FPURegisters[TOP].InUse) { Terminate(ErrorCode.FPUAccessViolation); return false; }
+                    a = FPURegisters[TOP].Value;
+                    if (!GetAddressAdv(out UInt64 m)) return false;
+                    switch (s & 15)
+                    {
+                        case 3: case 4: if (!GetMemRaw(m, 4, out m)) return false; b = AsFloat(m); break;
+                        case 5: case 6: if (!GetMemRaw(m, 8, out m)) return false; b = AsDouble(m); break;
+
+                        case 7: case 8: if (!GetMemRaw(m, 2, out m)) return false; b = (Int64)SignExtend(m, 1); break;
+                        case 9: case 10: if (!GetMemRaw(m, 4, out m)) return false; b = (Int64)SignExtend(m, 2); break;
+
+                        default: Terminate(ErrorCode.UndefinedBehavior); return false;
+                    }
+                    break;
+            }
+
+            // do the comparison
+            if (a > b) { C3 = false; C2 = false; C0 = false; }
+            else if (a < b) { C3 = false; C2 = false; C0 = true; }
+            else if (a == b) { C3 = true; C2 = false; C0 = false; }
+            // otherwise is unordered
+            else
+            {
+                // FCOM throws in this case (FUCOM is the one that doesn't)
+                Terminate(ErrorCode.ArithmeticError); return false;
+            }
+
+            // C1 is cleared
+            C1 = false;
+
+            // handle popping cases
+            switch (s & 7)
+            {
+                case 2: return PopFPU(out a) && PopFPU(out a);
+                case 1: case 4: case 6: case 8: case 10: return PopFPU(out a);
+            }
+
+            return true;
+        }
+        /*
+        [1: pop][1: unordered][2:][1:][3: i]
+            cmp st(0), st(i)
+            unordered allows NaN
+        */
+        private bool ProcessFCOMI()
+        {
+            if (!GetMemAdv(1, out UInt64 s)) return false;
+
+            if (!FPURegisters[TOP].InUse || !FPURegisters[(TOP + s) & 7].InUse) { Terminate(ErrorCode.FPUAccessViolation); return false; }
+
+            double a = FPURegisters[TOP].Value;
+            double b = FPURegisters[(TOP + s) & 7].Value;
+
+            // do the comparison
+            if (a > b) { ZF = false; PF = false; CF = false; }
+            else if (a < b) { ZF = false; PF = false; CF = true; }
+            else if (a == b) { ZF = true; PF = false; CF = false; }
+            // otherwise is unordered
+            else
+            {
+                // if unordered, set flags accordingly, otherwise is arithmetic error
+                if ((s & 64) != 0) { ZF = true; PF = true; CF = true; }
+                else { Terminate(ErrorCode.ArithmeticError); return false; }
+            }
+
+            // C1 is cleared (C0, C2, C3 not affected)
+            C1 = false;
+
+            // handle popping case
+            if ((s & 128) != 0) return PopFPU(out a);
+            else return true;
         }
 
         private bool ProcessFSIN()

@@ -314,17 +314,17 @@ namespace CSX64
                 case OPCode.SETcc: return ProcessSETcc();
 
                 case OPCode.MOV: return ProcessMOV();
-                case OPCode.MOVcc: if (!GetMemAdv(1, out op) || !TryGet_cc((ccOPCode)op, out flag)) { Terminate(ErrorCode.UndefinedBehavior); return false; } return ProcessMOV(flag);
+                case OPCode.MOVcc: return ProcessMOVcc();
 
                 case OPCode.XCHG: return ProcessXCHG();
 
-                case OPCode.JMP: return ProcessJMP(true, ref op);
-                case OPCode.Jcc: if (!GetMemAdv(1, out op) || !TryGet_cc((ccOPCode)op, out flag)) { Terminate(ErrorCode.UndefinedBehavior); return false; } return ProcessJMP(flag, ref op);
+                case OPCode.JMP: return ProcessJMP(ref op);
+                case OPCode.Jcc: return ProcessJcc();
                 case OPCode.LOOP: return ProcessLOOP(true);
                 case OPCode.LOOPe: return ProcessLOOP(ZF);
                 case OPCode.LOOPne: return ProcessLOOP(!ZF);
 
-                case OPCode.CALL: return ProcessJMP(true, ref op) && PushRaw(8, op);
+                case OPCode.CALL: return ProcessJMP(ref op) && PushRaw(8, op);
                 case OPCode.RET: if (!PopRaw(8, out op)) return false; RIP = op; return true;
 
                 case OPCode.PUSH: return ProcessPUSH();
@@ -368,12 +368,16 @@ namespace CSX64
                 case OPCode.ANDN: return ProcessANDN();
                 case OPCode.BT: return ProcessBT();
 
+                case OPCode.Cxy: return ProcessCxy();
+                case OPCode.MOVxX: return ProcessMOVxX();
+
                 // x87 instructions
 
                 case OPCode.FLD_const: return ProcessFLD_const();
                 case OPCode.FLD: return ProcessFLD();
                 case OPCode.FST: return ProcessFST();
                 case OPCode.FXCH: return ProcessFXCH();
+                case OPCode.FMOVcc: return ProcessFMOVcc();
 
                 case OPCode.FADD: return ProcessFADD();
                 case OPCode.FSUB: return ProcessFSUB();
@@ -392,6 +396,11 @@ namespace CSX64
                 case OPCode.FSQRT: return ProcessFSQRT();
                 case OPCode.FYL2X: return ProcessFYL2X();
                 case OPCode.FYL2XP1: return ProcessFYL2XP1();
+
+                case OPCode.FXAM: return ProcessFXAM();
+                case OPCode.FTST: return ProcessFTST();
+                case OPCode.FCOM: return ProcessFCOM();
+                case OPCode.FCOMI: return ProcessFCOMI();
 
                 case OPCode.FSIN: return ProcessFSIN();
                 case OPCode.FCOS: return ProcessFCOS();
