@@ -90,6 +90,20 @@ namespace CSX64
             bool accepting_options = true;                       // marks that we're still accepting options
             bool fsf = false;                                    // fsf flag
 
+            double[] vals = { 0.0001254, double.Epsilon, 1.00001, 2.123, 3.345, 1000.21, 204, 34356, 38654, -234576, 23643, -346.3465, -1.674e123 };
+
+            /*
+            // extract utility testing
+            foreach (double val in vals)
+            {
+                Utility.ExtractDouble(val, out double exp, out double sig);
+                double res = Utility.AssembleDouble(exp, sig);
+
+                Console.WriteLine($"{val,24} -> {sig,24} *2^ {exp,-8} -> {res,24} d {res-val,16:e17}");
+            }
+            Console.ReadLine();
+            */
+
             /*
             // performance testing stuff
 

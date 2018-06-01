@@ -58,13 +58,17 @@ namespace CSX64
         public UInt64 MemorySize => (UInt64)Memory.Length;
 
         /// <summary>
-        /// Gets the barrier before which memory is executable
+        /// The barrier before which memory is executable
         /// </summary>
         public UInt64 ExeBarrier { get; protected set; }
         /// <summary>
-        /// Gets the barrier before which memory is read-only
+        /// The barrier before which memory is read-only
         /// </summary>
         public UInt64 ReadonlyBarrier { get; protected set; }
+        /// <summary>
+        /// Gets the barrier before which the stack can't enter
+        /// </summary>
+        public UInt64 StackBarrier { get; protected set; }
 
         /// <summary>
         /// Gets the current time as used by the assembler
@@ -115,6 +119,7 @@ namespace CSX64
             // set up mmory barriers
             ExeBarrier = text_seglen;
             ReadonlyBarrier = text_seglen + rodata_seglen;
+            StackBarrier = text_seglen + rodata_seglen + data_seglen + bss_seglen;
 
             // randomize registers
             for (int i = 0; i < Registers.Length; ++i) Registers[i].x64 = Rand.NextUInt64();
@@ -286,11 +291,9 @@ namespace CSX64
             // fail if terminated or awaiting data
             if (!Running || SuspendedRead) return false;
 
-            // parsing locations
-            UInt64 op;
-            bool flag;
+            UInt64 op; // parsing location
 
-            // make sure we're in in the text segment
+            // make sure we're before the executable barrier
             if (RIP >= ExeBarrier) { Terminate(ErrorCode.AccessViolation); return false; }
 
             // fetch the instruction
@@ -396,6 +399,8 @@ namespace CSX64
                 case OPCode.FSQRT: return ProcessFSQRT();
                 case OPCode.FYL2X: return ProcessFYL2X();
                 case OPCode.FYL2XP1: return ProcessFYL2XP1();
+                case OPCode.FXTRACT: return ProcessFXTRACT();
+                case OPCode.FSCALE: return ProcessFSCALE();
 
                 case OPCode.FXAM: return ProcessFXAM();
                 case OPCode.FTST: return ProcessFTST();

@@ -501,6 +501,10 @@ namespace CSX64
         private bool PushRaw(UInt64 size, UInt64 val)
         {
             RSP -= size;
+
+            // do the stack barrier test
+            if (RSP < StackBarrier) { Terminate(ErrorCode.StackOverflow); return false; }
+
             return SetMemRaw(RSP, size, val);
         }
         /// <summary>
@@ -510,8 +514,12 @@ namespace CSX64
         /// <param name="val">the resulting value</param>
         private bool PopRaw(UInt64 size, out UInt64 val)
         {
+            // do stack barrier test before increment (makes sure the value we're fetching was in the stack segment)
+            if (RSP < StackBarrier) { Terminate(ErrorCode.StackOverflow); val = 0; return false; }
+
             if (!GetMemRaw(RSP, size, out val)) return false;
             RSP += size;
+
             return true;
         }
 

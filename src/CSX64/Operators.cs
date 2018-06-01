@@ -1892,6 +1892,43 @@ namespace CSX64
 
             return true;
         }
+        private bool ProcessFXTRACT()
+        {
+            if (!FPURegisters[TOP].InUse) { Terminate(ErrorCode.FPUAccessViolation); return false; }
+
+            C0 = Rand.NextBool();
+            C1 = Rand.NextBool();
+            C2 = Rand.NextBool();
+            C3 = Rand.NextBool();
+
+            // get value and extract exponent/significand
+            double val = FPURegisters[TOP].Value;
+            ExtractDouble(val, out double exp, out double sig);
+
+            // exponent in st0, then push the significand
+            FPURegisters[TOP].Value = exp;
+            return PushFPU(sig);
+        }
+        private bool ProcessFSCALE()
+        {
+            if (!FPURegisters[TOP].InUse || !FPURegisters[(TOP + 1) & 7].InUse) { Terminate(ErrorCode.FPUAccessViolation); return false; }
+
+            double a = FPURegisters[TOP].Value;
+            double b = FPURegisters[(TOP + 1) & 7].Value;
+
+            // get exponent and significand of st0
+            ExtractDouble(a, out double exp, out double sig);
+
+            // add (truncated) st1 to exponent of st0
+            FPURegisters[TOP].Value = AssembleDouble(exp + (Int64)b, sig);
+
+            C0 = Rand.NextBool();
+            C1 = Rand.NextBool();
+            C2 = Rand.NextBool();
+            C3 = Rand.NextBool();
+
+            return true;
+        }
 
         private bool ProcessFXAM()
         {

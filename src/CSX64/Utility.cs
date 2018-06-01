@@ -43,6 +43,32 @@ namespace CSX64
             return val != 0 && (val & (val - 1)) == 0;
         }
 
+        public static void ExtractDouble(double val, out double exp, out double sig)
+        {
+            // get the raw bits
+            UInt64 bits = DoubleAsUInt64(val);
+
+            // get the raw exponent
+            UInt64 raw_exp = (bits >> 52) & 0x7ff;
+
+            // get exponent and subtract bias
+            exp = (double)raw_exp - 1023;
+            // get significand (m.0) and offset to 0.m
+            sig = (double)(bits & 0xfffffffffffff) / (1ul << 52);
+
+            // if it's denormalized, add 1 to exponent
+            if (raw_exp == 0) exp += 1;
+            // otherwise add the invisible 1 to get 1.m
+            else sig += 1;
+
+            // handle negative case
+            if (val < 0) sig = -sig;
+        }
+        public static double AssembleDouble(double exp, double sig)
+        {
+            return sig * Math.Pow(2, exp);
+        }
+
         // -- memory utilities -- //
 
         /// <summary>

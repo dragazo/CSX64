@@ -3401,6 +3401,8 @@ namespace CSX64
                         case "FSQRT": if (!args.TryProcessNoArgOp(OPCode.FSQRT)) return args.res; break;
                         case "FYL2X": if (!args.TryProcessNoArgOp(OPCode.FYL2X)) return args.res; break;
                         case "FYL2XP1": if (!args.TryProcessNoArgOp(OPCode.FYL2XP1)) return args.res; break;
+                        case "FXTRACT": if (!args.TryProcessNoArgOp(OPCode.FXTRACT)) return args.res; break;
+                        case "FSCALE": if (!args.TryProcessNoArgOp(OPCode.FSCALE)) return args.res; break;
 
                         case "FXAM": if (!args.TryProcessNoArgOp(OPCode.FXAM)) return args.res; break;
                         case "FTST": if (!args.TryProcessNoArgOp(OPCode.FTST)) return args.res; break;
