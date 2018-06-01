@@ -299,9 +299,8 @@ namespace CSX64
             // fetch the instruction
             if (!GetMemAdv(1, out op)) return false;
 
-            for (int i = 0; i < 8; ++i)
-                Console.WriteLine($"st{i}: {(FPURegisters[(TOP + i) & 7].InUse ? FPURegisters[(TOP + i) & 7].Value.ToString() : "Not In Use")}");
-            Console.WriteLine($"{RIP:x8} - {(OPCode)op}\n");
+            //for (int i = 0; i < 8; ++i) Console.WriteLine($"st{i}: {(FPURegisters[(TOP + i) & 7].InUse ? FPURegisters[(TOP + i) & 7].Value.ToString() : "Not In Use")}");
+            //Console.WriteLine($"{RIP:x8} - {(OPCode)op}\n");
 
             // switch through the opcodes
             switch ((OPCode)op)
@@ -372,6 +371,7 @@ namespace CSX64
                 case OPCode.BT: return ProcessBT();
 
                 case OPCode.Cxy: return ProcessCxy();
+                case OPCode.CxyE: return ProcessCxyE();
                 case OPCode.MOVxX: return ProcessMOVxX();
 
                 // x87 instructions

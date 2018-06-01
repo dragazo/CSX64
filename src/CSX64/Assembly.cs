@@ -425,14 +425,22 @@ namespace CSX64
                         err = $"Ill-formed numeric literal encountered: \"{Token}\"";
                         return false;
                     }
-                    // if it's a character
-                    else if (Token[0] == '\'')
+                    // if it's a character constant
+                    else if (Token[0] == '"' || Token[0] == '\'' || Token[0] == '`')
                     {
-                        // make sure it's terminated
-                        if (Token.Length != 3 || Token[2] != '\'') { err = $"Ill-formed character literal encountered: \"{Token}\""; return false; }
+                        // get the characters
+                        if (!Assembly.TryExtractStringChars(Token, out string chars, ref err)) return false;
 
-                        // extract the character
-                        res = Token[1];
+                        // must be 1-8 chars
+                        if (chars.Length == 0) { err = $"Ill-formed character literal encountered (empty): {Token}"; return false; }
+                        if (chars.Length > 8) { err = $"Ill-formed character literal encountered (too long): {Token}"; return false; }
+
+                        res = 0; // zero res just in case that's removed from the top of the function later on
+
+                        // build the value
+                        for (int i = 0; i < chars.Length; ++i)
+                            res |= (UInt64)(chars[i] & 0xff) << (i * 8);
+
                         break;
                     }
                     // if it's a defined symbol we haven't already visited
@@ -1182,6 +1190,85 @@ namespace CSX64
             ["ST(7)"] = 7
         };
 
+        internal static bool TryExtractStringChars(string token, out string chars, ref string err)
+        {
+            chars = null; // null result so compiler won't complain
+
+            // make sure it starts with a quote and is terminated
+            if (token[0] != '"' && token[0] != '\'' && token[0] != '`' || token[0] != token[token.Length - 1]) { err = $"Ill-formed string: {token}"; return false; }
+
+            StringBuilder b = new StringBuilder();
+
+            // read all the characters inside
+            for (int i = 1; i < token.Length - 1; ++i)
+            {
+                // if this is a `backquote` literal, it allows \escapes
+                if (token[0] == '`' && token[i] == '\\')
+                {
+                    // bump up i and make sure it's still good
+                    if (++i >= token.Length - 1) { err = $"Ill-formed string (ends with beginning of an escape sequence): {token}"; return false; }
+
+                    int temp, temp2;
+                    switch (token[i])
+                    {
+                        case '\'': temp = '\''; break;
+                        case '"': temp = '"'; break;
+                        case '`': temp = '`'; break;
+                        case '\\': temp = '\\'; break;
+                        case '?': temp = '?'; break;
+                        case 'a': temp = '\a'; break;
+                        case 'b': temp = '\b'; break;
+                        case 't': temp = '\t'; break;
+                        case 'n': temp = '\n'; break;
+                        case 'v': temp = '\v'; break;
+                        case 'f': temp = '\f'; break;
+                        case 'r': temp = '\r'; break;
+                        case 'e': temp = 27; break;
+
+                        case '0':
+                        case '1':
+                        case '2':
+                        case '3':
+                        case '4':
+                        case '5':
+                        case '6':
+                        case '7':
+                            temp = 0;
+                            // read the octal value into temp (up to 3 octal digits)
+                            for (int oct_count = 0; oct_count < 3 && token[i] >= '0' && token[i] <= '7'; ++i, ++oct_count)
+                                temp = (temp << 3) | (token[i] - '0');
+                            --i; // undo the last i increment (otherwise outer loop will skip a char)
+                            break;
+
+                        case 'x':
+                            // bump up i and make sure it's a hex digit
+                            if (!GetHexValue(token[++i], out temp)) { err = $"Ill-formed string (invalid hexadecimal escape): {token}"; return false; }
+                            // if the next char is also a hex digit
+                            if (GetHexValue(token[i + 1], out temp2))
+                            {
+                                // read it into the escape value as well
+                                ++i;
+                                temp = (temp << 4) | temp2;
+                            }
+                            break;
+
+                        case 'u': case 'U': err = $"Unicode character escapes are not yet supported: {token}"; return false;
+
+                        default: err = $"Ill-formed string (escape sequence not recognized): {token}"; return false;
+                    }
+
+                    // append the character
+                    b.Append((char)(temp & 0xff));
+                }
+                // otherwise just read the character verbatim
+                else b.Append(token[i]);
+            }
+
+            // return extracted chars
+            chars = b.ToString();
+            return true;
+        }
+
         /// <summary>
         /// Holds all the variables used during assembly
         /// </summary>
@@ -1271,7 +1358,7 @@ namespace CSX64
                     // find the next terminator (comma-separated)
                     for (quote = -1; pos < rawline.Length && (rawline[pos] != ',' || quote >= 0); ++pos)
                     {
-                        if (rawline[pos] == '"' || rawline[pos] == '\'')
+                        if (rawline[pos] == '"' || rawline[pos] == '\'' || rawline[pos] == '`')
                             quote = quote < 0 ? pos : (rawline[pos] == rawline[quote] ? -1 : quote);
 
                         // omit white space unless in a quote
@@ -1498,7 +1585,9 @@ namespace CSX64
                             else if (token[end] == ')') --depth;
                             else if (numeric && token[end] == 'e' || token[end] == 'E') exp = true; // e or E begins exponent
                             else if (numeric && token[end] == '+' || token[end] == '-' || char.IsDigit(token[end])) exp = false; // + or - or a digit ends exponent safety net
-                            else if (token[end] == '\'') quote = end; // single quote marks start of character literal
+                            else if (token[end] == '"') quote = end; // quote marks start of character literal
+                            else if (token[end] == '\'') quote = end;
+                            else if (token[end] == '`') quote = end;
 
                             // can't ever have negative depth
                             if (depth < 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched parenthesis \"{token}\""); return false; }
@@ -1516,7 +1605,7 @@ namespace CSX64
                     if (quote >= 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched quotation in character literal \"{token}\""); return false; }
                     // if pos == end we'll have an empty token
                     if (pos == end) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Empty token encountered in expression \"{token}\""); return false; }
-
+                    
                     // -- process value -- //
 
                     // -- convert value to an expression tree -- //
@@ -1532,7 +1621,7 @@ namespace CSX64
                     {
                         // get the value to insert
                         string val = token.Substring(pos, end - pos);
-
+                        
                         // mutate it
                         if (!MutateName(ref val)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse imm \"{token}\"\n-> {res.ErrorMsg}"); return false; }
 
@@ -2247,6 +2336,8 @@ namespace CSX64
                 UInt64 mult;
                 bool floating;
 
+                string err = null;
+
                 for (int i = 0; i < args.Length; ++i)
                 {
                     if (args[i].Length == 0) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Emission encountered empty argument"); return false; }
@@ -2272,18 +2363,21 @@ namespace CSX64
                             if (!TryAppendExpr(size, hole)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
                     }
                     // if a string
-                    else if (args[i][0] == '"')
+                    else if (args[i][0] == '"' || args[i][0] == '\'' || args[i][0] == '`')
                     {
-                        // make sure it's properly closed
-                        if (args[i][0] != args[i][args[i].Length - 1]) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: String literal must be enclosed in single or double quotes"); return false; }
+                        // get its chars
+                        if (!TryExtractStringChars(args[i], out string chars, ref err)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Invalid string literal: {args[i]}\n-> {err}"); return false; }
 
-                        // dump the contents into memory
-                        for (int j = 1; j < args[i].Length - 1; ++j)
+                        // dump into memory (one byte each)
+                        for (int j = 0; j < chars.Length; ++j)
+                            if (!TryAppendVal(1, chars[j])) return false;
+
+                        // if this wasn't a multiple of size
+                        if (chars.Length % (int)size != 0)
                         {
-                            // make sure there's no string splicing
-                            if (args[i][j] == args[i][0]) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: String emission prematurely reached a terminating quote"); return false; }
-
-                            if (!TryAppendVal(size, args[i][j])) return false;
+                            // pad with 0 to fill in the remaining space
+                            for (int j = (int)size - chars.Length % (int)size; j > 0; --j)
+                                if (!TryAppendVal(1, 0)) return false;
                         }
                     }
                     // otherwise is a value
@@ -3329,6 +3423,10 @@ namespace CSX64
                         case "CWD": if (!args.TryProcessNoArgOp(OPCode.Cxy, true, 0)) return args.res; break;
                         case "CDQ": if (!args.TryProcessNoArgOp(OPCode.Cxy, true, 1)) return args.res; break;
                         case "CQO": if (!args.TryProcessNoArgOp(OPCode.Cxy, true, 2)) return args.res; break;
+
+                        case "CBW": if (!args.TryProcessNoArgOp(OPCode.CxyE, true, 0)) return args.res; break;
+                        case "CWDE": if (!args.TryProcessNoArgOp(OPCode.CxyE, true, 1)) return args.res; break;
+                        case "CDQE": if (!args.TryProcessNoArgOp(OPCode.CxyE, true, 2)) return args.res; break;
 
                         case "MOVZX": if (!args.TryProcessMOVxX(OPCode.MOVxX, false)) return args.res; break;
                         case "MOVSX": if (!args.TryProcessMOVxX(OPCode.MOVxX, true)) return args.res; break;

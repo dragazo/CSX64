@@ -45,28 +45,55 @@ namespace CSX64
 
         public static void ExtractDouble(double val, out double exp, out double sig)
         {
-            // get the raw bits
-            UInt64 bits = DoubleAsUInt64(val);
+            if (double.IsNaN(val))
+            {
+                exp = sig = double.NaN;
+            }
+            else if (double.IsPositiveInfinity(val))
+            {
+                exp = double.PositiveInfinity;
+                sig = 1;
+            }
+            else if (double.IsNegativeInfinity(val))
+            {
+                exp = double.PositiveInfinity;
+                sig = -1;
+            }
+            else
+            {
+                // get the raw bits
+                UInt64 bits = DoubleAsUInt64(val);
 
-            // get the raw exponent
-            UInt64 raw_exp = (bits >> 52) & 0x7ff;
+                // get the raw exponent
+                UInt64 raw_exp = (bits >> 52) & 0x7ff;
 
-            // get exponent and subtract bias
-            exp = (double)raw_exp - 1023;
-            // get significand (m.0) and offset to 0.m
-            sig = (double)(bits & 0xfffffffffffff) / (1ul << 52);
+                // get exponent and subtract bias
+                exp = (double)raw_exp - 1023;
+                // get significand (m.0) and offset to 0.m
+                sig = (double)(bits & 0xfffffffffffff) / (1ul << 52);
 
-            // if it's denormalized, add 1 to exponent
-            if (raw_exp == 0) exp += 1;
-            // otherwise add the invisible 1 to get 1.m
-            else sig += 1;
+                // if it's denormalized, add 1 to exponent
+                if (raw_exp == 0) exp += 1;
+                // otherwise add the invisible 1 to get 1.m
+                else sig += 1;
 
-            // handle negative case
-            if (val < 0) sig = -sig;
+                // handle negative case
+                if (val < 0) sig = -sig;
+            }
         }
         public static double AssembleDouble(double exp, double sig)
         {
             return sig * Math.Pow(2, exp);
+        }
+
+        public static bool GetHexValue(char ch, out int val)
+        {
+            if (ch >= '0' && ch <= '9') val = ch - '0';
+            else if (ch >= 'a' && ch <= 'f') val = ch - 'a' + 10;
+            else if (ch >= 'A' && ch <= 'F') val = ch - 'A' + 10;
+            else { val = 0; return false; }
+
+            return true;
         }
 
         // -- memory utilities -- //

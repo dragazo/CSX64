@@ -1322,6 +1322,25 @@ namespace CSX64
             }
         }
         /*
+        [8: ext]
+            ext = 0: CBW
+            ext = 0: CWDE
+            ext = 0: CDQE
+        */
+        private bool ProcessCxyE()
+        {
+            if (!GetMemAdv(1, out UInt64 ext)) return false;
+
+            switch (ext)
+            {
+                case 0: AX = (UInt16)SignExtend(AL, 0); return true;
+                case 1: EAX = (UInt32)SignExtend(AX, 1); return true;
+                case 2: RAX = SignExtend(EAX, 2); return true;
+
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
+            }
+        }
+        /*
         [4: dest][4: mode]   [1: mem][1: sh][2:][4: src]
             mode = 0: 16 <- 8  Zero
             mode = 1: 16 <- 8  Sign

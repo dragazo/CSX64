@@ -36,7 +36,7 @@ namespace CSX64
         CMP, TEST, CMPZ,
 
         BSWAP, BEXTR, BLSI, BLSMSK, BLSR, ANDN, BT,
-        Cxy, MOVxX,
+        Cxy, CxyE, MOVxX,
 
         // x87 instructions
 
