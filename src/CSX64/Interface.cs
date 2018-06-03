@@ -348,6 +348,8 @@ namespace CSX64
                 case OPCode.SAR: return ProcessSAR();
                 case OPCode.ROL: return ProcessROL();
                 case OPCode.ROR: return ProcessROR();
+                case OPCode.RCL: return ProcessRCL();
+                case OPCode.RCR: return ProcessRCR();
 
                 case OPCode.AND: return ProcessAND();
                 case OPCode.OR: return ProcessOR();
@@ -368,7 +370,7 @@ namespace CSX64
                 case OPCode.BLSMSK: return ProcessBLSMSK();
                 case OPCode.BLSR: return ProcessBLSR();
                 case OPCode.ANDN: return ProcessANDN();
-                case OPCode.BT: return ProcessBT();
+                case OPCode.BTx: return ProcessBTx();
 
                 case OPCode.Cxy: return ProcessCxy();
                 case OPCode.CxyE: return ProcessCxyE();

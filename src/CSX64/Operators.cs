@@ -225,6 +225,67 @@ namespace CSX64
         }
 
         /*
+        [4: dest][2: size][1: dh][1: mem]   [6: count][2: mode]  ...  ([address])
+            mode = 0: 1
+            mode = 1: count
+            mode = 2: CL
+            mode = 3: [8: imm] (comes before address)
+        */
+        private bool FetchShiftOpFormat(out UInt64 s, out UInt64 m, out UInt64 val, out UInt64 count)
+        {
+            m = val = count = 0; // zero these because compiler is a vengeful god
+
+            // read settings byte
+            if (!GetMemAdv(1, out s) || !GetMemAdv(1, out UInt64 mode)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
+
+            // get count
+            switch (mode & 3)
+            {
+                case 0: count = 1; break;
+                case 1: count = mode >> 2; break;
+                case 2: count = CL; break;
+                case 3: if (GetMemAdv(1, out count)) return false; break;
+            }
+
+            // if dest is a register
+            if ((s & 1) == 0)
+            {
+                // if high flag set
+                if ((s & 2) != 0)
+                {
+                    // need to be in (ABCD)H
+                    if ((s & 0xc0) != 0 || sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+                    val = Registers[s >> 4].x8h;
+                }
+                else val = Registers[s >> 4][sizecode];
+            }
+            // otherwise is memory value
+            else
+            {
+                if (!GetAddressAdv(out m) || !GetMemRaw(m, Size(sizecode), out val)) return false;
+            }
+
+            return true;
+        }
+        private bool StoreShiftOpFormat(UInt64 s, UInt64 m, UInt64 res)
+        {
+            UInt64 sizecode = (s >> 2) & 3;
+
+            // if dest is a register
+            if ((s & 1) == 0)
+            {
+                // if high flag set
+                if ((s & 2) != 0) Registers[s >> 4].x8h = (byte)res;
+                else Registers[s >> 4][sizecode] = res;
+
+                return true;
+            }
+            // otherwise dest is memory
+            else return SetMemRaw(m, Size(sizecode), res);
+        }
+
+        /*
         [4: reg][2: size][2: mode]
             mode = 0:               reg
             mode = 1:               h reg (AH, BH, CH, or DH)
@@ -953,125 +1014,182 @@ namespace CSX64
 
         private bool ProcessSHL()
         {
-            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 0)) return false;
-            UInt64 sizecode = (s1 >> 2) & 3;
+            if (!FetchShiftOpFormat(out UInt64 s, out UInt64 m, out UInt64 val, out UInt64 count)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
 
-            UInt16 sh = (UInt16)(b & (sizecode == 3 ? 0x3ful : 0x1ful)); // mask shift val to 6 bits on 64-bit op, otherwise to 5 bits
+            UInt16 sh = (UInt16)(count & (sizecode == 3 ? 0x3ful : 0x1ful)); // mask shift val to 6 bits on 64-bit op, otherwise to 5 bits
 
             // shift of zero is no-op
             if (sh != 0)
             {
-                UInt64 res = Truncate(a << sh, sizecode);
+                UInt64 res = Truncate(val << sh, sizecode);
 
                 UpdateFlagsZSP(res, sizecode);
-                CF = sh < SizeBits(sizecode) ? ((a >> ((UInt16)SizeBits(sizecode) - sh)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
+                CF = sh < SizeBits(sizecode) ? ((val >> ((UInt16)SizeBits(sizecode) - sh)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
                 OF = sh == 1 ? Negative(res, sizecode) != CF : Rand.NextBool(); // OF is 1 if top 2 bits of original value were different (UND for sh != 1)
                 AF = Rand.NextBool(); // AF is undefined
 
-                return StoreBinaryOpFormatNew(s1, s2, m, res);
+                return StoreShiftOpFormat(s, m, res);
             }
             else return true;
         }
         private bool ProcessSHR()
         {
-            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 0)) return false;
-            UInt64 sizecode = (s1 >> 2) & 3;
+            if (!FetchShiftOpFormat(out UInt64 s, out UInt64 m, out UInt64 val, out UInt64 count)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
 
-            UInt16 sh = (UInt16)(b & (sizecode == 3 ? 0x3ful : 0x1ful)); // mask shift val to 6 bits on 64-bit op, otherwise to 5 bits
+            UInt16 sh = (UInt16)(count & (sizecode == 3 ? 0x3ful : 0x1ful)); // mask shift val to 6 bits on 64-bit op, otherwise to 5 bits
 
             // shift of zero is no-op
             if (sh != 0)
             {
-                UInt64 res = a >> sh;
+                UInt64 res = val >> sh;
 
                 UpdateFlagsZSP(res, sizecode);
-                CF = sh < SizeBits(sizecode) ? ((a >> (sh - 1)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
-                OF = sh == 1 ? Negative(a, sizecode) : Rand.NextBool(); // OF is high bit of original value (UND for sh != 1)
+                CF = sh < SizeBits(sizecode) ? ((val >> (sh - 1)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
+                OF = sh == 1 ? Negative(val, sizecode) : Rand.NextBool(); // OF is high bit of original value (UND for sh != 1)
                 AF = Rand.NextBool(); // AF is undefined
 
-                return StoreBinaryOpFormatNew(s1, s2, m, res);
+                return StoreShiftOpFormat(s, m, res);
             }
             else return true;
         }
 
         private bool ProcessSAL()
         {
-            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 0)) return false;
-            UInt64 sizecode = (s1 >> 2) & 3;
+            if (!FetchShiftOpFormat(out UInt64 s, out UInt64 m, out UInt64 val, out UInt64 count)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
 
-            UInt16 sh = (UInt16)(b & (sizecode == 3 ? 0x3ful : 0x1ful)); // mask shift val to 6 bits on 64-bit op, otherwise to 5 bits
+            UInt16 sh = (UInt16)(count & (sizecode == 3 ? 0x3ful : 0x1ful)); // mask shift val to 6 bits on 64-bit op, otherwise to 5 bits
 
             // shift of zero is no-op
             if (sh != 0)
             {
-                UInt64 res = Truncate((UInt64)((Int64)SignExtend(a, sizecode) << sh), sizecode);
+                UInt64 res = Truncate((UInt64)((Int64)SignExtend(val, sizecode) << sh), sizecode);
 
                 UpdateFlagsZSP(res, sizecode);
-                CF = sh < SizeBits(sizecode) ? ((a >> ((UInt16)SizeBits(sizecode) - sh)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
+                CF = sh < SizeBits(sizecode) ? ((val >> ((UInt16)SizeBits(sizecode) - sh)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
                 OF = sh == 1 ? Negative(res, sizecode) != CF : Rand.NextBool(); // OF is 1 if top 2 bits of original value were different (UND for sh != 1)
                 AF = Rand.NextBool(); // AF is undefined
 
-                return StoreBinaryOpFormatNew(s1, s2, m, res);
+                return StoreShiftOpFormat(s, m, res);
             }
             else return true;
         }
         private bool ProcessSAR()
         {
-            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 0)) return false;
-            UInt64 sizecode = (s1 >> 2) & 3;
+            if (!FetchShiftOpFormat(out UInt64 s, out UInt64 m, out UInt64 val, out UInt64 count)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
 
-            UInt16 sh = (UInt16)(b & (sizecode == 3 ? 0x3ful : 0x1ful)); // mask shift val to 6 bits on 64-bit op, otherwise to 5 bits
+            UInt16 sh = (UInt16)(count & (sizecode == 3 ? 0x3ful : 0x1ful)); // mask shift val to 6 bits on 64-bit op, otherwise to 5 bits
 
             // shift of zero is no-op
             if (sh != 0)
             {
-                UInt64 res = Truncate((UInt64)((Int64)SignExtend(a, sizecode) >> sh), sizecode);
+                UInt64 res = Truncate((UInt64)((Int64)SignExtend(val, sizecode) >> sh), sizecode);
 
                 UpdateFlagsZSP(res, sizecode);
-                CF = sh < SizeBits(sizecode) ? ((a >> (sh - 1)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
+                CF = sh < SizeBits(sizecode) ? ((val >> (sh - 1)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
                 OF = sh == 1 ? false : Rand.NextBool(); // OF is cleared (UND for sh != 1)
                 AF = Rand.NextBool(); // AF is undefined
 
-                return StoreBinaryOpFormatNew(s1, s2, m, res);
+                return StoreShiftOpFormat(s, m, res);
             }
             else return false;
         }
 
         private bool ProcessROL()
         {
-            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 0)) return false;
-            UInt64 sizecode = (s1 >> 2) & 3;
+            if (!FetchShiftOpFormat(out UInt64 s, out UInt64 m, out UInt64 val, out UInt64 count)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
 
-            UInt16 sh = (UInt16)(b % SizeBits(sizecode)); // rotate performed modulo-n
+            UInt16 sh = (UInt16)(count & (sizecode == 3 ? 0x3ful : 0x1ful)); // mask shift val to 6 bits on 64-bit op, otherwise to 5 bits
+            sh %= (UInt16)SizeBits(sizecode); // rotate performed modulo-n
 
             // shift of zero is no-op
             if (sh != 0)
             {
-                UInt64 res = Truncate((a << sh) | (a >> ((UInt16)SizeBits(sizecode) - sh)), sizecode);
+                UInt64 res = Truncate((val << sh) | (val >> ((UInt16)SizeBits(sizecode) - sh)), sizecode);
 
-                CF = ((a >> ((UInt16)SizeBits(sizecode) - sh)) & 1) == 1; // CF holds last bit shifted around
+                CF = ((val >> ((UInt16)SizeBits(sizecode) - sh)) & 1) == 1; // CF holds last bit shifted around
                 OF = sh == 1 ? CF ^ Negative(res, sizecode) : Rand.NextBool(); // OF is xor of CF (after rotate) and high bit of result (UND if sh != 1)
 
-                return StoreBinaryOpFormatNew(s1, s2, m, res);
+                return StoreShiftOpFormat(s, m, res);
             }
             else return true;
         }
         private bool ProcessROR()
         {
-            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 0)) return false;
-            UInt64 sizecode = (s1 >> 2) & 3;
+            if (!FetchShiftOpFormat(out UInt64 s, out UInt64 m, out UInt64 val, out UInt64 count)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
 
-            UInt16 sh = (UInt16)(b % SizeBits(sizecode)); // rotate performed modulo-n
+            UInt16 sh = (UInt16)(count & (sizecode == 3 ? 0x3ful : 0x1ful)); // mask shift val to 6 bits on 64-bit op, otherwise to 5 bits
+            sh %= (UInt16)SizeBits(sizecode); // rotate performed modulo-n
 
             // shift of zero is no-op
             if (sh != 0)
             {
-                UInt64 res = Truncate((a >> sh) | (a << ((UInt16)SizeBits(sizecode) - sh)), sizecode);
+                UInt64 res = Truncate((val >> sh) | (val << ((UInt16)SizeBits(sizecode) - sh)), sizecode);
 
-                CF = ((a >> (sh - 1)) & 1) == 1; // CF holds last bit shifted around
+                CF = ((val >> (sh - 1)) & 1) == 1; // CF holds last bit shifted around
                 OF = sh == 1 ? Negative(res, sizecode) ^ (((res >> ((8 << (ushort)sizecode) - 2)) & 1) != 0) : Rand.NextBool(); // OF is xor of 2 highest bits of result
 
-                return StoreBinaryOpFormatNew(s1, s2, m, res);
+                return StoreShiftOpFormat(s, m, res);
+            }
+            else return true;
+        }
+
+        private bool ProcessRCL()
+        {
+            if (!FetchShiftOpFormat(out UInt64 s, out UInt64 m, out UInt64 val, out UInt64 count)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
+
+            UInt16 sh = (UInt16)(count & (sizecode == 3 ? 0x3ful : 0x1ful)); // mask shift val to 6 bits on 64-bit op, otherwise to 5 bits
+            sh %= (UInt16)(SizeBits(sizecode) + 1); // rotate performed modulo-n+1
+
+            // shift of zero is no-op
+            if (sh != 0)
+            {
+                UInt64 res = val, temp;
+                UInt64 high_mask = 1ul << (UInt16)(SizeBits(sizecode) - 1); // mask for highest bit
+                for (UInt16 i = 0; i < sh; ++i)
+                {
+                    temp = res << 1; // shift res left by 1, store in temp
+                    temp |= CF ? 1 : 0ul; // or in CF to the lowest bit
+                    CF = (res & high_mask) != 0; // get the previous highest bit into CF
+                    res = temp; // store back to res
+                }
+
+                OF = sh == 1 ? CF ^ Negative(res, sizecode) : Rand.NextBool(); // OF is xor of CF (after rotate) and high bit of result (UND if sh != 1)
+
+                return StoreShiftOpFormat(s, m, res);
+            }
+            else return true;
+        }
+        private bool ProcessRCR()
+        {
+            if (!FetchShiftOpFormat(out UInt64 s, out UInt64 m, out UInt64 val, out UInt64 count)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
+
+            UInt16 sh = (UInt16)(count & (sizecode == 3 ? 0x3ful : 0x1ful)); // mask shift val to 6 bits on 64-bit op, otherwise to 5 bits
+            sh %= (UInt16)(SizeBits(sizecode) + 1); // rotate performed modulo-n+1
+
+            // shift of zero is no-op
+            if (sh != 0)
+            {
+                UInt64 res = val, temp;
+                UInt64 high_mask = 1ul << (UInt16)(SizeBits(sizecode) - 1); // mask for highest bit
+                for (UInt16 i = 0; i < sh; ++i)
+                {
+                    temp = res >> 1; // shift res right by 1, store in temp
+                    temp |= CF ? high_mask : 0ul; // or in CF to the highest bit
+                    CF = (res & 1) != 0; // get the previous low bit into CF
+                    res = temp; // store back to res
+                }
+
+                OF = sh == 1 ? Negative(res, sizecode) ^ (((res >> ((8 << (ushort)sizecode) - 2)) & 1) != 0) : Rand.NextBool(); // OF is xor of 2 highest bits of result
+
+                return StoreShiftOpFormat(s, m, res);
             }
             else return true;
         }
@@ -1276,7 +1394,7 @@ namespace CSX64
             return StoreBinaryOpFormatNew(s1, s2, m, res);
         }
 
-        private bool ProcessBT()
+        private bool ProcessBTx()
         {
             if (!GetMemAdv(1, out UInt64 ext)) return false;
 

@@ -2662,6 +2662,7 @@ namespace CSX64
             {
                 if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 2 args"); return false; }
 
+                // write op code
                 if (!TryAppendVal(1, (UInt64)op)) return false;
 
                 UInt64 a_sizecode, b_sizecode;
@@ -2731,6 +2732,9 @@ namespace CSX64
             {
                 if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 1 arg"); return false; }
 
+                // write op code
+                if (!TryAppendVal(1, (UInt64)op)) return false;
+
                 UInt64 a_sizecode;
 
                 // reg
@@ -2752,6 +2756,63 @@ namespace CSX64
                 }
                 else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} expected a register or memory argument"); return false; }
 
+                return true;
+            }
+
+            private bool __TryProcessShift_mid()
+            {
+                // reg, reg
+                if (TryParseCPURegister(args[1], out UInt64 src, out UInt64 b_sizecode, out bool b_high))
+                {
+                    if (src != 2 || b_sizecode != 0 || b_high) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Shifts using a register as count source must use CL"); return false; }
+
+                    if (!TryAppendVal(1, 2)) return false;
+                }
+                // reg, imm
+                else if (TryParseImm(args[1], out Expr imm))
+                {
+                    // if it's instant we can put it in the count field of the binary format
+                    if (imm.Evaluate(file.Symbols, out UInt64 _imm, out bool _immf, ref res.ErrorMsg))
+                    {
+                        if (_immf) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Attempt to use a floating-point value with a shift"); return false; }
+                        if (_imm >= 64) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Attempt to shift by 64 or more bits (will not have the desired effect)"); return false; }
+
+                        if (!TryAppendVal(1, (_imm << 2) | 1)) return false;
+                    }
+                    else
+                    {
+                        if (!TryAppendVal(1, 3)) return false;
+                        if (!TryAppendExpr(1, imm)) return false;
+                    }
+                }
+                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Second argument to a shift must be CL or an imm"); return false; }
+
+                return true;
+            }
+            public bool TryProcessShift(OPCode op)
+            {
+                if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 2 args"); return false; }
+
+                // write op code
+                if (!TryAppendVal(1, (UInt64)op)) return false;
+                
+                // reg, *
+                if (TryParseCPURegister(args[0], out UInt64 dest, out UInt64 a_sizecode, out bool a_high))
+                {
+                    if (!TryAppendVal(1, (dest << 4) | (a_sizecode << 2) | (a_high ? 2 : 0ul))) return false;
+                    if (!__TryProcessShift_mid()) return false;
+                }
+                // mem, *
+                else if (TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out a_sizecode, out bool explicit_size))
+                {
+                    if (!explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce operand size"); return false; }
+
+                    if (!TryAppendVal(1, (a_sizecode << 2) | 1)) return false;
+                    if (!__TryProcessShift_mid()) return false;
+                    if (!TryAppendAddress(1, b, ptr_base)) return false;
+                }
+                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} expected a register or memory value as first operand"); return false; }
+                
                 return true;
             }
 
@@ -3379,12 +3440,14 @@ namespace CSX64
                         case "DIV": if (!args.TryProcessIMMRM(OPCode.DIV)) return args.res; break;
                         case "IDIV": if (!args.TryProcessIMMRM(OPCode.IDIV)) return args.res; break;
 
-                        case "SHL": if (!args.TryProcessBinaryOp(OPCode.SHL, false, 0, 15, 0)) return args.res; break;
-                        case "SHR": if (!args.TryProcessBinaryOp(OPCode.SHR, false, 0, 15, 0)) return args.res; break;
-                        case "SAL": if (!args.TryProcessBinaryOp(OPCode.SAL, false, 0, 15, 0)) return args.res; break;
-                        case "SAR": if (!args.TryProcessBinaryOp(OPCode.SAR, false, 0, 15, 0)) return args.res; break;
-                        case "ROL": if (!args.TryProcessBinaryOp(OPCode.ROL, false, 0, 15, 0)) return args.res; break;
-                        case "ROR": if (!args.TryProcessBinaryOp(OPCode.ROR, false, 0, 15, 0)) return args.res; break;
+                        case "SHL": if (!args.TryProcessShift(OPCode.SHL)) return args.res; break;
+                        case "SHR": if (!args.TryProcessShift(OPCode.SHR)) return args.res; break;
+                        case "SAL": if (!args.TryProcessShift(OPCode.SAL)) return args.res; break;
+                        case "SAR": if (!args.TryProcessShift(OPCode.SAR)) return args.res; break;
+                        case "ROL": if (!args.TryProcessShift(OPCode.ROL)) return args.res; break;
+                        case "ROR": if (!args.TryProcessShift(OPCode.ROR)) return args.res; break;
+                        case "RCL": if (!args.TryProcessShift(OPCode.RCL)) return args.res; break;
+                        case "RCR": if (!args.TryProcessShift(OPCode.RCR)) return args.res; break;
 
                         case "AND": if (!args.TryProcessBinaryOp(OPCode.AND)) return args.res; break;
                         case "OR": if (!args.TryProcessBinaryOp(OPCode.OR)) return args.res; break;
@@ -3415,10 +3478,10 @@ namespace CSX64
                         case "BLSR": if (!args.TryProcessUnaryOp(OPCode.BLSR)) return args.res; break;
                         case "ANDN": if (!args.TryProcessBinaryOp(OPCode.ANDN)) return args.res; break;
 
-                        case "BT": if (!args.TryProcessBinaryOp(OPCode.BT, true, 0, 15, 0, false)) return args.res; break;
-                        case "BTS": if (!args.TryProcessBinaryOp(OPCode.BT, true, 1, 15, 0, false)) return args.res; break;
-                        case "BTR": if (!args.TryProcessBinaryOp(OPCode.BT, true, 2, 15, 0, false)) return args.res; break;
-                        case "BTC": if (!args.TryProcessBinaryOp(OPCode.BT, true, 3, 15, 0, false)) return args.res; break;
+                        case "BT": if (!args.TryProcessBinaryOp(OPCode.BTx, true, 0, 15, 0, false)) return args.res; break;
+                        case "BTS": if (!args.TryProcessBinaryOp(OPCode.BTx, true, 1, 15, 0, false)) return args.res; break;
+                        case "BTR": if (!args.TryProcessBinaryOp(OPCode.BTx, true, 2, 15, 0, false)) return args.res; break;
+                        case "BTC": if (!args.TryProcessBinaryOp(OPCode.BTx, true, 3, 15, 0, false)) return args.res; break;
                             
                         case "CWD": if (!args.TryProcessNoArgOp(OPCode.Cxy, true, 0)) return args.res; break;
                         case "CDQ": if (!args.TryProcessNoArgOp(OPCode.Cxy, true, 1)) return args.res; break;

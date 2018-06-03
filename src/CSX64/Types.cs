@@ -29,13 +29,13 @@ namespace CSX64
 
         ADD, SUB,
         MUL, IMUL, DIV, IDIV,
-        SHL, SHR, SAL, SAR, ROL, ROR,
+        SHL, SHR, SAL, SAR, ROL, ROR, RCL, RCR,
         AND, OR, XOR,
         INC, DEC, NEG, NOT,
 
         CMP, TEST, CMPZ,
 
-        BSWAP, BEXTR, BLSI, BLSMSK, BLSR, ANDN, BT,
+        BSWAP, BEXTR, BLSI, BLSMSK, BLSR, ANDN, BTx,
         Cxy, CxyE, MOVxX,
 
         // x87 instructions
