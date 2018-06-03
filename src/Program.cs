@@ -6,6 +6,7 @@ using System.Drawing;
 using System.IO;
 using System.Runtime.Serialization;
 using System.Security;
+using System.Text;
 
 namespace CSX64
 {

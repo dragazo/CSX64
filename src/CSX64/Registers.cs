@@ -212,5 +212,14 @@ namespace CSX64
         public double ST5 { get => FPURegisters[(TOP + 5) & 7].Value; set => FPURegisters[(TOP + 5) & 7].Value = value; }
         public double ST6 { get => FPURegisters[(TOP + 6) & 7].Value; set => FPURegisters[(TOP + 6) & 7].Value = value; }
         public double ST7 { get => FPURegisters[(TOP + 7) & 7].Value; set => FPURegisters[(TOP + 7) & 7].Value = value; }
+
+        public bool ST0_InUse { get => FPURegisters[(TOP + 0) & 7].InUse; set => FPURegisters[(TOP + 0) & 7].InUse = value; }
+        public bool ST1_InUse { get => FPURegisters[(TOP + 1) & 7].InUse; set => FPURegisters[(TOP + 1) & 7].InUse = value; }
+        public bool ST2_InUse { get => FPURegisters[(TOP + 2) & 7].InUse; set => FPURegisters[(TOP + 2) & 7].InUse = value; }
+        public bool ST3_InUse { get => FPURegisters[(TOP + 3) & 7].InUse; set => FPURegisters[(TOP + 3) & 7].InUse = value; }
+        public bool ST4_InUse { get => FPURegisters[(TOP + 4) & 7].InUse; set => FPURegisters[(TOP + 4) & 7].InUse = value; }
+        public bool ST5_InUse { get => FPURegisters[(TOP + 5) & 7].InUse; set => FPURegisters[(TOP + 5) & 7].InUse = value; }
+        public bool ST6_InUse { get => FPURegisters[(TOP + 6) & 7].InUse; set => FPURegisters[(TOP + 6) & 7].InUse = value; }
+        public bool ST7_InUse { get => FPURegisters[(TOP + 7) & 7].InUse; set => FPURegisters[(TOP + 7) & 7].InUse = value; }
     }
 }
