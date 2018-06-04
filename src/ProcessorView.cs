@@ -114,16 +114,16 @@ namespace CSX64
             g.DrawString($"C:  {(Computer.CF ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
 
             y += h;
-            g.DrawString($"a:  {(Computer.a ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
-            g.DrawString($"ae: {(Computer.ae ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
-            g.DrawString($"b:  {(Computer.b ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
-            g.DrawString($"be: {(Computer.be ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"a:  {(Computer.cc_a ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"ae: {(Computer.cc_ae ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"b:  {(Computer.cc_b ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"be: {(Computer.cc_be ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
 
             y += h;
-            g.DrawString($"g:  {(Computer.g ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
-            g.DrawString($"ge: {(Computer.ge ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
-            g.DrawString($"l:  {(Computer.l ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
-            g.DrawString($"le: {(Computer.le ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"g:  {(Computer.cc_g ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"ge: {(Computer.cc_ge ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"l:  {(Computer.cc_l ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
+            g.DrawString($"le: {(Computer.cc_le ? 1 : 0)}", DebuggingFont, DebuggingBrush, x, y += h);
 
             // -- state -- //
 

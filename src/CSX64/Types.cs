@@ -19,9 +19,9 @@ namespace CSX64
         NOP,
         HLT, SYSCALL,
         PUSHF, POPF,
-        SETcc,
+        FlagManip,
 
-        MOV, MOVcc, XCHG,
+        SETcc, MOV, MOVcc, XCHG,
 
         JMP, Jcc, LOOP, LOOPe, LOOPne, CALL, RET,
         PUSH, POP,

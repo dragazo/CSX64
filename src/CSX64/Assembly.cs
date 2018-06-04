@@ -2758,6 +2758,15 @@ namespace CSX64
 
                 return true;
             }
+            public bool TryProcessFlagManip(OPCode op, UInt64 flag, bool value)
+            {
+                if (args.Length != 0) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected no operands"); return false; }
+
+                if (!TryAppendVal(1, (UInt64)op)) return false;
+                if (!TryAppendVal(1, (value ? 128 : 0ul) | flag)) return false;
+
+                return true;
+            }
 
             private bool __TryProcessShift_mid()
             {
@@ -2766,24 +2775,15 @@ namespace CSX64
                 {
                     if (src != 2 || b_sizecode != 0 || b_high) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Shifts using a register as count source must use CL"); return false; }
 
-                    if (!TryAppendVal(1, 2)) return false;
+                    if (!TryAppendVal(1, 0x80)) return false;
                 }
                 // reg, imm
                 else if (TryParseImm(args[1], out Expr imm))
                 {
-                    // if it's instant we can put it in the count field of the binary format
-                    if (imm.Evaluate(file.Symbols, out UInt64 _imm, out bool _immf, ref res.ErrorMsg))
-                    {
-                        if (_immf) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Attempt to use a floating-point value with a shift"); return false; }
-                        if (_imm >= 64) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Attempt to shift by 64 or more bits (will not have the desired effect)"); return false; }
+                    // mask the shift count to 6 bits (we just need to make sure it can't set the CL flag)
+                    imm = new Expr() { OP = Expr.OPs.BitAnd, Left = imm, Right = new Expr() { IntResult = 0x3f } };
 
-                        if (!TryAppendVal(1, (_imm << 2) | 1)) return false;
-                    }
-                    else
-                    {
-                        if (!TryAppendVal(1, 3)) return false;
-                        if (!TryAppendExpr(1, imm)) return false;
-                    }
+                    if (!TryAppendExpr(1, imm)) return false;
                 }
                 else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Second argument to a shift must be CL or an imm"); return false; }
 
@@ -3337,6 +3337,16 @@ namespace CSX64
                         case "POPF": if (!args.TryProcessNoArgOp(OPCode.POPF, true, 0)) return args.res; break;
                         case "POPFD": if (!args.TryProcessNoArgOp(OPCode.POPF, true, 1)) return args.res; break;
                         case "POPFQ": if (!args.TryProcessNoArgOp(OPCode.POPF, true, 2)) return args.res; break;
+
+                        case "STC": if (!args.TryProcessFlagManip(OPCode.FlagManip, 0, true)) return args.res; break;
+                        case "STI": if (!args.TryProcessFlagManip(OPCode.FlagManip, 1, true)) return args.res; break;
+                        case "STD": if (!args.TryProcessFlagManip(OPCode.FlagManip, 2, true)) return args.res; break;
+                        case "STAC": if (!args.TryProcessFlagManip(OPCode.FlagManip, 3, true)) return args.res; break;
+
+                        case "CLC": if (!args.TryProcessFlagManip(OPCode.FlagManip, 0, false)) return args.res; break;
+                        case "CLI": if (!args.TryProcessFlagManip(OPCode.FlagManip, 1, false)) return args.res; break;
+                        case "CLD": if (!args.TryProcessFlagManip(OPCode.FlagManip, 2, false)) return args.res; break;
+                        case "CLAC": if (!args.TryProcessFlagManip(OPCode.FlagManip, 3, false)) return args.res; break;
 
                         case "SETZ": case "SETE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 0, 1)) return args.res; break;
                         case "SETNZ": case "SETNE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 1, 1)) return args.res; break;

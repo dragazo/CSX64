@@ -6,84 +6,122 @@ namespace CSX64
 {
     public partial class Computer
     {
-        private const UInt64 CF_Mask = 0x0001;
-        private const UInt64 RESERVED1_Mask = 0x0002;
-        private const UInt64 PF_Mask = 0x0004;
-        private const UInt64 RESERVED2_Mask = 0x0008;
-        private const UInt64 AF_Mask = 0x0010;
-        private const UInt64 RESERVED3_Mask = 0x0020;
-        private const UInt64 ZF_Mask = 0x0040;
-        private const UInt64 SF_Mask = 0x0080;
-        private const UInt64 TF_Mask = 0x0100;
-        private const UInt64 IF_Mask = 0x0200;
-        private const UInt64 DF_Mask = 0x0400;
-        private const UInt64 OF_Mask = 0x0800;
-
-        private const UInt64 FSF_Mask = 0x000_0001_0000_0000;
+        // source: https://en.wikipedia.org/wiki/FLAGS_register
 
         public bool CF
         {
-            get => (RFLAGS & CF_Mask) != 0;
-            set => RFLAGS = (RFLAGS & ~CF_Mask) | (value ? CF_Mask : 0);
+            get => (RFLAGS & 0x0001ul) != 0;
+            set => RFLAGS = (RFLAGS & ~0x0001ul) | (value ? 0x0001ul : 0);
         }
         public bool PF
         {
-            get => (RFLAGS & PF_Mask) != 0;
-            set => RFLAGS = (RFLAGS & ~PF_Mask) | (value ? PF_Mask : 0);
+            get => (RFLAGS & 0x0004ul) != 0;
+            set => RFLAGS = (RFLAGS & ~0x0004ul) | (value ? 0x0004ul : 0);
         }
         public bool AF
         {
-            get => (RFLAGS & AF_Mask) != 0;
-            set => RFLAGS = (RFLAGS & ~AF_Mask) | (value ? AF_Mask : 0);
+            get => (RFLAGS & 0x0010ul) != 0;
+            set => RFLAGS = (RFLAGS & ~0x0010ul) | (value ? 0x0010ul : 0);
         }
         public bool ZF
         {
-            get => (RFLAGS & ZF_Mask) != 0;
-            set => RFLAGS = (RFLAGS & ~ZF_Mask) | (value ? ZF_Mask : 0);
+            get => (RFLAGS & 0x0040ul) != 0;
+            set => RFLAGS = (RFLAGS & ~0x0040ul) | (value ? 0x0040ul : 0);
         }
         public bool SF
         {
-            get => (RFLAGS & SF_Mask) != 0;
-            set => RFLAGS = (RFLAGS & ~SF_Mask) | (value ? SF_Mask : 0);
+            get => (RFLAGS & 0x0080ul) != 0;
+            set => RFLAGS = (RFLAGS & ~0x0080ul) | (value ? 0x0080ul : 0);
         }
         public bool TF
         {
-            get => (RFLAGS & TF_Mask) != 0;
-            set => RFLAGS = (RFLAGS & ~TF_Mask) | (value ? TF_Mask : 0);
+            get => (RFLAGS & 0x0100ul) != 0;
+            set => RFLAGS = (RFLAGS & ~0x0100ul) | (value ? 0x0100ul : 0);
         }
         public bool IF
         {
-            get => (RFLAGS & IF_Mask) != 0;
-            set => RFLAGS = (RFLAGS & ~IF_Mask) | (value ? IF_Mask : 0);
+            get => (RFLAGS & 0x0200ul) != 0;
+            set => RFLAGS = (RFLAGS & ~0x0200ul) | (value ? 0x0200ul : 0);
         }
         public bool DF
         {
-            get => (RFLAGS & DF_Mask) != 0;
-            set => RFLAGS = (RFLAGS & ~DF_Mask) | (value ? DF_Mask : 0);
+            get => (RFLAGS & 0x0400ul) != 0;
+            set => RFLAGS = (RFLAGS & ~0x0400ul) | (value ? 0x0400ul : 0);
         }
         public bool OF
         {
-            get => (RFLAGS & OF_Mask) != 0;
-            set => RFLAGS = (RFLAGS & ~OF_Mask) | (value ? OF_Mask : 0);
+            get => (RFLAGS & 0x0800ul) != 0;
+            set => RFLAGS = (RFLAGS & ~0x0800ul) | (value ? 0x0800ul : 0);
+        }
+        public byte IOPL
+        {
+            get => (byte)((RFLAGS >> 12) & 3);
+            set => RFLAGS = (RFLAGS & ~0x3000ul) | ((UInt64)(value & 3) << 12);
+        }
+        public bool NT
+        {
+            get => (RFLAGS & 0x4000ul) != 0;
+            set => RFLAGS = (RFLAGS & ~0x4000ul) | (value ? 0x4000ul : 0);
         }
 
-        public bool a { get => !CF && !ZF; }
-        public bool ae { get => !CF; }
-        public bool b { get => CF; }
-        public bool be { get => CF || ZF; }
+        public bool RF
+        {
+            get => (RFLAGS & 0x0001_0000ul) != 0;
+            set => RFLAGS = (RFLAGS & ~0x0001_0000ul) | (value ? 0x0001_0000ul : 0);
+        }
+        public bool VM
+        {
+            get => (RFLAGS & 0x0002_0000ul) != 0;
+            set => RFLAGS = (RFLAGS & ~0x0002_0000ul) | (value ? 0x0002_0000ul : 0);
+        }
+        public bool AC
+        {
+            get => (RFLAGS & 0x0004_0000ul) != 0;
+            set => RFLAGS = (RFLAGS & ~0x0004_0000ul) | (value ? 0x0004_0000ul : 0);
+        }
+        public bool VIF
+        {
+            get => (RFLAGS & 0x0008_0000ul) != 0;
+            set => RFLAGS = (RFLAGS & ~0x0008_0000ul) | (value ? 0x0008_0000ul : 0);
+        }
+        public bool VIP
+        {
+            get => (RFLAGS & 0x0010_0000ul) != 0;
+            set => RFLAGS = (RFLAGS & ~0x0010_0000ul) | (value ? 0x0010_0000ul : 0);
+        }
+        public bool ID1
+        {
+            get => (RFLAGS & 0x0020_0000ul) != 0;
+            set => RFLAGS = (RFLAGS & ~0x0020_0000ul) | (value ? 0x0020_0000ul : 0);
+        }
+        public bool ID2
+        {
+            get => (RFLAGS & 0x0040_0000ul) != 0;
+            set => RFLAGS = (RFLAGS & ~0x0040_0000ul) | (value ? 0x0040_0000ul : 0);
+        }
+        public UInt16 VAD
+        {
+            get => (UInt16)((RFLAGS >> 23) & 0x1ff);
+            set => RFLAGS = (RFLAGS & ~0xff80_0000ul) | ((UInt64)(value & 0x1ff) << 23);
+        }
 
-        public bool g { get => !ZF && SF == OF; }
-        public bool ge { get => SF == OF; }
-        public bool l { get => SF != OF; }
-        public bool le { get => ZF || SF != OF; }
+        public bool cc_b { get => CF; }
+        public bool cc_be { get => CF || ZF; }
+        public bool cc_a { get => !CF && !ZF; }
+        public bool cc_ae { get => !CF; }
+
+        public bool cc_l { get => SF != OF; }
+        public bool cc_le { get => ZF || SF != OF; }
+        public bool cc_g { get => !ZF && SF == OF; }
+        public bool cc_ge { get => SF == OF; }
 
         /// <summary>
         /// Indicates that we're allowed to run file system instructions
         /// </summary>
         public bool FSF
         {
-            get => (RFLAGS & FSF_Mask) != 0;
-            set => RFLAGS = (RFLAGS & ~FSF_Mask) | (value ? FSF_Mask : 0);
+            get => (RFLAGS & 0x000_0001_0000_0000ul) != 0;
+            set => RFLAGS = (RFLAGS & ~0x000_0001_0000_0000ul) | (value ? 0x000_0001_0000_0000ul : 0);
         }
 
         // --------------------------------------------

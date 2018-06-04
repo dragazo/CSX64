@@ -313,6 +313,8 @@ namespace CSX64
                 case OPCode.PUSHF: return ProcessPUSHF();
                 case OPCode.POPF: return ProcessPOPF();
 
+                case OPCode.FlagManip: return ProcessFlagManip();
+
                 case OPCode.SETcc: return ProcessSETcc();
 
                 case OPCode.MOV: return ProcessMOV();

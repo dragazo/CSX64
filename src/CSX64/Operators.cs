@@ -225,28 +225,20 @@ namespace CSX64
         }
 
         /*
-        [4: dest][2: size][1: dh][1: mem]   [6: count][2: mode]  ...  ([address])
-            mode = 0: 1
-            mode = 1: count
-            mode = 2: CL
-            mode = 3: [8: imm] (comes before address)
+        [4: dest][2: size][1: dh][1: mem]   [1: CL][1:][6: count]   ([address])
         */
         private bool FetchShiftOpFormat(out UInt64 s, out UInt64 m, out UInt64 val, out UInt64 count)
         {
             m = val = count = 0; // zero these because compiler is a vengeful god
 
             // read settings byte
-            if (!GetMemAdv(1, out s) || !GetMemAdv(1, out UInt64 mode)) return false;
+            if (!GetMemAdv(1, out s) || !GetMemAdv(1, out count)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
-            // get count
-            switch (mode & 3)
-            {
-                case 0: count = 1; break;
-                case 1: count = mode >> 2; break;
-                case 2: count = CL; break;
-                case 3: if (GetMemAdv(1, out count)) return false; break;
-            }
+            // if count set CL flag, replace it with that
+            if ((count & 0x80) != 0) count = CL;
+            // mask count
+            count = count & (sizecode == 3 ? 0x3ful : 0x1ful);
 
             // if dest is a register
             if ((s & 1) == 0)
@@ -259,14 +251,11 @@ namespace CSX64
                     val = Registers[s >> 4].x8h;
                 }
                 else val = Registers[s >> 4][sizecode];
+
+                return true;
             }
             // otherwise is memory value
-            else
-            {
-                if (!GetAddressAdv(out m) || !GetMemRaw(m, Size(sizecode), out val)) return false;
-            }
-
-            return true;
+            else return GetAddressAdv(out m) && GetMemRaw(m, Size(sizecode), out val);
         }
         private bool StoreShiftOpFormat(UInt64 s, UInt64 m, UInt64 res)
         {
@@ -384,6 +373,30 @@ namespace CSX64
         }
 
         /*
+        [1: value][7: flag]
+            flag = 0: CF
+            flag = 1: IF
+            flag = 2: DF
+            flag = 3: AC
+            else UND
+        */
+        private bool ProcessFlagManip()
+        {
+            if (!GetMemAdv(1, out UInt64 s)) return false;
+
+            bool value = (s & 0x80) != 0;
+            switch (s & 0x7f)
+            {
+                case 0: CF = value; return true;
+                case 1: IF = value; return true;
+                case 2: DF = value; return true;
+                case 3: AC = value; return true;
+
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
+            }
+        }
+
+        /*
         [op][cnd]
             cnd = 0: Z
             cnd = 1: NZ
@@ -423,14 +436,14 @@ namespace CSX64
                 case 7: flag = !OF; break;
                 case 8: flag = CF; break;
                 case 9: flag = !CF; break;
-                case 10: flag = b; break;
-                case 11: flag = be; break;
-                case 12: flag = a; break;
-                case 13: flag = ae; break;
-                case 14: flag = l; break;
-                case 15: flag = le; break;
-                case 16: flag = g; break;
-                case 17: flag = ge; break;
+                case 10: flag = cc_b; break;
+                case 11: flag = cc_be; break;
+                case 12: flag = cc_a; break;
+                case 13: flag = cc_ae; break;
+                case 14: flag = cc_l; break;
+                case 15: flag = cc_le; break;
+                case 16: flag = cc_g; break;
+                case 17: flag = cc_ge; break;
 
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
@@ -484,14 +497,14 @@ namespace CSX64
                 case 7: flag = !OF; break;
                 case 8: flag = CF; break;
                 case 9: flag = !CF; break;
-                case 10: flag = b; break;
-                case 11: flag = be; break;
-                case 12: flag = a; break;
-                case 13: flag = ae; break;
-                case 14: flag = l; break;
-                case 15: flag = le; break;
-                case 16: flag = g; break;
-                case 17: flag = ge; break;
+                case 10: flag = cc_b; break;
+                case 11: flag = cc_be; break;
+                case 12: flag = cc_a; break;
+                case 13: flag = cc_ae; break;
+                case 14: flag = cc_l; break;
+                case 15: flag = cc_le; break;
+                case 16: flag = cc_g; break;
+                case 17: flag = cc_ge; break;
 
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
@@ -618,14 +631,14 @@ namespace CSX64
                 case 7: flag = !OF; break;
                 case 8: flag = CF; break;
                 case 9: flag = !CF; break;
-                case 10: flag = b; break;
-                case 11: flag = be; break;
-                case 12: flag = a; break;
-                case 13: flag = ae; break;
-                case 14: flag = l; break;
-                case 15: flag = le; break;
-                case 16: flag = g; break;
-                case 17: flag = ge; break;
+                case 10: flag = cc_b; break;
+                case 11: flag = cc_be; break;
+                case 12: flag = cc_a; break;
+                case 13: flag = cc_ae; break;
+                case 14: flag = cc_l; break;
+                case 15: flag = cc_le; break;
+                case 16: flag = cc_g; break;
+                case 17: flag = cc_ge; break;
                 case 18: flag = CX == 0; break;
                 case 19: flag = ECX == 0; break;
                 case 20: flag = RCX == 0; break;
@@ -1017,16 +1030,14 @@ namespace CSX64
             if (!FetchShiftOpFormat(out UInt64 s, out UInt64 m, out UInt64 val, out UInt64 count)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
-            UInt16 sh = (UInt16)(count & (sizecode == 3 ? 0x3ful : 0x1ful)); // mask shift val to 6 bits on 64-bit op, otherwise to 5 bits
-
             // shift of zero is no-op
-            if (sh != 0)
+            if (count != 0)
             {
-                UInt64 res = Truncate(val << sh, sizecode);
+                UInt64 res = Truncate(val << (UInt16)count, sizecode);
 
                 UpdateFlagsZSP(res, sizecode);
-                CF = sh < SizeBits(sizecode) ? ((val >> ((UInt16)SizeBits(sizecode) - sh)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
-                OF = sh == 1 ? Negative(res, sizecode) != CF : Rand.NextBool(); // OF is 1 if top 2 bits of original value were different (UND for sh != 1)
+                CF = count < SizeBits(sizecode) ? ((val >> (UInt16)(SizeBits(sizecode) - count)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
+                OF = count == 1 ? Negative(res, sizecode) != CF : Rand.NextBool(); // OF is 1 if top 2 bits of original value were different (UND for sh != 1)
                 AF = Rand.NextBool(); // AF is undefined
 
                 return StoreShiftOpFormat(s, m, res);
@@ -1038,16 +1049,14 @@ namespace CSX64
             if (!FetchShiftOpFormat(out UInt64 s, out UInt64 m, out UInt64 val, out UInt64 count)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
-            UInt16 sh = (UInt16)(count & (sizecode == 3 ? 0x3ful : 0x1ful)); // mask shift val to 6 bits on 64-bit op, otherwise to 5 bits
-
             // shift of zero is no-op
-            if (sh != 0)
+            if (count != 0)
             {
-                UInt64 res = val >> sh;
+                UInt64 res = val >> (UInt16)count;
 
                 UpdateFlagsZSP(res, sizecode);
-                CF = sh < SizeBits(sizecode) ? ((val >> (sh - 1)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
-                OF = sh == 1 ? Negative(val, sizecode) : Rand.NextBool(); // OF is high bit of original value (UND for sh != 1)
+                CF = count < SizeBits(sizecode) ? ((val >> (UInt16)(count - 1)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
+                OF = count == 1 ? Negative(val, sizecode) : Rand.NextBool(); // OF is high bit of original value (UND for sh != 1)
                 AF = Rand.NextBool(); // AF is undefined
 
                 return StoreShiftOpFormat(s, m, res);
@@ -1060,16 +1069,14 @@ namespace CSX64
             if (!FetchShiftOpFormat(out UInt64 s, out UInt64 m, out UInt64 val, out UInt64 count)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
-            UInt16 sh = (UInt16)(count & (sizecode == 3 ? 0x3ful : 0x1ful)); // mask shift val to 6 bits on 64-bit op, otherwise to 5 bits
-
             // shift of zero is no-op
-            if (sh != 0)
+            if (count != 0)
             {
-                UInt64 res = Truncate((UInt64)((Int64)SignExtend(val, sizecode) << sh), sizecode);
+                UInt64 res = Truncate((UInt64)((Int64)SignExtend(val, sizecode) << (UInt16)count), sizecode);
 
                 UpdateFlagsZSP(res, sizecode);
-                CF = sh < SizeBits(sizecode) ? ((val >> ((UInt16)SizeBits(sizecode) - sh)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
-                OF = sh == 1 ? Negative(res, sizecode) != CF : Rand.NextBool(); // OF is 1 if top 2 bits of original value were different (UND for sh != 1)
+                CF = count < SizeBits(sizecode) ? ((val >> (UInt16)(SizeBits(sizecode) - count)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
+                OF = count == 1 ? Negative(res, sizecode) != CF : Rand.NextBool(); // OF is 1 if top 2 bits of original value were different (UND for sh != 1)
                 AF = Rand.NextBool(); // AF is undefined
 
                 return StoreShiftOpFormat(s, m, res);
@@ -1081,16 +1088,14 @@ namespace CSX64
             if (!FetchShiftOpFormat(out UInt64 s, out UInt64 m, out UInt64 val, out UInt64 count)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
-            UInt16 sh = (UInt16)(count & (sizecode == 3 ? 0x3ful : 0x1ful)); // mask shift val to 6 bits on 64-bit op, otherwise to 5 bits
-
             // shift of zero is no-op
-            if (sh != 0)
+            if (count != 0)
             {
-                UInt64 res = Truncate((UInt64)((Int64)SignExtend(val, sizecode) >> sh), sizecode);
+                UInt64 res = Truncate((UInt64)((Int64)SignExtend(val, sizecode) >> (UInt16)count), sizecode);
 
                 UpdateFlagsZSP(res, sizecode);
-                CF = sh < SizeBits(sizecode) ? ((val >> (sh - 1)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
-                OF = sh == 1 ? false : Rand.NextBool(); // OF is cleared (UND for sh != 1)
+                CF = count < SizeBits(sizecode) ? ((val >> (UInt16)(count - 1)) & 1) == 1 : Rand.NextBool(); // CF holds last bit shifted out (UND for sh >= #bits)
+                OF = count == 1 ? false : Rand.NextBool(); // OF is cleared (UND for sh != 1)
                 AF = Rand.NextBool(); // AF is undefined
 
                 return StoreShiftOpFormat(s, m, res);
@@ -1103,16 +1108,15 @@ namespace CSX64
             if (!FetchShiftOpFormat(out UInt64 s, out UInt64 m, out UInt64 val, out UInt64 count)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
-            UInt16 sh = (UInt16)(count & (sizecode == 3 ? 0x3ful : 0x1ful)); // mask shift val to 6 bits on 64-bit op, otherwise to 5 bits
-            sh %= (UInt16)SizeBits(sizecode); // rotate performed modulo-n
+            count %= SizeBits(sizecode); // rotate performed modulo-n
 
             // shift of zero is no-op
-            if (sh != 0)
+            if (count != 0)
             {
-                UInt64 res = Truncate((val << sh) | (val >> ((UInt16)SizeBits(sizecode) - sh)), sizecode);
+                UInt64 res = Truncate((val << (UInt16)count) | (val >> (UInt16)(SizeBits(sizecode) - count)), sizecode);
 
-                CF = ((val >> ((UInt16)SizeBits(sizecode) - sh)) & 1) == 1; // CF holds last bit shifted around
-                OF = sh == 1 ? CF ^ Negative(res, sizecode) : Rand.NextBool(); // OF is xor of CF (after rotate) and high bit of result (UND if sh != 1)
+                CF = ((val >> (UInt16)(SizeBits(sizecode) - count)) & 1) == 1; // CF holds last bit shifted around
+                OF = count == 1 ? CF ^ Negative(res, sizecode) : Rand.NextBool(); // OF is xor of CF (after rotate) and high bit of result (UND if sh != 1)
 
                 return StoreShiftOpFormat(s, m, res);
             }
@@ -1123,16 +1127,15 @@ namespace CSX64
             if (!FetchShiftOpFormat(out UInt64 s, out UInt64 m, out UInt64 val, out UInt64 count)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
-            UInt16 sh = (UInt16)(count & (sizecode == 3 ? 0x3ful : 0x1ful)); // mask shift val to 6 bits on 64-bit op, otherwise to 5 bits
-            sh %= (UInt16)SizeBits(sizecode); // rotate performed modulo-n
+            count %= SizeBits(sizecode); // rotate performed modulo-n
 
             // shift of zero is no-op
-            if (sh != 0)
+            if (count != 0)
             {
-                UInt64 res = Truncate((val >> sh) | (val << ((UInt16)SizeBits(sizecode) - sh)), sizecode);
+                UInt64 res = Truncate((val >> (UInt16)count) | (val << (UInt16)(SizeBits(sizecode) - count)), sizecode);
 
-                CF = ((val >> (sh - 1)) & 1) == 1; // CF holds last bit shifted around
-                OF = sh == 1 ? Negative(res, sizecode) ^ (((res >> ((8 << (ushort)sizecode) - 2)) & 1) != 0) : Rand.NextBool(); // OF is xor of 2 highest bits of result
+                CF = ((val >> (UInt16)(count - 1)) & 1) == 1; // CF holds last bit shifted around
+                OF = count == 1 ? Negative(res, sizecode) ^ (((res >> (UInt16)(SizeBits(sizecode) - 2)) & 1) != 0) : Rand.NextBool(); // OF is xor of 2 highest bits of result
 
                 return StoreShiftOpFormat(s, m, res);
             }
@@ -1144,15 +1147,14 @@ namespace CSX64
             if (!FetchShiftOpFormat(out UInt64 s, out UInt64 m, out UInt64 val, out UInt64 count)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
-            UInt16 sh = (UInt16)(count & (sizecode == 3 ? 0x3ful : 0x1ful)); // mask shift val to 6 bits on 64-bit op, otherwise to 5 bits
-            sh %= (UInt16)(SizeBits(sizecode) + 1); // rotate performed modulo-n+1
+            count %= SizeBits(sizecode) + 1; // rotate performed modulo-n+1
 
             // shift of zero is no-op
-            if (sh != 0)
+            if (count != 0)
             {
                 UInt64 res = val, temp;
                 UInt64 high_mask = 1ul << (UInt16)(SizeBits(sizecode) - 1); // mask for highest bit
-                for (UInt16 i = 0; i < sh; ++i)
+                for (UInt16 i = 0; i < count; ++i)
                 {
                     temp = res << 1; // shift res left by 1, store in temp
                     temp |= CF ? 1 : 0ul; // or in CF to the lowest bit
@@ -1160,7 +1162,7 @@ namespace CSX64
                     res = temp; // store back to res
                 }
 
-                OF = sh == 1 ? CF ^ Negative(res, sizecode) : Rand.NextBool(); // OF is xor of CF (after rotate) and high bit of result (UND if sh != 1)
+                OF = count == 1 ? CF ^ Negative(res, sizecode) : Rand.NextBool(); // OF is xor of CF (after rotate) and high bit of result (UND if sh != 1)
 
                 return StoreShiftOpFormat(s, m, res);
             }
@@ -1171,15 +1173,14 @@ namespace CSX64
             if (!FetchShiftOpFormat(out UInt64 s, out UInt64 m, out UInt64 val, out UInt64 count)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
-            UInt16 sh = (UInt16)(count & (sizecode == 3 ? 0x3ful : 0x1ful)); // mask shift val to 6 bits on 64-bit op, otherwise to 5 bits
-            sh %= (UInt16)(SizeBits(sizecode) + 1); // rotate performed modulo-n+1
+            count %= SizeBits(sizecode) + 1; // rotate performed modulo-n+1
 
             // shift of zero is no-op
-            if (sh != 0)
+            if (count != 0)
             {
                 UInt64 res = val, temp;
                 UInt64 high_mask = 1ul << (UInt16)(SizeBits(sizecode) - 1); // mask for highest bit
-                for (UInt16 i = 0; i < sh; ++i)
+                for (UInt16 i = 0; i < count; ++i)
                 {
                     temp = res >> 1; // shift res right by 1, store in temp
                     temp |= CF ? high_mask : 0ul; // or in CF to the highest bit
@@ -1187,7 +1188,7 @@ namespace CSX64
                     res = temp; // store back to res
                 }
 
-                OF = sh == 1 ? Negative(res, sizecode) ^ (((res >> ((8 << (ushort)sizecode) - 2)) & 1) != 0) : Rand.NextBool(); // OF is xor of 2 highest bits of result
+                OF = count == 1 ? Negative(res, sizecode) ^ (((res >> (UInt16)(SizeBits(sizecode) - 2)) & 1) != 0) : Rand.NextBool(); // OF is xor of 2 highest bits of result
 
                 return StoreShiftOpFormat(s, m, res);
             }
@@ -1304,9 +1305,14 @@ namespace CSX64
             switch (sizecode)
             {
                 case 3:
-                    res = (a << 56) | ((a & 0x000000000000ff00) << 40) | ((a & 0x0000000000ff0000) << 24) | ((a & 0x00000000ff000000) << 8)
-                    | ((a & 0x000000ff00000000) >> 8) | ((a & 0x0000ff0000000000) >> 24) | ((a & 0x00ff000000000000) >> 40) | (a >> 56); break;
-                case 2: res = (a << 24) | ((a & 0x0000ff00) << 8) | ((a & 0x00ff0000) >> 8) | (a >> 24); break;
+                    res = (a << 32) | (a >> 32);
+                    res = ((a & 0x0000ffff0000ffff) << 16) | ((a & 0xffff0000ffff0000) >> 16);
+                    res = ((a & 0x00ff00ff00ff00ff) << 8) | ((a & 0xff00ff00ff00ff00) >> 8);
+                    break;
+                case 2:
+                    res = (a << 16) | (a >> 16);
+                    res = ((a & 0x00ff00ff) << 8) | ((a & 0xff00ff00) >> 8);
+                    break;
                 case 1: res = (a << 8) | (a >> 8); break;
                 case 0: res = a; break;
             }
@@ -1771,10 +1777,10 @@ namespace CSX64
             {
                 case 0: flag = ZF; break;
                 case 1: flag = !ZF; break;
-                case 2: flag = b; break;
-                case 3: flag = be; break;
-                case 4: flag = a; break;
-                case 5: flag = ae; break;
+                case 2: flag = cc_b; break;
+                case 3: flag = cc_be; break;
+                case 4: flag = cc_a; break;
+                case 5: flag = cc_ae; break;
                 case 6: flag = PF; break;
                 case 7: flag = !PF; break;
 
