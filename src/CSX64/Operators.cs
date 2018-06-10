@@ -169,9 +169,10 @@ namespace CSX64
         }
 
         /*
-        [4: dest][2: size][1: h][1: mem]
+        [4: dest][2: size][1: dh][1: mem]
             mem = 0:             dest <- f(dest)
             mem = 1: [address]   M[address] <- f(M[address])
+            (dh marks AH, BH, CH, or DH for dest)
         */
         private bool FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, bool get_a = true, int _a_sizecode = -1)
         {
@@ -279,7 +280,7 @@ namespace CSX64
             mode = 0:               reg
             mode = 1:               h reg (AH, BH, CH, or DH)
             mode = 2: [size: imm]   imm
-            mode = 3: [address],    M[address]
+            mode = 3: [address]     M[address]
         */
         private bool FetchIMMRMFormat(out UInt64 s, out UInt64 a, int _a_sizecode = -1)
         {
@@ -348,9 +349,10 @@ namespace CSX64
 
             switch (ext)
             {
-                case 0: return PushRaw(2, RFLAGS);
-                case 1: return PushRaw(4, RFLAGS & 0x00fcffff); // VM and RF flags are not saved in the stored image for PUSHD and PUSHQ
-                case 2: return PushRaw(8, RFLAGS & 0x00fcffff);
+                case 0:
+                case 1: // VM and RF flags are cleared in the stored image
+                case 2:
+                    return PushRaw(Size(ext + 1), RFLAGS & ~0x30000ul);
 
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
@@ -362,10 +364,10 @@ namespace CSX64
             switch (ext)
             {
                 case 0:
-                case 1:
+                case 1: // can't modify reserved flags
                 case 2:
                     if (!PopRaw(Size(ext + 1), out ext)) return false;
-                    RFLAGS = RFLAGS & ~0x7fd5ul | ext & 0x7fd5ul; // can't modify reserved flags (for now we only care about the low 16 flags)
+                    RFLAGS = RFLAGS & ~0x003f0fd5ul | ext & 0x003f0fd5ul;
                     return true;
 
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
@@ -373,7 +375,7 @@ namespace CSX64
         }
 
         /*
-        [1: value][7: flag]
+        [1: value][7: flag_id]
             flag = 0: CF
             flag = 1: IF
             flag = 2: DF
@@ -518,7 +520,7 @@ namespace CSX64
 		        r1 <- r2
 		        r2 <- r1
 	        mem = 1: [address]
-		        r1         <- M[address]
+		        r1 <- M[address]
 		        M[address] <- r1
             (r1h and r2h mark AH, BH, CH, or DH for r1 or r2)
         */
@@ -650,8 +652,20 @@ namespace CSX64
 
             return true;
         }
-        private bool ProcessLOOP(bool continue_flag)
+        private bool ProcessLOOPcc()
         {
+            // get the cc continue flag
+            bool continue_flag;
+            if (!GetMemAdv(1, out UInt64 ext)) return false;
+            switch (ext)
+            {
+                case 0: continue_flag = true; break; // LOOP
+                case 1: continue_flag = ZF; break;   // LOOPe
+                case 2: continue_flag = !ZF; break;  // LOOPne
+
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
+            }
+
             if (!FetchIMMRMFormat(out UInt64 s, out UInt64 val)) return false;
             UInt64 sizecode = (s >> 2) & 3;
 
@@ -682,7 +696,7 @@ namespace CSX64
             return PushRaw(Size(sizecode), a);
         }
         /*
-        [4: reg][2: size][1:][1: mem]
+        [4: dest][2: size][1:][1: mem]
             mem = 0:             reg
             mem = 1: [address]   M[address]
         */
@@ -707,6 +721,10 @@ namespace CSX64
             else return GetAddressAdv(out s) && SetMemRaw(s, Size(sizecode), val);
         }
 
+        /*
+        [4: dest][2: size][2:]   [address]
+            dest <- address
+        */
         private bool ProcessLEA()
         {
             if (!GetMemAdv(1, out UInt64 s) || !GetAddressAdv(out UInt64 address)) return false;
@@ -1429,8 +1447,11 @@ namespace CSX64
         /*
         [8: ext]
             ext = 0: CWD
-            ext = 0: CDQ
-            ext = 0: CQO
+            ext = 1: CDQ
+            ext = 2: CQO
+            ext = 3: CBW
+            ext = 4: CWDE
+            ext = 5: CDQE
         */
         private bool ProcessCxy()
         {
@@ -1442,24 +1463,9 @@ namespace CSX64
                 case 1: EDX = (EAX & 0x80000000) == 0 ? 0u : 0xffffffff; return true;
                 case 2: RDX = (RAX & 0x8000000000000000) == 0 ? 0ul : 0xffffffffffffffff; return true;
 
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-        /*
-        [8: ext]
-            ext = 0: CBW
-            ext = 0: CWDE
-            ext = 0: CDQE
-        */
-        private bool ProcessCxyE()
-        {
-            if (!GetMemAdv(1, out UInt64 ext)) return false;
-
-            switch (ext)
-            {
-                case 0: AX = (UInt16)SignExtend(AL, 0); return true;
-                case 1: EAX = (UInt32)SignExtend(AX, 1); return true;
-                case 2: RAX = SignExtend(EAX, 2); return true;
+                case 3: AX = (UInt16)SignExtend(AL, 0); return true;
+                case 4: EAX = (UInt32)SignExtend(AX, 1); return true;
+                case 5: RAX = SignExtend(EAX, 2); return true;
 
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }

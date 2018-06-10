@@ -3421,9 +3421,9 @@ namespace CSX64
                         case "JECXZ": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 19, 14)) return args.res; break;
                         case "JRCXZ": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 20, 14)) return args.res; break;
 
-                        case "LOOP": if (!args.TryProcessIMMRM(OPCode.LOOP, false, 0, 14)) return args.res; break;
-                        case "LOOPZ": case "LOOPE": if (!args.TryProcessIMMRM(OPCode.LOOPe, false, 0, 14)) return args.res; break;
-                        case "LOOPNZ": case "LOOPNE": if (!args.TryProcessIMMRM(OPCode.LOOPne, false, 0, 14)) return args.res; break;
+                        case "LOOP": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, 0, 14)) return args.res; break;
+                        case "LOOPZ": case "LOOPE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, 1, 14)) return args.res; break;
+                        case "LOOPNZ": case "LOOPNE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, 2, 14)) return args.res; break;
 
                         case "CALL": if (!args.TryProcessIMMRM(OPCode.CALL, false, 0, 14)) return args.res; break;
                         case "RET": if (!args.TryProcessNoArgOp(OPCode.RET)) return args.res; break;
@@ -3497,9 +3497,9 @@ namespace CSX64
                         case "CDQ": if (!args.TryProcessNoArgOp(OPCode.Cxy, true, 1)) return args.res; break;
                         case "CQO": if (!args.TryProcessNoArgOp(OPCode.Cxy, true, 2)) return args.res; break;
 
-                        case "CBW": if (!args.TryProcessNoArgOp(OPCode.CxyE, true, 0)) return args.res; break;
-                        case "CWDE": if (!args.TryProcessNoArgOp(OPCode.CxyE, true, 1)) return args.res; break;
-                        case "CDQE": if (!args.TryProcessNoArgOp(OPCode.CxyE, true, 2)) return args.res; break;
+                        case "CBW": if (!args.TryProcessNoArgOp(OPCode.Cxy, true, 3)) return args.res; break;
+                        case "CWDE": if (!args.TryProcessNoArgOp(OPCode.Cxy, true, 4)) return args.res; break;
+                        case "CDQE": if (!args.TryProcessNoArgOp(OPCode.Cxy, true, 5)) return args.res; break;
 
                         case "MOVZX": if (!args.TryProcessMOVxX(OPCode.MOVxX, false)) return args.res; break;
                         case "MOVSX": if (!args.TryProcessMOVxX(OPCode.MOVxX, true)) return args.res; break;

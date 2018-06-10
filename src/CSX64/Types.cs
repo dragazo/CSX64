@@ -10,7 +10,8 @@ namespace CSX64
     {
         None, OutOfBounds, UnhandledSyscall, UndefinedBehavior, ArithmeticError, Abort,
         IOFailure, FSDisabled, AccessViolation, InsufficientFDs, FDNotInUse, NotImplemented, StackOverflow,
-        FPUStackOverflow, FPUStackUnderflow, FPUError, FPUAccessViolation
+        FPUStackOverflow, FPUStackUnderflow, FPUError, FPUAccessViolation,
+        AlignmentViolation
     }
     public enum OPCode
     {
@@ -23,7 +24,7 @@ namespace CSX64
 
         SETcc, MOV, MOVcc, XCHG,
 
-        JMP, Jcc, LOOP, LOOPe, LOOPne, CALL, RET,
+        JMP, Jcc, LOOPcc, CALL, RET,
         PUSH, POP,
         LEA,
 
@@ -33,10 +34,10 @@ namespace CSX64
         AND, OR, XOR,
         INC, DEC, NEG, NOT,
 
-        CMP, TEST, CMPZ,
+        CMP, CMPZ, TEST,
 
         BSWAP, BEXTR, BLSI, BLSMSK, BLSR, ANDN, BTx,
-        Cxy, CxyE, MOVxX,
+        Cxy, MOVxX,
 
         // x87 instructions
 
@@ -60,7 +61,7 @@ namespace CSX64
         Move, Remove,
         Mkdir, Rmdir,
 
-        Exit
+        Exit,
     }
 
     /// <summary>

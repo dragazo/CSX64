@@ -1,64 +1,55 @@
 global malloc
 global free
 
-heap_top: emit __prog_end__ # top of memory heap
-
-# ($1:64 size) -> ($0:64 ptr or null if fail)
-# allocates a number of bytes of contiguous dynamic storage space
-# returns a pointer to the start of the allocated data
-# indexing outside of this range is undefined behavior
+; (rdi:64 size) -> (rax:64 ptr or null if fail)
+; allocates a number of bytes of contiguous dynamic storage space
+; returns a pointer to the start of the allocated data
+; indexing outside of this range is undefined behavior
 malloc:
-	# cannot allocate 0 bytes
-	cmpz $1
-	jnz [.begin]
-	xor $0, $0
-	jmp [.end]
+	; cannot allocate 0 bytes
+	cmp rdi, 0
+	jnz .begin
+	xor rax, rax
+	ret
 	
 	.begin:
-	mov $2, __prog_end__ # load starting position (end of program segment)
-	jmp [.search_aft]
+	mov rcx, __heap__ ; load starting position (end of program segment)
+	jmp .search_aft
 	.search_top:
-		cmpz:8 [$2]       # cmp0 bucket settings
-		jnz [.search_inc] # if nonzero, bucket is in use
+		cmp byte ptr [rcx], 0 ; cmp bucket settings
+		jnz .search_inc       ; if nonzero, bucket is in use
 		
-		cmp [$2+1], $1 # cmp bucket size to size requested
-		jae [.found]   # if large enough, we found one
+		cmp [rcx+1], rdi ; cmp bucket size to size requested
+		jae .found       ; if large enough, we found one
 	.search_inc:
-		add $2, [$2+1] # add bucket size
-		add $2, 9      # add bucket padding
+		add rcx, [rcx+1] ; add bucket size
+		add rcx, 9       ; add bucket padding
 	.search_aft:
-		cmp $2, [heap_top] # while $2 < [heap_top]
-		jb [.search_top]
+		cmp rcx, [heap_top] ; while rcx < [heap_top]
+		jb .search_top
 	
-	# none found, create a new bucket
-	mov [$2+1], $1 # set its size
-	la $3, [$2+9+$1] # increment top past the new bucket
-	mov [heap_top], $3
+	; none found, create a new bucket
+	mov [rcx+1], rdi     ; set its size
+	lea rdx, [rcx+9+rdi] ; increment top past the new bucket
+	mov [heap_top], rdx
 	
-	.found: # found a spot
-		mov:8 [$2], 1 # mark as used
-		la $0, [$2+9] # store start of bucket data for ret
+	.found: ; found a spot
+		mov byte ptr [rcx], 1 ; mark as used
+		lea rax, [rcx+9]      ; store start of bucket data for ret
 	.end: ret
 
-# ($1:64 address) -> ()
-# frees the memory provided by malloc
-# undefined if used on anything not returned by malloc
-# noop on null
+; (rdi:64 address) -> ()
+; frees the memory provided by malloc
+; undefined if used on anything not returned by malloc
+; noop on null
 free:
-	cmpz $1 # cmp 0
-	jz [.end]
+	cmp rdi, 0 ; cmp 0
+	jz .end
 	
-	mov:8 [$1-9], 0 # mark as unused
+	mov byte ptr [rdi-9], 0 ; mark as unused
 	
 	.end: ret
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
+
+segment .data
+
+heap_top: dq __heap__ ; top of memory heap

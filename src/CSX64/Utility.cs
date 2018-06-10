@@ -134,33 +134,6 @@ namespace CSX64
             return b.ToString();
         }
 
-        /// <summary>
-        /// Writes debugging data about the computer object via <see cref="Print(string)"/>
-        /// </summary>
-        /// <param name="c">computer objet to log</param>
-        public static string GetDebugString(this Computer c)
-        {
-            return CreateTable(new int[] { 26, 10, 0 }, new string[][]
-               {
-                new string[] { $"RAX: {c.RAX:x16}", $"CF: {(c.CF ? 1 : 0)}", $"RFLAGS: {c.RFLAGS:x16}" },
-                new string[] { $"RBX: {c.RBX:x16}", $"PF: {(c.PF ? 1 : 0)}", $"RIP:    {c.RIP:x16}" },
-                new string[] { $"RCX: {c.RCX:x16}", $"AF: {(c.AF ? 1 : 0)}" },
-                new string[] { $"RDX: {c.RDX:x16}", $"ZF: {(c.ZF ? 1 : 0)}", $"ST0: {(c.ST0_InUse ? c.ST0.ToString() : "Empty")}" },
-                new string[] { $"RSI: {c.RSI:x16}", $"SF: {(c.SF ? 1 : 0)}",$"ST1: {(c.ST1_InUse ? c.ST1.ToString() : "Empty")}" },
-                new string[] { $"RDI: {c.RDI:x16}", $"OF: {(c.OF ? 1 : 0)}", $"ST2: {(c.ST2_InUse ? c.ST2.ToString() : "Empty")}" },
-                new string[] { $"RBP: {c.RBP:x16}", null, $"ST3: {(c.ST3_InUse ? c.ST3.ToString() : "Empty")}" },
-                new string[] { $"RSP: {c.RSP:x16}", $"b:  {(c.cc_b ? 1 : 0)}",$"ST4: {(c.ST4_InUse ? c.ST4.ToString() : "Empty")}" },
-                new string[] { $"R8:  {c.R8:x16}", $"be: {(c.cc_be ? 1 : 0)}", $"ST5: {(c.ST5_InUse ? c.ST5.ToString() : "Empty")}" },
-                new string[] { $"R9:  {c.R9:x16}", $"a:  {(c.cc_a ? 1 : 0)}",$"ST6: {(c.ST6_InUse ? c.ST6.ToString() : "Empty")}" },
-                new string[] { $"R10: {c.R10:x16}", $"ae: {(c.cc_ae ? 1 : 0)}",$"ST7: {(c.ST7_InUse ? c.ST7.ToString() : "Empty")}" },
-                new string[] { $"R11: {c.R11:x16}" },
-                new string[] { $"R12: {c.R12:x16}", $"l:  {(c.cc_l ? 1 : 0)}",$"C0: {(c.C0 ? 1 : 0)}" },
-                new string[] { $"R13: {c.R13:x16}", $"le: {(c.cc_le ? 1 : 0)}", $"C1: {(c.C1 ? 1 : 0)}" },
-                new string[] { $"R14: {c.R14:x16}", $"g:  {(c.cc_g ? 1 : 0)}",$"C2: {(c.C2 ? 1 : 0)}" },
-                new string[] { $"R15: {c.R15:x16}", $"ge: {(c.cc_ge ? 1 : 0)}", $"C3: {(c.C3 ? 1 : 0)}" },
-               });
-        }
-
         // -- memory utilities -- //
 
         /// <summary>

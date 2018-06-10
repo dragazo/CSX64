@@ -7,6 +7,7 @@ namespace CSX64
     public partial class Computer
     {
         // source: https://en.wikipedia.org/wiki/FLAGS_register
+        // source: http://www.eecg.toronto.edu/~amza/www.mindsec.com/files/x86regs.html
 
         public bool CF
         {

@@ -324,9 +324,7 @@ namespace CSX64
 
                 case OPCode.JMP: return ProcessJMP(ref op);
                 case OPCode.Jcc: return ProcessJcc();
-                case OPCode.LOOP: return ProcessLOOP(true);
-                case OPCode.LOOPe: return ProcessLOOP(ZF);
-                case OPCode.LOOPne: return ProcessLOOP(!ZF);
+                case OPCode.LOOPcc: return ProcessLOOPcc();
 
                 case OPCode.CALL: return ProcessJMP(ref op) && PushRaw(8, op);
                 case OPCode.RET: if (!PopRaw(8, out op)) return false; RIP = op; return true;
@@ -363,8 +361,8 @@ namespace CSX64
                 case OPCode.NOT: return ProcessNOT();
 
                 case OPCode.CMP: return ProcessSUB(false);
-                case OPCode.TEST: return ProcessAND(false);
                 case OPCode.CMPZ: return ProcessCMPZ();
+                case OPCode.TEST: return ProcessAND(false);
 
                 case OPCode.BSWAP: return ProcessBSWAP();
                 case OPCode.BEXTR: return ProcessBEXTR();
@@ -375,7 +373,6 @@ namespace CSX64
                 case OPCode.BTx: return ProcessBTx();
 
                 case OPCode.Cxy: return ProcessCxy();
-                case OPCode.CxyE: return ProcessCxyE();
                 case OPCode.MOVxX: return ProcessMOVxX();
 
                 // x87 instructions
@@ -424,6 +421,33 @@ namespace CSX64
                 // otherwise, unknown opcode
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
+        }
+
+        /// <summary>
+        /// Creates a string containing all register/flag states"/>
+        /// </summary>
+        /// <param name="c">computer objet to log</param>
+        public string GetDebugString()
+        {
+            return CreateTable(new int[] { 26, 10, 0 }, new string[][]
+               {
+                new string[] { $"RAX: {RAX:x16}", $"CF: {(CF ? 1 : 0)}", $"RFLAGS: {RFLAGS:x16}" },
+                new string[] { $"RBX: {RBX:x16}", $"PF: {(PF ? 1 : 0)}", $"RIP:    {RIP:x16}" },
+                new string[] { $"RCX: {RCX:x16}", $"AF: {(AF ? 1 : 0)}" },
+                new string[] { $"RDX: {RDX:x16}", $"ZF: {(ZF ? 1 : 0)}", $"ST0: {(ST0_InUse ? ST0.ToString() : "Empty")}" },
+                new string[] { $"RSI: {RSI:x16}", $"SF: {(SF ? 1 : 0)}",$"ST1: {(ST1_InUse ? ST1.ToString() : "Empty")}" },
+                new string[] { $"RDI: {RDI:x16}", $"OF: {(OF ? 1 : 0)}", $"ST2: {(ST2_InUse ? ST2.ToString() : "Empty")}" },
+                new string[] { $"RBP: {RBP:x16}", null, $"ST3: {(ST3_InUse ? ST3.ToString() : "Empty")}" },
+                new string[] { $"RSP: {RSP:x16}", $"b:  {(cc_b ? 1 : 0)}",$"ST4: {(ST4_InUse ? ST4.ToString() : "Empty")}" },
+                new string[] { $"R8:  {R8:x16}", $"be: {(cc_be ? 1 : 0)}", $"ST5: {(ST5_InUse ? ST5.ToString() : "Empty")}" },
+                new string[] { $"R9:  {R9:x16}", $"a:  {(cc_a ? 1 : 0)}",$"ST6: {(ST6_InUse ? ST6.ToString() : "Empty")}" },
+                new string[] { $"R10: {R10:x16}", $"ae: {(cc_ae ? 1 : 0)}",$"ST7: {(ST7_InUse ? ST7.ToString() : "Empty")}" },
+                new string[] { $"R11: {R11:x16}" },
+                new string[] { $"R12: {R12:x16}", $"l:  {(cc_l ? 1 : 0)}",$"C0: {(C0 ? 1 : 0)}" },
+                new string[] { $"R13: {R13:x16}", $"le: {(cc_le ? 1 : 0)}", $"C1: {(C1 ? 1 : 0)}" },
+                new string[] { $"R14: {R14:x16}", $"g:  {(cc_g ? 1 : 0)}",$"C2: {(C2 ? 1 : 0)}" },
+                new string[] { $"R15: {R15:x16}", $"ge: {(cc_ge ? 1 : 0)}", $"C3: {(C3 ? 1 : 0)}" },
+               });
         }
     }
 }
