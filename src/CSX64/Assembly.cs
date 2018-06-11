@@ -2646,6 +2646,51 @@ namespace CSX64
 
                 return true;
             }
+            public bool TryProcessRR_RM(OPCode op, bool has_ext_op = false, UInt64 ext_op = 0, UInt64 sizemask = 15)
+            {
+                if (args.Length != 3) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 3 operands"); return false; }
+
+                // write op code
+                if (!TryAppendVal(1, (UInt64)op)) return false;
+                if (has_ext_op) { if (!TryAppendVal(1, ext_op)) return false; }
+
+                // reg, *, *
+                if (TryParseCPURegister(args[0], out UInt64 dest, out UInt64 sizecode, out bool dest_high))
+                {
+                    // apply size mask
+                    if ((Size(sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified operand size"); return false; }
+
+                    // reg, reg, *
+                    if (TryParseCPURegister(args[1], out UInt64 src_1, out UInt64 src_1_sizecode, out bool src_1_high))
+                    {
+                        // reg, reg, reg
+                        if (TryParseCPURegister(args[2], out UInt64 src_2, out UInt64 src_2_sizecode, out bool src_2_high))
+                        {
+                            // ensure sizes match
+                            if (sizecode != src_1_sizecode || sizecode != src_2_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Size mismatch"); return false; }
+
+                            if (!TryAppendVal(1, (dest << 4) | (sizecode << 2) | (dest_high ? 2 : 0ul) | 0)) return false;
+                            if (!TryAppendVal(1, (src_1_high ? 128 : 0ul) | src_1)) return false;
+                            if (!TryAppendVal(1, (src_2_high ? 128 : 0ul) | src_2)) return false;
+                        }
+                        // reg, reg, mem
+                        else if (TryParseAddress(args[2], out UInt64 a, out UInt64 b, out Expr ptr_base, out src_2_sizecode, out bool src_2_explicit_size))
+                        {
+                            // ensure sizes match
+                            if (sizecode != src_1_sizecode || src_2_explicit_size && sizecode != src_2_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Size mismatch"); return false; }
+
+                            if (!TryAppendVal(1, (dest << 4) | (sizecode << 2) | (dest_high ? 2 : 0ul) | 1)) return false;
+                            if (!TryAppendVal(1, (src_1_high ? 128 : 0ul) | src_1)) return false;
+                            if (!TryAppendAddress(a, b, ptr_base)) return false;
+                        }
+                        else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Second operand must be a register or memory value"); return false; }
+                    }
+                    else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Second operand must be a register"); return false; }
+                }
+                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: First operand must be a register"); return false; }
+
+                return true;
+            }
 
             public bool TryProcessNoArgOp(OPCode op, bool has_ext_op = false, UInt64 ext_op = 0)
             {
@@ -3141,6 +3186,7 @@ namespace CSX64
 
                 return true;
             }
+            
         }
 
         /// <summary>
@@ -3486,7 +3532,7 @@ namespace CSX64
                         case "BLSI": if (!args.TryProcessUnaryOp(OPCode.BLSI)) return args.res; break;
                         case "BLSMSK": if (!args.TryProcessUnaryOp(OPCode.BLSMSK)) return args.res; break;
                         case "BLSR": if (!args.TryProcessUnaryOp(OPCode.BLSR)) return args.res; break;
-                        case "ANDN": if (!args.TryProcessBinaryOp(OPCode.ANDN)) return args.res; break;
+                        case "ANDN": if (!args.TryProcessRR_RM(OPCode.ANDN, false, 0, 12)) return args.res; break;
 
                         case "BT": if (!args.TryProcessBinaryOp(OPCode.BTx, true, 0, 15, 0, false)) return args.res; break;
                         case "BTS": if (!args.TryProcessBinaryOp(OPCode.BTx, true, 1, 15, 0, false)) return args.res; break;
@@ -3515,8 +3561,8 @@ namespace CSX64
                         case "FLDL2E": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 2)) return args.res; break;
                         case "FLDPI": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 3)) return args.res; break;
                         case "FLDLG2": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 4)) return args.res; break;
-                        case "FLDLN2": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 4)) return args.res; break;
-                        case "FLDZ": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 5)) return args.res; break;
+                        case "FLDLN2": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 5)) return args.res; break;
+                        case "FLDZ": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 6)) return args.res; break;
 
                         case "FLD": if (!args.TryProcessFLD(OPCode.FLD, false)) return args.res; break;
                         case "FILD": if (!args.TryProcessFLD(OPCode.FLD, true)) return args.res; break;
@@ -3532,10 +3578,10 @@ namespace CSX64
 
                         case "FMOVE": if (!args.TryProcessFMOVcc(OPCode.FMOVcc, 0)) return args.res; break;
                         case "FMOVNE": if (!args.TryProcessFMOVcc(OPCode.FMOVcc, 1)) return args.res; break;
-                        case "FMOVB": if (!args.TryProcessFMOVcc(OPCode.FMOVcc, 2)) return args.res; break;
-                        case "FMOVBE": if (!args.TryProcessFMOVcc(OPCode.FMOVcc, 3)) return args.res; break;
-                        case "FMOVA": if (!args.TryProcessFMOVcc(OPCode.FMOVcc, 4)) return args.res; break;
-                        case "FMOVAE": if (!args.TryProcessFMOVcc(OPCode.FMOVcc, 5)) return args.res; break;
+                        case "FMOVB": case "FMOVNAE": if (!args.TryProcessFMOVcc(OPCode.FMOVcc, 2)) return args.res; break;
+                        case "FMOVBE": case "FMOVNA": if (!args.TryProcessFMOVcc(OPCode.FMOVcc, 3)) return args.res; break;
+                        case "FMOVA": case "FMOVNBE": if (!args.TryProcessFMOVcc(OPCode.FMOVcc, 4)) return args.res; break;
+                        case "FMOVAE": case "FMOVNB": if (!args.TryProcessFMOVcc(OPCode.FMOVcc, 5)) return args.res; break;
                         case "FMOVU": if (!args.TryProcessFMOVcc(OPCode.FMOVcc, 6)) return args.res; break;
                         case "FMOVNU": if (!args.TryProcessFMOVcc(OPCode.FMOVcc, 7)) return args.res; break;
 
@@ -3683,7 +3729,7 @@ namespace CSX64
         /// <param name="exe">the resulting executable</param>
         /// <param name="objs">the object files to link. should all be clean</param>
         /// <exception cref="ArgumentException"></exception>
-        public static LinkResult Link(out byte[] exe, params ObjectFile[] objs)
+        public static LinkResult Link(out byte[] exe, ObjectFile[] objs, string entry_point = "main")
         {
             exe = null; // initially null result
 
@@ -3748,14 +3794,14 @@ namespace CSX64
                     if (obj.Symbols.ContainsKey(reserved)) return new LinkResult(LinkError.SymbolRedefinition, $"Object file defined symbol with name \"{reserved}\" (reserved)");
             }
 
-            // ensure we got a "main" global symbol
-            if (!global_to_obj.TryGetValue("main", out ObjectFile main_obj)) return new LinkResult(LinkError.MissingSymbol, "No entry point");
+            // ensure the entry point was defined
+            if (!global_to_obj.TryGetValue(entry_point, out ObjectFile main_obj)) return new LinkResult(LinkError.MissingSymbol, "No entry point");
 
             // make sure we start the merge process with the main object file
             include_queue.Enqueue(main_obj);
 
             // add a hole for the call location of the header
-            main_obj.TextHoles.Add(new HoleData() { Address = 2 - (UInt32)text.Count, Size = 8, Expr = new Expr() { Token = "main" }, Line = -1 });
+            main_obj.TextHoles.Add(new HoleData() { Address = 2 - (UInt32)text.Count, Size = 8, Expr = new Expr() { Token = entry_point }, Line = -1 });
 
             // -- merge things -- //
 

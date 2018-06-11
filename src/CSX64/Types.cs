@@ -75,12 +75,12 @@ namespace CSX64
         public UInt64 x64;
 
         /// <summary>
-        /// gets/sets the low dword
+        /// gets/sets the low dword. As per Intel standard, setting the low dword zeroes the high dword.
         /// </summary>
         public UInt32 x32
         {
             get => (UInt32)x64;
-            set => x64 = x64 & ~0xfffffffful | value;
+            set => x64 = value;
         }
 
         /// <summary>
@@ -116,8 +116,32 @@ namespace CSX64
         /// <param name="sizecode">the size code to select</param>
         internal UInt64 this[UInt64 sizecode]
         {
-            get => (((1ul << (8 << (ushort)sizecode)) & ~1ul) - 1) & x64;
-            set => x64 = ~(((1ul << (8 << (ushort)sizecode)) & ~1ul) - 1) & x64 | (((1ul << (8 << (ushort)sizecode)) & ~1ul) - 1) & value;
+            get
+            {
+                //(((1ul << (8 << (ushort)sizecode)) & ~1ul) - 1) & x64;
+                switch (sizecode)
+                {
+                    case 3: return x64;
+                    case 2: return x32;
+                    case 1: return x16;
+                    case 0: return x8;
+
+                    default: throw new ArgumentOutOfRangeException("register sizecode must be on range [0,3]");
+                }
+            }
+            set
+            {
+                //x64 = ~(((1ul << (8 << (ushort)sizecode)) & ~1ul) - 1) & x64 | (((1ul << (8 << (ushort)sizecode)) & ~1ul) - 1) & value;
+                switch (sizecode)
+                {
+                    case 3: x64 = value; return;
+                    case 2: x32 = (UInt32)value; return;
+                    case 1: x16 = (UInt16)value; return;
+                    case 0: x8 = (byte)value; return;
+
+                    default: throw new ArgumentOutOfRangeException("register sizecode must be on range [0,3]");
+                }
+            }
         }
     }
 
@@ -175,24 +199,70 @@ namespace CSX64
             Interactive = interactive;
         }
         /// <summary>
-        /// Unlinks the stream and makes this file descriptor unused. If managed, first closes the stream. If not currenty in use, does nothing.
+        /// Unlinks the stream and makes this file descriptor unused. If managed, first closes the stream.
+        /// If not currenty in use, does nothing. Returns true if successful (no errors).
         /// </summary>
-        public void Close()
+        public bool Close()
         {
+            // closing unused file is no-op
             if (InUse)
             {
-                // only close managed streams
+                // if the file is managed
                 if (Managed)
                 {
                     // close the stream
                     try { BaseStream.Close(); }
-                    catch (Exception) { }
-                    // ensure stream is nulled even if close() throws
-                    finally { BaseStream = null; }
+                    // fail case must still null the stream (user is free to ignore the error and reuse the object)
+                    catch (Exception) { BaseStream = null; return false; }
                 }
-                // just unlink unmanaged streams
-                else BaseStream = null;
+
+                // unlink the stream
+                BaseStream = null;
             }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Flushes the stream tied to this file descriptor. Throws <see cref="AccessViolationException"/> if already in use.
+        /// Returns true on success (no errors).
+        /// </summary>
+        /// <exception cref="AccessViolationException"></exception>
+        public bool Flush()
+        {
+            if (!InUse) throw new AccessViolationException("Attempt to flush a FileDescriptor that was not in use");
+
+            // flush the stream
+            try { BaseStream.Flush(); return true; }
+            catch (Exception) { return false; }
+        }
+
+        /// <summary>
+        /// Sets the current position in the file. Throws <see cref="AccessViolationException"/> if already in use.
+        /// Returns true on success (no errors).
+        /// </summary>
+        /// <exception cref="AccessViolationException"></exception>
+        public bool Seek(long offset, SeekOrigin origin)
+        {
+            if (!InUse) throw new AccessViolationException("Attempt to flush a FileDescriptor that was not in use");
+
+            // seek to new position
+            try { BaseStream.Seek(offset, origin); return true; }
+            catch (Exception) { return false; }
+        }
+        /// <summary>
+        /// Gets the current position in the file. Throws <see cref="AccessViolationException"/> if already in use.
+        /// Returns true on success (no errors).
+        /// </summary>
+        /// <param name="pos">the position in the file if successful</param>
+        /// <exception cref="AccessViolationException"></exception>
+        public bool Tell(out long pos)
+        {
+            if (!InUse) throw new AccessViolationException("Attempt to flush a FileDescriptor that was not in use");
+            
+            // return position (the getter can throw)
+            try { pos = BaseStream.Position; return true; }
+            catch (Exception) { pos = -1; return false; }
         }
     }
 }

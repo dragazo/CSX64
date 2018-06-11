@@ -310,6 +310,64 @@ namespace CSX64
             return true;
         }
 
+        /*
+        [4: dest][2: size][1: dh][1: mem]   [1: src_1_h][3:][4: src_1]
+            mem = 0: [1: src_2_h][3:][4: src_2]
+            mem = 1: [address_src_2]
+        */
+        private bool FetchRR_RMFormat(out UInt64 s, out UInt64 dest, out UInt64 a, out UInt64 b)
+        {
+            dest = a = b = 0; // zero these so compiler won't complain
+
+            if (!GetMemAdv(1, out s) || !GetMemAdv(1, out a)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
+
+            // if dest is high
+            if ((s & 2) != 0)
+            {
+                if (sizecode != 0 || (s & 0xc0) != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+                dest = Registers[s >> 4].x8h;
+            }
+            else dest = Registers[s >> 4][sizecode];
+
+            // if a is high
+            if ((a & 128) != 0)
+            {
+                if (sizecode != 0 || (a & 0x0c) != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+                a = Registers[a & 15].x8h;
+            }
+            else a = Registers[a & 15][sizecode];
+
+            // if b is register
+            if ((s & 1) == 0)
+            {
+                if (!GetMemAdv(1, out b)) return false;
+
+                // if b is high
+                if ((b & 128) != 0)
+                {
+                    if (sizecode != 0 || (b & 0x0c) != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+                    b = Registers[b & 15].x8h;
+                }
+                else b = Registers[b & 15][sizecode];
+            }
+            // otherwise b is memory
+            else
+            {
+                if (!GetAddressAdv(out b) || !GetMemRaw(b, Size(sizecode), out b)) return false;
+            }
+
+            return true;
+        }
+        private bool StoreRR_RMFormat(UInt64 s, UInt64 res)
+        {
+            // if dest is high
+            if ((s & 2) != 0) Registers[s >> 4].x8h = (byte)res;
+            else Registers[s >> 4][(s >> 2) & 3] = res;
+
+            return true;
+        }
+
         // updates the flags for integral ops (identical for most integral ops)
         private void UpdateFlagsZSP(UInt64 value, UInt64 sizecode)
         {
@@ -511,7 +569,20 @@ namespace CSX64
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
 
-            return !flag || StoreBinaryOpFormatNew(s1, s2, m, src);
+            // if flag is true, store result
+            if (flag) return StoreBinaryOpFormatNew(s1, s2, m, src);
+            // even in false case upper 32 bits must be cleared in the case of a conditional 32-bit register load
+            else
+            {
+                // if it's a 32-bit register load
+                if (((s1 >> 2) & 3) == 2 && (s2 >> 4) <= 2)
+                {
+                    // load 32-bit partition to itself (internally zeroes high bits)
+                    Registers[s1 >> 4].x32 = Registers[s1 >> 4].x32;
+                }
+
+                return true;
+            }
         }
 
         /*
@@ -1404,18 +1475,22 @@ namespace CSX64
         }
         private bool ProcessANDN()
         {
-            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
-            UInt64 sizecode = (s1 >> 2) & 3;
+            if (!FetchRR_RMFormat(out UInt64 s, out UInt64 dest, out UInt64 a, out UInt64 b)) return false;
+            UInt64 sizecode = (s >> 2) & 3;
 
-            UInt64 res = a & ~b;
+            // only supports 32 and 64-bit operands
+            if (sizecode != 2 && sizecode != 3) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+
+            UInt64 res = ~a & b;
 
             ZF = res == 0;
             SF = Negative(res, sizecode);
-            OF = CF = false;
+            OF = false;
+            CF = false;
             AF = Rand.NextBool();
             PF = Rand.NextBool();
 
-            return StoreBinaryOpFormatNew(s1, s2, m, res);
+            return StoreRR_RMFormat(s, res);
         }
 
         private bool ProcessBTx()
@@ -1649,11 +1724,11 @@ namespace CSX64
         /*
         [1:][3: i][1:][3: mode]
             mode = 0: push st(i)
-            mode = 1: push fp32M
-            mode = 2: push fp64M
-            mode = 3: push int16M
-            mode = 4: push int32M
-            mode = 5: push int64M
+            mode = 1: push m32fp
+            mode = 2: push m64fp
+            mode = 3: push m16int
+            mode = 4: push m32int
+            mode = 5: push m64int
             else UND
         */
         private bool ProcessFLD()
@@ -1763,15 +1838,15 @@ namespace CSX64
             return true;
         }
         /*
-        [1:][3: i][1:][3: cnd]
-            cnd = 0: E  (=Z)
-            cnd = 1: NE (=NZ)
-            cnd = 2: B
-            cnd = 3: BE
-            cnd = 4: A
-            cnd = 5: AE
-            cnd = 6: U  (=P)
-            cnd = 7: NU (=NP)
+        [1:][3: i][1:][3: cc]
+            cc = 0: E  (=Z)
+            cc = 1: NE (=NZ)
+            cc = 2: B
+            cc = 3: BE
+            cc = 4: A
+            cc = 5: AE
+            cc = 6: U  (=P)
+            cc = 7: NU (=NP)
         */
         private bool ProcessFMOVcc()
         {

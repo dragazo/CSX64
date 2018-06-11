@@ -563,8 +563,8 @@ namespace CSX64
                 // set private flags
                 computer.FSF = fsf;
 
-                // tie standard streams
-                computer.GetFD(0).Open(Console.OpenStandardInput(), false, false); // stdin is non-interactive because we're not the ones that will be adding data to it. that's the console's responsibility
+                // tie standard streams - stdin is non-interactive because we don't control it
+                computer.GetFD(0).Open(Console.OpenStandardInput(), false, false); 
                 computer.GetFD(1).Open(Console.OpenStandardOutput(), false, false);
                 computer.GetFD(2).Open(Console.OpenStandardError(), false, false);
 

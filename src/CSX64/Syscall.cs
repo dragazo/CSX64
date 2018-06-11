@@ -31,7 +31,7 @@ namespace CSX64
 
                 // read from the file
                 int n = fd.BaseStream.Read(Memory, (int)RCX, (int)RDX);
-                
+
                 // if we got nothing but it's interactive
                 if (n == 0 && fd.Interactive)
                 {
@@ -39,7 +39,10 @@ namespace CSX64
                     SuspendedRead = true; // suspend execution until there's more data
                 }
                 // otherwise return num chars read from file
-                else ZF = (RAX = (UInt64)n) == 0;
+                else
+                {
+                    RAX = (UInt64)n; // count in RAX
+                }
 
                 return true;
             }
@@ -84,16 +87,17 @@ namespace CSX64
             // get path
             if (!GetCString(RBX, out string path)) return false;
 
-            FileStream f; // resulting stream
-
             // attempt to open the file
-            try { f = new FileStream(path, (FileMode)RCX, (FileAccess)RDX); }
-            catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
+            try
+            {
+                FileStream f = new FileStream(path, (FileMode)RCX, (FileAccess)RDX);
 
-            // store in the file descriptor
-            fd.Open(f, true, false);
-            // return file descriptor index
-            RAX = fd_index;
+                // store in the file descriptor
+                fd.Open(f, true, false);
+                // return file descriptor index in RAX
+                RAX = fd_index;
+            }
+            catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
 
             return true;
         }
@@ -111,8 +115,9 @@ namespace CSX64
             // get fd
             FileDescriptor fd = FileDescriptors[fd_index];
 
-            // close it (un/managed and not-in-use cases are handled internally)
-            fd.Close();
+            // close the file
+            if (!fd.Close()) { Terminate(ErrorCode.IOFailure); return false; }
+
             return true;
         }
 
@@ -130,9 +135,10 @@ namespace CSX64
             FileDescriptor fd = FileDescriptors[fd_index];
             if (!fd.InUse) { Terminate(ErrorCode.FDNotInUse); return false; }
 
-            // attempt to flush buffer
-            try { fd.BaseStream.Flush(); return true; }
-            catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
+            // flush the file
+            if (!fd.Flush()) { Terminate(ErrorCode.IOFailure); return false; }
+
+            return true;
         }
 
         /// <summary>
@@ -152,8 +158,9 @@ namespace CSX64
             if (!fd.InUse) { Terminate(ErrorCode.FDNotInUse); return false; }
 
             // attempt to seek in the file
-            try { fd.BaseStream.Seek((long)RCX, (SeekOrigin)RDX); return true; }
-            catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
+            if (!fd.Seek((long)RCX, (SeekOrigin)RDX)) { Terminate(ErrorCode.IOFailure); return false; }
+
+            return true;
         }
         /// <summary>
         /// Attempts to get the current position in the file
@@ -170,9 +177,13 @@ namespace CSX64
             FileDescriptor fd = FileDescriptors[fd_index];
             if (!fd.InUse) { Terminate(ErrorCode.FDNotInUse); return false; }
 
-            // attempt to read from memory to the file
-            try { RAX = (UInt64)fd.BaseStream.Position; return true; }
-            catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
+            // attempt to get current position in file
+            if (!fd.Tell(out long pos)) { Terminate(ErrorCode.IOFailure); return false; }
+
+            // store position in RAX
+            RAX = (UInt64)pos;
+            
+            return true;
         }
 
         /// <summary>
@@ -221,7 +232,7 @@ namespace CSX64
 
             // get the path
             if (!GetCString(RBX, out string path)) return false;
-
+            
             // attempt the move operation
             try { Directory.CreateDirectory(path); return true; }
             catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
