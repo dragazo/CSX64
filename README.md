@@ -1,5 +1,5 @@
 # CSX64
-CSX64 is a 64-bit processor emulator (custom instruction set) implemented in C#. It comes with a built-in, thorough assembly language loosely based around Intel x86_64.
+CSX64 is a 64-bit processor emulator implemented in C# (custom machine code - subset of Intel instruction set). It comes with a built-in, thorough assembly language loosely based around NASM.
 
 CSX64 was designed to be an educational tool for learning low-level programming in a well-documented, safe, emulated environment that is **platform independent**. Additionally, it was designed to be self-contained so that it could be added to other projects (e.g. a Unity game).
 
