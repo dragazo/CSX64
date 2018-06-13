@@ -47,9 +47,9 @@ namespace CSX64
         FMUL, FDIV, FDIVR,
 
         F2XM1, FABS, FCHS, FPREM, FPREM1, FRNDINT, FSQRT, FYL2X, FYL2XP1, FXTRACT, FSCALE,
-        FXAM, FTST, FCOM, FCOMI,
+        FXAM, FTST, FCOM, FUCOM, FCOMI,
         FSIN, FCOS, FSINCOS, FPTAN, FPATAN,
-        FDECSTP, FINCSTP, FFREE
+        FINCDECSTP, FFREE
     }
     public enum SyscallCode
     {

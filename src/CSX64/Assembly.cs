@@ -2955,17 +2955,20 @@ namespace CSX64
 
                     if (!explicit_size) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Could not deduce data size"); return false; }
 
-                    // 32-bit
-                    if (sizecode == 2)
+                    // intregal
+                    if (integral)
                     {
-                        if (!TryAppendVal(1, integral ? 5 : 3ul)) return false;
+                        if (sizecode == 1) { if (!TryAppendVal(1, 5)) return false; }
+                        else if (sizecode == 2) { if (!TryAppendVal(1, 6)) return false; }
+                        else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Integral {op} only supports 16 and 32-bit operands"); return false; }
                     }
-                    // 64-bit
-                    else if (sizecode == 3)
+                    // floatint-point
+                    else
                     {
-                        if (!TryAppendVal(1, integral ? 6 : 4ul)) return false;
+                        if (sizecode == 2) { if (!TryAppendVal(1, 3)) return false; }
+                        else if (sizecode == 3) { if (!TryAppendVal(1, 4)) return false; }
+                        else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} only supports 32 and 64-bit operands"); return false; }
                     }
-                    else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} requires 32 or 64-bit operands"); return false; }
 
                     // write the address
                     if (!TryAppendAddress(a, b, ptr_base)) return false;
@@ -3186,7 +3189,6 @@ namespace CSX64
 
                 return true;
             }
-            
         }
 
         /// <summary>
@@ -3640,9 +3642,10 @@ namespace CSX64
                         case "FSINCOS": if (!args.TryProcessNoArgOp(OPCode.FSINCOS)) return args.res; break;
                         case "FPTAN": if (!args.TryProcessNoArgOp(OPCode.FPTAN)) return args.res; break;
                         case "FPATAN": if (!args.TryProcessNoArgOp(OPCode.FPATAN)) return args.res; break;
+
+                        case "FINCSTP": if (!args.TryProcessNoArgOp(OPCode.FINCDECSTP, true, 0)) return args.res; break;
+                        case "FDECSTP": if (!args.TryProcessNoArgOp(OPCode.FINCDECSTP, true, 1)) return args.res; break;
                         
-                        case "FDECSTP": if (!args.TryProcessNoArgOp(OPCode.FDECSTP)) return args.res; break;
-                        case "FINCSTP": if (!args.TryProcessNoArgOp(OPCode.FINCSTP)) return args.res; break;
                         case "FFREE": if (!args.TryProcessFPURegisterOp(OPCode.FFREE)) return args.res; break;
 
                         default: return new AssembleResult(AssembleError.UnknownOp, $"line {args.line}: Unknown operation \"{args.op}\"");

@@ -128,7 +128,7 @@ namespace CSX64
 
             // free FPU registers
             for (int i = 0; i < FPURegisters.Length; ++i) FPURegisters[i].InUse = false;
-            // set TOP
+            // set TOP to 0 (for consistency when storing FPU status word to memory)
             TOP = 0;
 
             // set execution state
@@ -414,8 +414,7 @@ namespace CSX64
                 case OPCode.FPTAN: return ProcessFPTAN();
                 case OPCode.FPATAN: return ProcessFPATAN();
 
-                case OPCode.FDECSTP: return ProcessFDECSTP();
-                case OPCode.FINCSTP: return ProcessFINCSTP();
+                case OPCode.FINCDECSTP: return ProcessFINCDECSTP();
                 case OPCode.FFREE: return ProcessFFREE();
 
                 // otherwise, unknown opcode

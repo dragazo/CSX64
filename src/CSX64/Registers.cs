@@ -127,20 +127,18 @@ namespace CSX64
 
         // --------------------------------------------
 
-        private Register _RFLAGS;
-        private Register _RIP;
         private Register[] Registers = new Register[16];
 
         private FPURegister[] FPURegisters = new FPURegister[8];
         private UInt16 FPU_status;
 
-        public UInt64 RFLAGS { get => _RFLAGS.x64; set => _RFLAGS.x64 = value; }
-        public UInt32 EFLAGS { get => _RFLAGS.x32; set => _RFLAGS.x32 = value; }
-        public UInt16 FLAGS { get => _RFLAGS.x16; set => _RFLAGS.x16 = value; }
+        public UInt64 RFLAGS;
+        public UInt32 EFLAGS { get => (UInt32)RFLAGS; set => RFLAGS = RFLAGS & ~0xfffffffful | value; }
+        public UInt16 FLAGS { get => (UInt16)RFLAGS; set => RFLAGS = RFLAGS & ~0xfffful | value; }
 
-        public UInt64 RIP { get => _RIP.x64; set => _RIP.x64 = value; }
-        public UInt32 EIP { get => _RIP.x32; set => _RIP.x32 = value; }
-        public UInt16 IP { get => _RIP.x16; set => _RIP.x16 = value; }
+        public UInt64 RIP;
+        public UInt32 EIP { get => (UInt32)RIP; set => RIP = RIP & ~0xfffffffful | value; }
+        public UInt16 IP { get => (UInt16)RIP; set => RIP = RIP & ~0xfffful | value; }
 
         public UInt64 RAX { get => Registers[0].x64; set => Registers[0].x64 = value; }
         public UInt64 RBX { get => Registers[1].x64; set => Registers[1].x64 = value; }

@@ -1625,8 +1625,8 @@ namespace CSX64
             mode = 2: || + pop
             mode = 3: st(0) <- f(st(0), fp32M)
             mode = 4: st(0) <- f(st(0), fp64M)
-            mode = 5: st(0) <- f(st(0), int32M)
-            mode = 6: st(0) <- f(st(0), int64M)
+            mode = 5: st(0) <- f(st(0), int16M)
+            mode = 6: st(0) <- f(st(0), int32M)
             else UND
         */
         private bool FetchFPUBinaryFormat(out UInt64 s, out double a, out double b)
@@ -1652,8 +1652,8 @@ namespace CSX64
                     {
                         case 3: if (!GetMemRaw(m, 4, out m)) return false; b = AsFloat(m); return true;
                         case 4: if (!GetMemRaw(m, 8, out m)) return false; b = AsDouble(m); return true;
-                        case 5: if (!GetMemRaw(m, 4, out m)) return false; b = (Int64)SignExtend(m, 2); return true;
-                        case 6: if (!GetMemRaw(m, 8, out m)) return false; b = (Int64)m; return true;
+                        case 5: if (!GetMemRaw(m, 2, out m)) return false; b = (Int64)SignExtend(m, 1); return true;
+                        case 6: if (!GetMemRaw(m, 4, out m)) return false; b = (Int64)SignExtend(m, 2); return true;
 
                         default: Terminate(ErrorCode.UndefinedBehavior); return false;
                     }
@@ -2366,31 +2366,33 @@ namespace CSX64
             double b = FPURegisters[(TOP + 1) & 7].Value;
 
             ++TOP; // pop stack and place in new st(0)
-            FPURegisters[TOP].Value = Math.Atan2(a, b);
+            FPURegisters[TOP].Value = Math.Atan2(b, a);
 
             C0 = Rand.NextBool();
             C1 = Rand.NextBool();
             C2 = false;
             C3 = Rand.NextBool();
 
-            // also push 1 onto fpu stack
-            return PushFPU(1);
-        }
-
-        private bool ProcessFDECSTP()
-        {
-            --TOP; // does not modify tag word
-
-            C0 = Rand.NextBool();
-            C1 = false;
-            C2 = Rand.NextBool();
-            C3 = Rand.NextBool();
-
             return true;
         }
-        private bool ProcessFINCSTP()
+
+        /*
+        [7:][1: mode]
+            mode = 0: inc
+            mode = 1: dec
+        */
+        private bool ProcessFINCDECSTP()
         {
-            ++TOP; // does not modify tag word
+            if (!GetMemAdv(1, out UInt64 ext)) return false;
+
+            // does not modify tag word
+            switch (ext & 1)
+            {
+                case 0: ++TOP; break;
+                case 1: --TOP; break;
+
+                default: return true; // can't happen but compiler is stupid
+            }
 
             C0 = Rand.NextBool();
             C1 = false;
