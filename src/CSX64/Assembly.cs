@@ -2314,7 +2314,7 @@ namespace CSX64
                     if (!IsValidName(symbol, ref err)) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: {err}"); return false; }
 
                     // ensure we don't extern a symbol that already exists
-                    if (file.Symbols.ContainsKey(label_def)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Cannot define symbol \"{label_def}\" (defined internally) as external"); return false; }
+                    if (file.Symbols.ContainsKey(symbol)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Cannot define symbol \"{symbol}\" (defined internally) as external"); return false; }
 
                     // don't add to external list twice
                     if (file.ExternalSymbols.Contains(symbol)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Attempt to import symbol \"{symbol}\" multiple times"); return false; }
