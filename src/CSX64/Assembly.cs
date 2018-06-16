@@ -1078,7 +1078,7 @@ namespace CSX64
         
         private static readonly string[] AddressPrefixes = // the explicit address expression size prefixes (must be in correct binary (size code) order)
         {
-            "BYTEPTR", "WORDPTR", "DWORDPTR", "QWORDPTR"
+            "BYTE PTR", "WORD PTR", "DWORD PTR", "QWORD PTR"
         };
 
         private static readonly string[] AddressRegs = // the registers allowed in address expressions (must be in correct register id order)
@@ -1302,80 +1302,67 @@ namespace CSX64
             /// <param name="rawline">the raw line to parse</param>
             public bool SplitLine(string rawline)
             {
-                // (label: label: ...) (op(:size) (arg, arg, ...))
+                // (label:) (op (arg, arg, ...))
 
                 int pos = 0, end; // position in line parsing
                 int quote;        // index of openning quote in args
 
-                List<string> tokens = new List<string>();
-                StringBuilder b = new StringBuilder();
+                List<string> args = new List<string>();
 
-                // parse label
+                // -- parse label and op -- //
 
                 // skip leading white space
                 for (; pos < rawline.Length && char.IsWhiteSpace(rawline[pos]); ++pos) ;
                 // get a white space-delimited token
                 for (end = pos; end < rawline.Length && !char.IsWhiteSpace(rawline[end]); ++end) ;
 
-                // if it's a label
-                if (pos != end && rawline[end - 1] == LabelDefChar)
+                // if we got a label
+                if (pos < rawline.Length && rawline[end - 1] == LabelDefChar)
                 {
                     // set as label def
                     label_def = rawline.Substring(pos, end - pos - 1);
 
-                    // reposition pos to next non-whitespace
+                    // get another token for op to use
+
+                    // skip leading white space
                     for (pos = end; pos < rawline.Length && char.IsWhiteSpace(rawline[pos]); ++pos) ;
-                }
-                // otherwise null label
-                else label_def = null;
-
-                // parse op
-
-                // if we're still inside the line
-                if (pos < rawline.Length)
-                {
                     // get a white space-delimited token
                     for (end = pos; end < rawline.Length && !char.IsWhiteSpace(rawline[end]); ++end) ;
-
-                    // save this as op
-                    op = rawline.Substring(pos, end - pos);
-
-                    pos = end; // pass parsed section before next section
                 }
-                // otherwise there is no op
-                else op = string.Empty;
+                // otherwise there's no label for this line
+                else label_def = null;
+
+                // if we got something, record as op, otherwise is empty string
+                op = pos < rawline.Length ? rawline.Substring(pos, end - pos) : string.Empty;
+
+                // -- parse args -- //
 
                 // parse the rest of the line as comma-separated tokens
-                for (; pos < rawline.Length; ++pos)
+                while (true)
                 {
                     // skip leading white space
-                    for (; pos < rawline.Length && char.IsWhiteSpace(rawline[pos]); ++pos) ;
+                    for (pos = end + 1; pos < rawline.Length && char.IsWhiteSpace(rawline[pos]); ++pos) ;
                     // when pos reaches end of token, we're done parsing
                     if (pos >= rawline.Length) break;
 
-                    b.Clear(); // clear the string builder
-
                     // find the next terminator (comma-separated)
-                    for (quote = -1; pos < rawline.Length && (rawline[pos] != ',' || quote >= 0); ++pos)
+                    for (end = pos, quote = -1; end < rawline.Length; ++end)
                     {
-                        if (rawline[pos] == '"' || rawline[pos] == '\'' || rawline[pos] == '`')
-                            quote = quote < 0 ? pos : (rawline[pos] == rawline[quote] ? -1 : quote);
-
-                        // omit white space unless in a quote
-                        if (quote >= 0 || !char.IsWhiteSpace(rawline[pos])) b.Append(rawline[pos]);
+                        if (rawline[end] == '"' || rawline[end] == '\'' || rawline[end] == '`') quote = quote < 0 ? end : rawline[end] == rawline[quote] ? -1 : quote;
+                        else if (quote < 0 && rawline[end] == ',') break; // comma marks end of token
                     }
-
                     // make sure we closed any quotations
                     if (quote >= 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Unmatched quotation encountered in argument list"); return false; }
 
+                    // get the arg (remove leading/trailing white space - some logic requires them not be there e.g. address parser)
+                    string arg = rawline.Substring(pos, end - pos).Trim();
                     // make sure arg isn't empty
-                    if (b.Length == 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Empty operation argument encountered"); return false; }
-
+                    if (arg.Length == 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Empty operation argument encountered"); return false; }
                     // add this token
-                    tokens.Add(b.ToString());
+                    args.Add(arg);
                 }
                 // output tokens to assemble args
-                args = tokens.ToArray();
+                this.args = args.ToArray();
 
                 // successfully parsed line
                 return true;
@@ -1538,11 +1525,6 @@ namespace CSX64
                 Expr temp; // temporary for node creation
 
                 int pos = 0, end; // position in token
-                int depth;        // parenthesis depth
-                int quote;        // the starting index of a quote (or -1 if not currently inside a quote)
-
-                bool numeric; // flags for enabling exponent notation for floating-point
-                bool exp;
 
                 bool binPair = false;          // marker if tree contains complete binary pairs (i.e. N+1 values and N binary ops)
                 int unpaired_conditionals = 0; // number of unpaired conditional ops
@@ -1559,38 +1541,44 @@ namespace CSX64
 
                 stack.Push(null); // stack will always have a null at its base (simplifies code slightly)
 
-                if (token.Length == 0) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: Empty expression encountered"); return false; }
+                // skip white space
+                for (; pos < token.Length && char.IsWhiteSpace(token[pos]); ++pos) ;
+                // if we're past the end, token was empty
+                if (pos >= token.Length) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Empty expression encountered"); return false; }
 
-                while (pos < token.Length)
+                while (true)
                 {
-                    // -- read val(op) -- //
+                    // -- read (unary op...)[operand](binary op) -- //
 
-                    // consume unary ops
-                    for (; pos < token.Length && UnaryOps.Contains(token[pos]); ++pos) unaryOps.Push(token[pos]);
+                    // consume unary ops (allows white space)
+                    for (; pos < token.Length; ++pos)
+                    {
+                        if (UnaryOps.Contains(token[pos])) unaryOps.Push(token[pos]); // absorb unary ops
+                        else if (!char.IsWhiteSpace(token[pos])) break; // non-white is start of operand
+                    }
+                    // if we're past the end, there were unary ops with no operand
+                    if (pos >= token.Length) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Unary ops encountered without an operand"); return false; }
 
-                    depth = 0;  // initial depth of 0
-                    quote = -1; // initially not in a quote
+                    int depth = 0;  // parens depth - initially 0
+                    int quote = -1; // index of current quote char - initially not in one
 
-                    numeric = pos < token.Length && char.IsDigit(token[pos]); // flag if this is a numeric literal
-                    exp = false; // no exponent yet
+                    bool numeric = char.IsDigit(token[pos]); // flag if this is a numeric literal
 
-                    // find next binary op
-                    for (end = pos; end < token.Length && (depth > 0 || quote >= 0 || (numeric && exp) || !TryGetOp(token, end, out op, out oplen)); ++end)
+                    // move end to next logical separator (white space or binary op)
+                    for (end = pos; end < token.Length; ++end)
                     {
                         // if we're not in a quote
                         if (quote < 0)
                         {
                             // account for important characters
                             if (token[end] == '(') ++depth;
-                            else if (token[end] == ')') --depth;
-                            else if (numeric && token[end] == 'e' || token[end] == 'E') exp = true; // e or E begins exponent
-                            else if (numeric && token[end] == '+' || token[end] == '-' || char.IsDigit(token[end])) exp = false; // + or - or a digit ends exponent safety net
-                            else if (token[end] == '"') quote = end; // quote marks start of character literal
-                            else if (token[end] == '\'') quote = end;
-                            else if (token[end] == '`') quote = end;
+                            else if (token[end] == ')') --depth; // depth control
+                            else if (numeric && (token[end] == 'e' || token[end] == 'E') && end + 1 < token.Length && (token[end + 1] == '+' || token[end + 1] == '-')) ++end; // make sure an exponent sign won't be parsed as binary + or - by skipping it
+                            else if (token[end] == '"' || token[end] == '\'' || token[end] == '`') quote = end; // quotes mark start of a string
+                            else if (depth == 0 && (char.IsWhiteSpace(token[end]) || TryGetOp(token, end, out op, out oplen))) break; // break on white space or binary op
 
                             // can't ever have negative depth
-                            if (depth < 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched parenthesis \"{token}\""); return false; }
+                            if (depth < 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched parenthesis: {token}"); return false; }
                         }
                         // otherwise we're in a quote
                         else
@@ -1600,20 +1588,18 @@ namespace CSX64
                         }
                     }
                     // if depth isn't back to 0, there was a parens mismatch
-                    if (depth != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched parenthesis \"{token}\""); return false; }
-                    // if depth isn't back to 0, there was a parens mismatch
-                    if (quote >= 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched quotation in character literal \"{token}\""); return false; }
-                    // if pos == end we'll have an empty token
-                    if (pos == end) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Empty token encountered in expression \"{token}\""); return false; }
-                    
-                    // -- process value -- //
+                    if (depth != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched parenthesis: {token}"); return false; }
+                    // if quote isn't back to -1, there was a quote mismatch
+                    if (quote >= 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched quotation: {token}"); return false; }
+                    // if pos == end we'll have an empty token (e.g. expression was just a binary op)
+                    if (pos == end) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Empty token encountered in expression: {token}"); return false; }
 
-                    // -- convert value to an expression tree -- //
+                    // -- convert to expression tree -- //
 
                     // if sub-expression
                     if (token[pos] == '(')
                     {
-                        // parse it into temp
+                        // parse the inside into temp
                         if (!TryParseImm(token.Substring(pos + 1, end - pos - 2), out temp)) return false;
                     }
                     // otherwise is value
@@ -1621,7 +1607,7 @@ namespace CSX64
                     {
                         // get the value to insert
                         string val = token.Substring(pos, end - pos);
-                        
+
                         // mutate it
                         if (!MutateName(ref val)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse imm \"{token}\"\n-> {res.ErrorMsg}"); return false; }
 
@@ -1633,7 +1619,7 @@ namespace CSX64
 
                             temp = new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Token = $"#{current_seg}" }, Right = new Expr() { IntResult = line_pos_in_seg } };
                         }
-                        // if it's the start of segment
+                        // if it's the start of segment macro
                         else if (val == StartOfSegMacro)
                         {
                             // must be in a segment
@@ -1649,19 +1635,17 @@ namespace CSX64
 
                             // it either needs to be evaluatable or a valid label name
                             if (!temp.Evaluate(file.Symbols, out UInt64 _res, out bool floating, ref err) && !IsValidName(val, ref err))
-                            { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to resolve token as a valid imm or symbol name \"{val}\"\n-> {err}"); return false; }
+                            { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to resolve token as a valid imm or symbol name: {val}\n-> {err}"); return false; }
                         }
                     }
 
-                    // -- handle unary op by modifying subtree -- //
-
-                    // handle the unary ops in terms of binary ops (stack provides right-to-left evaluation)
+                    // handle parsed unary ops (stack provides right-to-left evaluation)
                     while (unaryOps.Count > 0)
                     {
                         char uop = unaryOps.Pop();
                         switch (uop)
                         {
-                            case '+': break;
+                            case '+': break; // unary plus does nothing
                             case '-': temp = new Expr() { OP = Expr.OPs.Neg, Left = temp }; break;
                             case '~': temp = new Expr() { OP = Expr.OPs.BitNot, Left = temp }; break;
                             case '!': temp = new Expr() { OP = Expr.OPs.LogNot, Left = temp }; break;
@@ -1683,64 +1667,71 @@ namespace CSX64
                         stack.Peek().Right = temp;
                     }
 
-                    // flag as a valid binary pair
+                    // flag as a valid binary pair (i.e. every binary op now has 2 operands)
                     binPair = true;
 
-                    // -- process op -- //
+                    // -- get binary op -- //
 
-                    if (end < token.Length)
+                    // we may have stopped token parsing on white space, so wind up to find a binary op
+                    for (; end < token.Length; ++end)
                     {
-                        // ternary conditional has special rules
-                        if (op == Expr.OPs.Pair)
-                        {
-                            // seek out nearest conditional without a pair
-                            for (; stack.Peek() != null && (stack.Peek().OP != Expr.OPs.Condition || stack.Peek().Right.OP == Expr.OPs.Pair); stack.Pop()) ;
-
-                            // if we didn't find anywhere to put it, this is an error
-                            if (stack.Peek() == null) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expression contained a ternary conditional pair without a corresponding condition \"{token}\""); return false; }
-                        }
-                        // right-to-left operators
-                        else if (op == Expr.OPs.Condition)
-                        {
-                            // wind current up to correct precedence (right-to-left evaluation, so don't skip equal precedence)
-                            for (; stack.Peek() != null && Precedence[stack.Peek().OP] < Precedence[op]; stack.Pop()) ;
-                        }
-                        // left-to-right operators
-                        else
-                        {
-                            // wind current up to correct precedence (left-to-right evaluation, so also skip equal precedence)
-                            for (; stack.Peek() != null && Precedence[stack.Peek().OP] <= Precedence[op]; stack.Pop()) ;
-                        }
-
-                        // if we have a valid current
-                        if (stack.Peek() != null)
-                        {
-                            // splice in the new operator, moving current's right sub-tree to left of new node
-                            stack.Push(stack.Peek().Right = new Expr() { OP = op, Left = stack.Peek().Right });
-                        }
-                        // otherwise we'll have to move the root
-                        else
-                        {
-                            // splice in the new operator, moving entire tree to left of new node
-                            stack.Push(expr = new Expr() { OP = op, Left = expr });
-                        }
-
-                        binPair = false; // flag as invalid binary pair
-
-                        // update unpaired conditionals
-                        if (op == Expr.OPs.Condition) ++unpaired_conditionals;
-                        else if (op == Expr.OPs.Pair) --unpaired_conditionals;
+                        if (TryGetOp(token, end, out op, out oplen)) break; // break when we find an op
+                        // if we hit a non-white character, there are tokens with no binary ops between them
+                        else if (!char.IsWhiteSpace(token[end])) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Encountered two tokens with no binary op between them: {token}"); return false; }
                     }
+                    // if we didn't find any binary ops, we're done
+                    if (end >= token.Length) break;
+
+                    // -- process binary op -- //
+
+                    // ternary conditional has special rules
+                    if (op == Expr.OPs.Pair)
+                    {
+                        // seek out nearest conditional without a pair
+                        for (; stack.Peek() != null && (stack.Peek().OP != Expr.OPs.Condition || stack.Peek().Right.OP == Expr.OPs.Pair); stack.Pop()) ;
+                        // if we didn't find anywhere to put it, this is an error
+                        if (stack.Peek() == null) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expression contained a ternary conditional pair without a corresponding condition: {token}"); return false; }
+                    }
+                    // right-to-left operators
+                    else if (op == Expr.OPs.Condition)
+                    {
+                        // wind current up to correct precedence (right-to-left evaluation, so don't skip equal precedence)
+                        for (; stack.Peek() != null && Precedence[stack.Peek().OP] < Precedence[op]; stack.Pop()) ;
+                    }
+                    // left-to-right operators
+                    else
+                    {
+                        // wind current up to correct precedence (left-to-right evaluation, so also skip equal precedence)
+                        for (; stack.Peek() != null && Precedence[stack.Peek().OP] <= Precedence[op]; stack.Pop()) ;
+                    }
+
+                    // if we have a valid current
+                    if (stack.Peek() != null)
+                    {
+                        // splice in the new operator, moving current's right sub-tree to left of new node
+                        stack.Push(stack.Peek().Right = new Expr() { OP = op, Left = stack.Peek().Right });
+                    }
+                    // otherwise we'll have to move the root
+                    else
+                    {
+                        // splice in the new operator, moving entire tree to left of new node
+                        stack.Push(expr = new Expr() { OP = op, Left = expr });
+                    }
+
+                    binPair = false; // flag as invalid binary pair
+
+                    // update unpaired conditionals
+                    if (op == Expr.OPs.Condition) ++unpaired_conditionals;
+                    else if (op == Expr.OPs.Pair) --unpaired_conditionals;
 
                     // pass last delimiter
                     pos = end + oplen;
                 }
 
                 // handle binary pair mismatch
-                if (!binPair) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expression contained a mismatched binary op: \"{token}\""); return false; }
-
+                if (!binPair) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expression contained a mismatched binary op: {token}"); return false; }
                 // make sure all conditionals were matched
-                if (unpaired_conditionals != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expression contained {unpaired_conditionals} incomplete ternary {(unpaired_conditionals == 1 ? "conditional" : "conditionals")}"); return false; }
+                if (unpaired_conditionals != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expression contained {unpaired_conditionals} incomplete ternary {(unpaired_conditionals == 1 ? "conditional" : "conditionals")}: {token}"); return false; }
 
                 // run ptrdiff logic on result
                 expr = Ptrdiff(expr);
@@ -2125,8 +2116,8 @@ namespace CSX64
                 for (int i = 0; i < AddressPrefixes.Length; ++i)
                     if (utoken.StartsWith(AddressPrefixes[i]))
                     {
-                        // pop the prefix off and take this size code
-                        token = token.Substring(AddressPrefixes[i].Length);
+                        // take this size code - explicit
+                        token = token.Substring(AddressPrefixes[i].Length).TrimStart();
                         explicit_size = true;
                         sizecode = (UInt64)i;
                         break;
@@ -2413,11 +2404,14 @@ namespace CSX64
             {
                 if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: EQU expected 1 arg"); return false; }
 
+                // make sure we have a label on this line
+                if (label_def == null) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: EQU requires a label to attach the expression to"); return false; }
+
+                // start by invalidating the label so if the EQU imm references it it won't be evaluated with a value that's about to be unrepresentative
+                file.Symbols[label_def].Token = "#EQU_TEMP";
+
                 // get the expression
                 if (!TryParseImm(args[0], out Expr expr)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: EQU expected an expression\n-> {res.ErrorMsg}"); return false; }
-
-                // make sure we have a label
-                if (label_def == null) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: EQU requires a label to attach the expression to"); return false; }
 
                 // redefine this line's label to expr
                 file.Symbols[label_def] = expr;
