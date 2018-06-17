@@ -1075,16 +1075,6 @@ namespace CSX64
             "##TEXT", "##RODATA", "##DATA", "##BSS",
             "__heap__"
         };
-        
-        private static readonly string[] AddressPrefixes = // the explicit address expression size prefixes (must be in correct binary (size code) order)
-        {
-            "BYTE PTR", "WORD PTR", "DWORD PTR", "QWORD PTR"
-        };
-
-        private static readonly string[] AddressRegs = // the registers allowed in address expressions (must be in correct register id order)
-        {
-            "RAX", "RBX", "RCX", "RDX", "RSI", "RDI", "RBP", "RSP", "R8", "R9", "R10", "R11", "R12", "R13", "R14", "R15"
-        };
 
         /// <summary>
         /// Maps CPU register names (all caps) to tuples of (id, sizecode, high)
@@ -1458,8 +1448,8 @@ namespace CSX64
             public bool TryAppendAddress(UInt64 a, UInt64 b, Expr hole)
             {
                 if (!TryAppendVal(1, a)) return false;
-                if ((a & 0x77) != 0) { if (!TryAppendVal(1, b)) return false; }
-                if ((a & 0x80) != 0) { if (!TryAppendExpr(8, hole)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append address base\n-> {res.ErrorMsg}"); return false; } }
+                if ((a & 0x0c) != 0) { if (!TryAppendVal(1, b)) return false; }
+                if ((a & 0x80) != 0) { if (!TryAppendExpr(Size((a >> 2) & 3), hole)) return false; }
 
                 return true;
             }
@@ -1947,9 +1937,9 @@ namespace CSX64
                     default: res = new AssembleResult(AssembleError.ArgError, $"line {line}: Invalid size multiplier: {val}"); return false;
                 }
             }
-            public bool TryParseAddressReg(string label, ref Expr hole, out UInt64 m, out bool neg)
+            public bool TryParseAddressReg(string label, ref Expr hole, out bool present, out UInt64 m)
             {
-                m = 0; neg = false; // initialize out params
+                m = 0; present = false; // initialize out params
 
                 Stack<Expr> path = new Stack<Expr>();
                 List<Expr> list = new List<Expr>();
@@ -2086,98 +2076,113 @@ namespace CSX64
 
                 // -- final task: get mult code and negative flag -- //
 
-                // if m is pretty big (TM), it's negative
-                if (m > 64) { m = ~m + 1; neg = true; } else neg = false;
                 // only other thing is transforming the multiplier into a mult code
                 switch (m)
                 {
-                    case 0: m = 0; break;
-                    case 1: m = 1; break;
-                    case 2: m = 2; break;
-                    case 4: m = 3; break;
-                    case 8: m = 4; break;
-                    case 16: m = 5; break;
-                    case 32: m = 6; break;
-                    case 64: m = 7; break;
+                    // 0 is not present
+                    case 0: m = 0; present = false; break;
 
-                    default: res = new AssembleResult(AssembleError.ArgError, $"line {line}: Invalid register multiplier encountered ({(Int64)m})"); return false;
+                    // if present, only 1, 2, 4, and 8 are allowed
+                    case 1: m = 0; present = true; break;
+                    case 2: m = 1; present = true; break;
+                    case 4: m = 2; present = true; break;
+                    case 8: m = 3; present = true; break;
+
+                    default: res = new AssembleResult(AssembleError.ArgError, $"line {line}: Register multipliers may only be 1, 2, 4, or 8. Got: {(Int64)m}*{label}"); return false;
                 }
 
                 // register successfully parsed
                 return true;
             }
-            public bool TryParseAddress(string token, out UInt64 a, out UInt64 b, out Expr hole, out UInt64 sizecode, out bool explicit_size)
+            public bool TryParseAddress(string token, out UInt64 a, out UInt64 b, out Expr ptr_base, out UInt64 sizecode, out bool explicit_size)
             {
-                a = b = 0; hole = new Expr();
+                a = b = 0; ptr_base = null;
                 sizecode = 0; explicit_size = false;
 
                 // account for exlicit sizecode prefix
                 string utoken = token.ToUpper();
-                for (int i = 0; i < AddressPrefixes.Length; ++i)
-                    if (utoken.StartsWith(AddressPrefixes[i]))
-                    {
-                        // take this size code - explicit
-                        token = token.Substring(AddressPrefixes[i].Length).TrimStart();
-                        explicit_size = true;
-                        sizecode = (UInt64)i;
-                        break;
-                    }
+                if (utoken.StartsWithToken("BYTE")) { sizecode = 0; explicit_size = true; utoken = utoken.Substring(4).TrimStart(); }
+                else if (utoken.StartsWithToken("WORD")) { sizecode = 1; explicit_size = true; utoken = utoken.Substring(4).TrimStart(); }
+                else if (utoken.StartsWithToken("DWORD")) { sizecode = 2; explicit_size = true; utoken = utoken.Substring(5).TrimStart(); }
+                else if (utoken.StartsWithToken("QWORD")) { sizecode = 3; explicit_size = true; utoken = utoken.Substring(5).TrimStart(); }
 
-                // must be of [*] format
-                if (token.Length < 3 || token[0] != '[' || token[token.Length - 1] != ']') { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Invalid address format encountered \"{token}\""); return false; }
-
-                UInt64 temp = 0; // parsing temporaries
-                bool btemp = false;
-
-                int reg_count = 0; // number of registers parsed
-                UInt64 r1 = 0, m1 = 0, r2 = 0, m2 = 0; // final register info
-                bool n1 = false, n2 = false;
-
-                string err = string.Empty; // evaluation error
-
-                // turn into an expression
-                if (!TryParseImm(token.Substring(1, token.Length - 2), out hole)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse address expression\n-> {res.ErrorMsg}"); return false; }
-
-                // look through each register that's legal in an address expression
-                for (int i = 0; i < AddressRegs.Length; ++i)
+                // if there was an explicit size
+                if (explicit_size)
                 {
-                    // get the register data
-                    if (!TryParseAddressReg(AddressRegs[i], ref hole, out temp, out btemp)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to extract register data\n-> {res.ErrorMsg}"); return false; }
+                    // CSX64 uses the DWORD PTR syntax, so now we need to start with PTR
+                    if (!utoken.StartsWith("PTR")) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Explicit memory operand size encountered without the PTR designator"); return false; }
 
-                    // if the multiplier was nonzero, the register is really being used
-                    if (temp != 0)
-                    {
-                        // put it into an available r slot
-                        if (reg_count == 0) { r1 = (UInt64)i; m1 = temp; n1 = btemp; }
-                        else if (reg_count == 1) { r2 = (UInt64)i; m2 = temp; n2 = btemp; }
-                        else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Can't use more than 2 registers to specify an address"); return false; }
-
-                        ++reg_count; // mark this slot as filled
-                    }
+                    // take all of that stuff off of token
+                    token = token.Substring(token.Length - utoken.Length + 3).TrimStart();
                 }
 
-                // if it still contains any registers they weren't 64-bit
-                foreach (var entry in CPURegisterInfo)
-                    if (hole.Find(entry.Key, true) != null) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to use register {entry.Key} in an address expression. Only 64-bit registers are allowed."); return false; }
+                // must be of [*] format
+                if (token.Length < 3 || token[0] != '[' || token[token.Length - 1] != ']') { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Invalid address format encountered: {token}"); return false; }
 
-                // make sure only one register is negative
-                if (n1 && n2) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Only one register may be negative in an address expression"); return false; }
-                // if the negative register is r1, swap with r2
-                if (n1)
+                UInt64 m1 = 0, r1 = UInt64.MaxValue, r2 = UInt64.MaxValue, sz = 3; // final register info - maxval denotes no value - m1 must default to 0 - sz defaults to 64-bit in the case that there's only an imm ptr_base
+                bool explicit_sz = false; // denotes that the ptr_base sizecode is explicit
+
+                // extract the address internals
+                token = token.Substring(1, token.Length - 2);
+
+                // handle explicit ptr_base sizes
+                utoken = token.ToUpper();
+                if (utoken.StartsWithToken("BYTE")) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: 8-bit addressing is not allowed. Encountered explicit 8-bit designator"); return false; }
+                else if (utoken.StartsWithToken("WORD")) { sz = 1; explicit_sz = true; token = token.Substring(4).TrimStart(); }
+                else if (utoken.StartsWithToken("DWORD")) { sz = 2; explicit_sz = true; token = token.Substring(5).TrimStart(); }
+                else if (utoken.StartsWithToken("QWORD")) { sz = 3; explicit_sz = true; token = token.Substring(5).TrimStart(); }
+
+                // turn into an expression
+                if (!TryParseImm(token, out ptr_base)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse address expression\n-> {res.ErrorMsg}"); return false; }
+
+                // look through all the register names
+                foreach (var entry in CPURegisterInfo)
                 {
-                    Swap(ref r1, ref r2);
-                    Swap(ref m1, ref m2);
-                    Swap(ref n1, ref n2);
+                    // extract the register data
+                    if (!TryParseAddressReg(entry.Key, ref ptr_base, out bool present, out UInt64 mult)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to extract register data\n-> {res.ErrorMsg}"); return false; }
+
+                    // if the register is present we need to do something with it
+                    if (present)
+                    {
+                        // 8-bit registers are not allowed
+                        if (entry.Value.Item2 == 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: 8-bit addressing is not allowed. Encountered register {entry.Key}"); return false; }
+
+                        // if we have an explicit address component size to enforce
+                        if (explicit_sz)
+                        {
+                            // if this conflicts with the current one, it's an error
+                            if (sz != entry.Value.Item2) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Encountered address components of conflicting sizes"); return false; }
+                        }
+                        // otherwise record this as the size to enforce
+                        else { sz = entry.Value.Item2; explicit_sz = true; }
+
+                        // if the multiplier is non-trivial (non-1) it has to go in r1
+                        if (mult != 0)
+                        {
+                            // if r1 already has a value, this is an error
+                            if (r1 != UInt64.MaxValue) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Only one register may have a (non-1) pre-multiplier"); return false; }
+
+                            r1 = entry.Value.Item1;
+                            m1 = mult;
+                        }
+                        // otherwise multiplier is trivial, try to put it in r2 first
+                        else if (r2 == UInt64.MaxValue) r2 = entry.Value.Item1;
+                        // if that falied, try r1
+                        else if (r1 == UInt64.MaxValue) r1 = entry.Value.Item1;
+                        // if nothing worked, both are full
+                        else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: An address expression may only use up to 2 registers"); return false; }
+                    }
                 }
 
                 // if we can evaluate the hole to zero, there is no hole (null it)
-                if (hole.Evaluate(file.Symbols, out temp, out btemp, ref err) && temp == 0) hole = null;
+                if (ptr_base.Evaluate(file.Symbols, out UInt64 _temp, out bool _btemp, ref utoken) && _temp == 0) ptr_base = null;
 
                 // -- apply final touches -- //
 
-                // [1: literal][3: m1][1: -m2][3: m2]   [4: r1][4: r2]   ([64: imm])
-                a = (hole != null ? 128 : 0ul) | (m1 << 4) | (n2 ? 8 : 0ul) | m2;
-                b = (r1 << 4) | r2;
+                // [1: imm][1:][2: mult_1][2: size][1: r1][1: r2]   ([4: r1][4: r2])   ([size: imm])
+
+                a = (ptr_base != null ? 0x80 : 0ul) | (m1 << 4) | (sz << 2) | (r1 != UInt64.MaxValue ? 2 : 0ul) | (r2 != UInt64.MaxValue ? 1 : 0ul);
+                b = (r1 != UInt64.MaxValue ? r1 << 4 : 0ul) | (r2 != UInt64.MaxValue ? r2 : 0ul);
 
                 // address successfully parsed
                 return true;

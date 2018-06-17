@@ -42,6 +42,28 @@ namespace CSX64
         {
             return val != 0 && (val & (val - 1)) == 0;
         }
+        /// <summary>
+        /// Extracts 2 distinct powers of 2 from the specified value. Returns true if the value is made up of exactly two non-zero powers of 2.
+        /// </summary>
+        /// <param name="val">the value to process</param>
+        /// <param name="a">the first (larger) power of 2</param>
+        /// <param name="b">the second (smaller) power of 2</param>
+        /// <returns></returns>
+        public static bool Extract2PowersOf2(this UInt64 val, out UInt64 a, out UInt64 b)
+        {
+            // isolate the lowest power of 2
+            b = val & (~val + 1);
+            // disable the lowest power of 2
+            val = val & (val - 1);
+
+            // isolate the next lowest power of 2
+            a = val & (~val + 1);
+            // disable the next lowest power of 2
+            val = val & (val - 1);
+
+            // if val is now zero and a and b are nonzero, we got 2 distinct powers of 2
+            return val == 0 && a != 0 && b != 0;
+        }
 
         public static void ExtractDouble(double val, out double exp, out double sig)
         {
@@ -350,6 +372,16 @@ namespace CSX64
                 if (str[i] == ch) return true;
 
             return false;
+        }
+
+        /// <summary>
+        /// Returns true if the the string is equal to the specified value or begins with it and is followed by white space.
+        /// </summary>
+        /// <param name="str">the string to search in</param>
+        /// <param name="val">the header value to test for</param>
+        public static bool StartsWithToken(this string str, string val)
+        {
+            return str.StartsWith(val) && (str.Length == val.Length || char.IsWhiteSpace(str[val.Length]));
         }
 
         /// <summary>

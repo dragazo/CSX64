@@ -573,17 +573,26 @@ namespace CSX64
         /// <param name="res">resulting address</param>
         private bool GetAddressAdv(out UInt64 res)
         {
-            res = 0; // initialize out param
+            // [1: imm][1:][2: mult_1][2: size][1: r1][1: r2]   ([4: r1][4: r2])   ([size: imm])
 
-            // [1: literal][3: m1][1: -m2][3: m2]   ([4: r1][4: r2])   ([64: imm])
+            UInt64 settings, sizecode, regs = 0; // regs is initialized to 0 because the compiler is stupid
+            res = 0; // initialize res - functions as imm parsing location, so it has to start at 0
 
-            UInt64 mults, regs = 0, imm = 0; // the mult codes, regs, and literal
+            // get the settings byte and regs byte if applicable
+            if (!GetMemAdv(1, out settings) || (settings & 0x0c) != 0 && !GetMemAdv(1, out regs)) return false;
 
-            // parse the address
-            if (!GetMemAdv(1, out mults) || (mults & 0x77) != 0 && !GetMemAdv(1, out regs) || (mults & 0x80) != 0 && !GetMemAdv(8, out imm)) return false;
+            // get the sizecode
+            sizecode = (settings >> 2) & 3;
+            // 8-bit addressing is not allowed
+            if (sizecode == 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
 
-            // compute the result into res
-            res = Mult((mults >> 4) & 7) * Registers[regs >> 4].x64 + Mult(mults & 7, mults & 8) * Registers[regs & 15].x64 + imm;
+            // get the imm if applicable - store into res
+            if ((settings & 0x80) != 0 && !GetMemAdv(Size(sizecode), out res)) return false;
+
+            // if r1 was used, add that pre-multiplied by the multiplier
+            if ((settings & 2) != 0) res += Registers[regs >> 4][sizecode] << (UInt16)((settings >> 4) & 3);
+            // if r2 was used, add that
+            if ((settings & 1) != 0) res += Registers[regs & 15][sizecode];
 
             // got an address
             return true;
