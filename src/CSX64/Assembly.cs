@@ -412,14 +412,17 @@ namespace CSX64
                     // if it's a number
                     if (char.IsDigit(Token[0]))
                     {
+                        // remove underscores (e.g. 0b_0011_1101_1101_1111)
+                        string token = Token.Replace("_", "");
+
                         // try several integral radicies
-                        if (Token.StartsWith("0x")) { if (Token.Substring(2).TryParseUInt64(out res, 16)) break; }
-                        else if (Token.StartsWith("0b")) { if (Token.Substring(2).TryParseUInt64(out res, 2)) break; }
-                        else if (Token[0] == '0' && Token.Length > 1) { if (Token.Substring(1).TryParseUInt64(out res, 8)) break; }
-                        else { if (Token.TryParseUInt64(out res, 10)) break; }
+                        if (token.StartsWith("0x")) { if (Token.Substring(2).TryParseUInt64(out res, 16)) break; }
+                        else if (token.StartsWith("0b")) { if (Token.Substring(2).TryParseUInt64(out res, 2)) break; }
+                        else if (token[0] == '0' && Token.Length > 1) { if (Token.Substring(1).TryParseUInt64(out res, 8)) break; }
+                        else { if (token.TryParseUInt64(out res, 10)) break; }
 
                         // try floating-point
-                        if (double.TryParse(Token, out double f)) { res = DoubleAsUInt64(f); floating = true; break; }
+                        if (double.TryParse(token, out double f)) { res = DoubleAsUInt64(f); floating = true; break; }
 
                         // if nothing worked, it's an ill-formed numeric literal
                         err = $"Ill-formed numeric literal encountered: \"{Token}\"";
