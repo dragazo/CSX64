@@ -3650,6 +3650,14 @@ namespace CSX64
                         
                         case "FFREE": if (!args.TryProcessFPURegisterOp(OPCode.FFREE)) return args.res; break;
 
+                        // SIMD instructions
+
+                        
+
+                        // misc instructions
+
+                        case "DEBUG": if (!args.TryProcessNoArgOp(OPCode.DEBUG, false, 0)) return args.res; break;
+
                         default: return new AssembleResult(AssembleError.UnknownOp, $"line {args.line}: Unknown operation \"{args.op}\"");
                     }
                 }

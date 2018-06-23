@@ -17,7 +17,7 @@ namespace CSX64
         {
             // get fd index
             UInt64 fd_index = RBX;
-            if (fd_index >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
+            if (fd_index >= (UInt64)FDCount) { Terminate(ErrorCode.OutOfBounds); return false; }
 
             // get fd
             FileDescriptor fd = FileDescriptors[fd_index];
@@ -58,7 +58,7 @@ namespace CSX64
         {
             // get fd index
             UInt64 fd_index = RBX;
-            if (fd_index >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
+            if (fd_index >= (UInt64)FDCount) { Terminate(ErrorCode.OutOfBounds); return false; }
 
             // get fd
             FileDescriptor fd = FileDescriptors[fd_index];
@@ -110,7 +110,7 @@ namespace CSX64
         {
             // get fd index
             UInt64 fd_index = RBX;
-            if (fd_index >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
+            if (fd_index >= (UInt64)FDCount) { Terminate(ErrorCode.OutOfBounds); return false; }
 
             // get fd
             FileDescriptor fd = FileDescriptors[fd_index];
@@ -129,7 +129,7 @@ namespace CSX64
         {
             // get fd index
             UInt64 fd_index = RBX;
-            if (fd_index >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
+            if (fd_index >= (UInt64)FDCount) { Terminate(ErrorCode.OutOfBounds); return false; }
 
             // get fd
             FileDescriptor fd = FileDescriptors[fd_index];
@@ -151,7 +151,7 @@ namespace CSX64
         {
             // get fd index
             UInt64 fd_index = RBX;
-            if (fd_index >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
+            if (fd_index >= (UInt64)FDCount) { Terminate(ErrorCode.OutOfBounds); return false; }
 
             // get fd
             FileDescriptor fd = FileDescriptors[fd_index];
@@ -171,7 +171,7 @@ namespace CSX64
         {
             // get fd index
             UInt64 fd_index = RBX;
-            if (fd_index >= NFileDescriptors) { Terminate(ErrorCode.OutOfBounds); return false; }
+            if (fd_index >= (UInt64)FDCount) { Terminate(ErrorCode.OutOfBounds); return false; }
 
             // get fd
             FileDescriptor fd = FileDescriptors[fd_index];

@@ -36,17 +36,17 @@ namespace CSX64
                 if ((a & 128) != 0)
                 {
                     if ((a & 0x0c) != 0 || sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
-                    a = Registers[a & 15].x8h;
+                    a = CPURegisters[a & 15].x8h;
                 }
-                else a = Registers[a & 15][sizecode];
+                else a = CPURegisters[a & 15][sizecode];
                 return true;
             }
             else return GetAddressAdv(out a) && GetMemRaw(a, Size(sizecode), out a);
         }
         private bool StoreTernaryOPFormat(UInt64 s, UInt64 res)
         {
-            if ((s & 2) != 0) Registers[s >> 4].x8h = (byte)res;
-            else Registers[s >> 4][(s >> 2) & 3] = res;
+            if ((s & 2) != 0) CPURegisters[s >> 4].x8h = (byte)res;
+            else CPURegisters[s >> 4][(s >> 2) & 3] = res;
             return true;
         }
 
@@ -84,17 +84,17 @@ namespace CSX64
                     {
                         // make sure we're in registers 0-3 and 8-bit mode
                         if ((s1 & 0xc0) != 0 || a_sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
-                        if (get_a) a = Registers[s1 >> 4].x8h;
+                        if (get_a) a = CPURegisters[s1 >> 4].x8h;
                     }
-                    else if (get_a) a = Registers[s1 >> 4][a_sizecode];
+                    else if (get_a) a = CPURegisters[s1 >> 4][a_sizecode];
                     // if sh is flagged
                     if ((s1 & 1) != 0)
                     {
                         // make sure we're in registers 0-3 and 8-bit mode
                         if ((s2 & 0x0c) != 0 || b_sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
-                        b = Registers[s2 & 15].x8h;
+                        b = CPURegisters[s2 & 15].x8h;
                     }
-                    else b = Registers[s2 & 15][b_sizecode];
+                    else b = CPURegisters[s2 & 15][b_sizecode];
                     return true;
 
                 case 1:
@@ -103,9 +103,9 @@ namespace CSX64
                     {
                         // make sure we're in registers 0-3 and 8-bit mode
                         if ((s1 & 0xc0) != 0 || a_sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
-                        if (get_a) a = Registers[s1 >> 4].x8h;
+                        if (get_a) a = CPURegisters[s1 >> 4].x8h;
                     }
-                    else if (get_a) a = Registers[s1 >> 4][a_sizecode];
+                    else if (get_a) a = CPURegisters[s1 >> 4][a_sizecode];
                     // get imm
                     return GetMemAdv(Size(b_sizecode), out b);
 
@@ -118,9 +118,9 @@ namespace CSX64
                     {
                         // make sure we're in registers 0-3 and 8-bit mode
                         if ((s1 & 0xc0) != 0 || a_sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
-                        if (get_a) a = Registers[s1 >> 4].x8h;
+                        if (get_a) a = CPURegisters[s1 >> 4].x8h;
                     }
-                    else if (get_a) a = Registers[s1 >> 4][a_sizecode];
+                    else if (get_a) a = CPURegisters[s1 >> 4][a_sizecode];
                     // get mem
                     return GetAddressAdv(out m) && GetMemRaw(m, Size(b_sizecode), out b);
 
@@ -132,9 +132,9 @@ namespace CSX64
                     {
                         // make sure we're in registers 0-3 and 8-bit mode
                         if ((s2 & 0x0c) != 0 || b_sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
-                        b = Registers[s2 & 15].x8h;
+                        b = CPURegisters[s2 & 15].x8h;
                     }
-                    else b = Registers[s2 & 15][b_sizecode];
+                    else b = CPURegisters[s2 & 15][b_sizecode];
                     return true;
 
                 case 4:
@@ -156,8 +156,8 @@ namespace CSX64
                 case 0:
                 case 1:
                 case 2:
-                    if ((s1 & 2) != 0) Registers[s1 >> 4].x8h = (byte)res;
-                    else Registers[s1 >> 4][sizecode] = res;
+                    if ((s1 & 2) != 0) CPURegisters[s1 >> 4].x8h = (byte)res;
+                    else CPURegisters[s1 >> 4][sizecode] = res;
                     return true;
 
                 case 3:
@@ -195,9 +195,9 @@ namespace CSX64
                     {
                         // make sure we're in registers 0-3 and 8-bit mode
                         if ((s & 0xc0) != 0 || a_sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
-                        if (get_a) a = Registers[s >> 4].x8h;
+                        if (get_a) a = CPURegisters[s >> 4].x8h;
                     }
-                    else if (get_a) a = Registers[s >> 4][a_sizecode];
+                    else if (get_a) a = CPURegisters[s >> 4][a_sizecode];
                     return true;
 
                 case 1:
@@ -214,8 +214,8 @@ namespace CSX64
             switch (s & 1)
             {
                 case 0:
-                    if ((s & 2) != 0) Registers[s >> 4].x8h = (byte)res;
-                    else Registers[s >> 4][sizecode] = res;
+                    if ((s & 2) != 0) CPURegisters[s >> 4].x8h = (byte)res;
+                    else CPURegisters[s >> 4][sizecode] = res;
                     return true;
 
                 case 1:
@@ -249,9 +249,9 @@ namespace CSX64
                 {
                     // need to be in (ABCD)H
                     if ((s & 0xc0) != 0 || sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
-                    val = Registers[s >> 4].x8h;
+                    val = CPURegisters[s >> 4].x8h;
                 }
-                else val = Registers[s >> 4][sizecode];
+                else val = CPURegisters[s >> 4][sizecode];
 
                 return true;
             }
@@ -266,8 +266,8 @@ namespace CSX64
             if ((s & 1) == 0)
             {
                 // if high flag set
-                if ((s & 2) != 0) Registers[s >> 4].x8h = (byte)res;
-                else Registers[s >> 4][sizecode] = res;
+                if ((s & 2) != 0) CPURegisters[s >> 4].x8h = (byte)res;
+                else CPURegisters[s >> 4][sizecode] = res;
 
                 return true;
             }
@@ -294,12 +294,12 @@ namespace CSX64
             switch (s & 3)
             {
                 case 0:
-                    a = Registers[s >> 4][a_sizecode];
+                    a = CPURegisters[s >> 4][a_sizecode];
                     return true;
 
                 case 1:
                     if ((s & 0xc0) != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
-                    a = Registers[s >> 4].x8h;
+                    a = CPURegisters[s >> 4].x8h;
                     return true;
 
                 case 2: return GetMemAdv(Size(a_sizecode), out a);
@@ -326,17 +326,17 @@ namespace CSX64
             if ((s & 2) != 0)
             {
                 if (sizecode != 0 || (s & 0xc0) != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
-                dest = Registers[s >> 4].x8h;
+                dest = CPURegisters[s >> 4].x8h;
             }
-            else dest = Registers[s >> 4][sizecode];
+            else dest = CPURegisters[s >> 4][sizecode];
 
             // if a is high
             if ((a & 128) != 0)
             {
                 if (sizecode != 0 || (a & 0x0c) != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
-                a = Registers[a & 15].x8h;
+                a = CPURegisters[a & 15].x8h;
             }
-            else a = Registers[a & 15][sizecode];
+            else a = CPURegisters[a & 15][sizecode];
 
             // if b is register
             if ((s & 1) == 0)
@@ -347,9 +347,9 @@ namespace CSX64
                 if ((b & 128) != 0)
                 {
                     if (sizecode != 0 || (b & 0x0c) != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
-                    b = Registers[b & 15].x8h;
+                    b = CPURegisters[b & 15].x8h;
                 }
-                else b = Registers[b & 15][sizecode];
+                else b = CPURegisters[b & 15][sizecode];
             }
             // otherwise b is memory
             else
@@ -362,8 +362,8 @@ namespace CSX64
         private bool StoreRR_RMFormat(UInt64 s, UInt64 res)
         {
             // if dest is high
-            if ((s & 2) != 0) Registers[s >> 4].x8h = (byte)res;
-            else Registers[s >> 4][(s >> 2) & 3] = res;
+            if ((s & 2) != 0) CPURegisters[s >> 4].x8h = (byte)res;
+            else CPURegisters[s >> 4][(s >> 2) & 3] = res;
 
             return true;
         }
@@ -578,7 +578,7 @@ namespace CSX64
                 if (((s1 >> 2) & 3) == 2 && (s2 >> 4) <= 2)
                 {
                     // load 32-bit partition to itself (internally zeroes high bits)
-                    Registers[s1 >> 4].x32 = Registers[s1 >> 4].x32;
+                    CPURegisters[s1 >> 4].x32 = CPURegisters[s1 >> 4].x32;
                 }
 
                 return true;
@@ -606,9 +606,9 @@ namespace CSX64
             if ((a & 2) != 0)
             {
                 if ((a & 0xc0) != 0 || sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
-                temp_1 = Registers[a >> 4].x8h;
+                temp_1 = CPURegisters[a >> 4].x8h;
             }
-            else temp_1 = Registers[a >> 4][sizecode];
+            else temp_1 = CPURegisters[a >> 4][sizecode];
 
             // if b is reg
             if ((a & 1) == 0)
@@ -619,13 +619,13 @@ namespace CSX64
                 if ((b & 128) != 0)
                 {
                     if ((b & 0x0c) != 0 || sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
-                    temp_2 = Registers[b & 15].x8h;
-                    Registers[b & 15].x8h = (byte)temp_1;
+                    temp_2 = CPURegisters[b & 15].x8h;
+                    CPURegisters[b & 15].x8h = (byte)temp_1;
                 }
                 else
                 {
-                    temp_2 = Registers[b & 15][sizecode];
-                    Registers[b & 15][sizecode] = temp_1;
+                    temp_2 = CPURegisters[b & 15][sizecode];
+                    CPURegisters[b & 15][sizecode] = temp_1;
                 }
             }
             // otherwise b is mem
@@ -638,8 +638,8 @@ namespace CSX64
             }
 
             // store a's result (b's was handled internally above)
-            if ((a & 2) != 0) Registers[a >> 4].x8h = (byte)temp_2;
-            else Registers[a >> 4][sizecode] = temp_2;
+            if ((a & 2) != 0) CPURegisters[a >> 4].x8h = (byte)temp_2;
+            else CPURegisters[a >> 4][sizecode] = temp_2;
 
             return true;
         }
@@ -785,7 +785,7 @@ namespace CSX64
             // if register
             if ((s & 1) == 0)
             {
-                Registers[s >> 4][sizecode] = val;
+                CPURegisters[s >> 4][sizecode] = val;
                 return true;
             }
             // otherwise is memory
@@ -804,7 +804,7 @@ namespace CSX64
             // LEA doesn't allow 8-bit addressing
             if (sizecode == 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
 
-            Registers[s >> 4][sizecode] = address;
+            CPURegisters[s >> 4][sizecode] = address;
             return true;
         }
 
@@ -1576,11 +1576,11 @@ namespace CSX64
                         {
                             // make sure we're in registers A-D
                             if ((s2 & 0x0c) != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
-                            src = Registers[s2 & 15].x8h;
+                            src = CPURegisters[s2 & 15].x8h;
                         }
-                        else src = Registers[s2 & 15].x8;
+                        else src = CPURegisters[s2 & 15].x8;
                         break;
-                    case 3: case 5: case 7: case 9: src = Registers[s2 & 15].x16; break;
+                    case 3: case 5: case 7: case 9: src = CPURegisters[s2 & 15].x16; break;
 
                     default: Terminate(ErrorCode.UndefinedBehavior); return false;
                 }
@@ -1601,16 +1601,16 @@ namespace CSX64
             // store the value
             switch (s1 & 15)
             {
-                case 0: Registers[s1 >> 4].x16 = (UInt16)src; break;
-                case 1: Registers[s1 >> 4].x16 = (UInt16)SignExtend(src, 0); break;
+                case 0: CPURegisters[s1 >> 4].x16 = (UInt16)src; break;
+                case 1: CPURegisters[s1 >> 4].x16 = (UInt16)SignExtend(src, 0); break;
 
-                case 2: case 3: Registers[s1 >> 4].x32 = (UInt32)src; break;
-                case 4: Registers[s1 >> 4].x32 = (UInt32)SignExtend(src, 0); break;
-                case 5: Registers[s1 >> 4].x32 = (UInt32)SignExtend(src, 1); break;
+                case 2: case 3: CPURegisters[s1 >> 4].x32 = (UInt32)src; break;
+                case 4: CPURegisters[s1 >> 4].x32 = (UInt32)SignExtend(src, 0); break;
+                case 5: CPURegisters[s1 >> 4].x32 = (UInt32)SignExtend(src, 1); break;
 
-                case 6: case 7: Registers[s1 >> 4].x64 = src; break;
-                case 8: Registers[s1 >> 4].x64 = SignExtend(src, 0); break;
-                case 9: Registers[s1 >> 4].x64 = SignExtend(src, 1); break;
+                case 6: case 7: CPURegisters[s1 >> 4].x64 = src; break;
+                case 8: CPURegisters[s1 >> 4].x64 = SignExtend(src, 0); break;
+                case 9: CPURegisters[s1 >> 4].x64 = SignExtend(src, 1); break;
             }
 
             return true;
@@ -1650,7 +1650,7 @@ namespace CSX64
                     if (!GetAddressAdv(out UInt64 m)) return false;
                     switch (s & 7)
                     {
-                        case 3: if (!GetMemRaw(m, 4, out m)) return false; b = AsFloat(m); return true;
+                        case 3: if (!GetMemRaw(m, 4, out m)) return false; b = AsFloat((UInt32)m); return true;
                         case 4: if (!GetMemRaw(m, 8, out m)) return false; b = AsDouble(m); return true;
                         case 5: if (!GetMemRaw(m, 2, out m)) return false; b = (Int64)SignExtend(m, 1); return true;
                         case 6: if (!GetMemRaw(m, 4, out m)) return false; b = (Int64)SignExtend(m, 2); return true;
@@ -1751,7 +1751,7 @@ namespace CSX64
                     if (!GetAddressAdv(out UInt64 m)) return false;
                     switch (s & 7)
                     {
-                        case 1: if (!GetMemRaw(m, 4, out m)) return false; return PushFPU(AsFloat(m));
+                        case 1: if (!GetMemRaw(m, 4, out m)) return false; return PushFPU(AsFloat((UInt32)m));
                         case 2: if (!GetMemRaw(m, 8, out m)) return false; return PushFPU(AsDouble(m));
 
                         case 3: if (!GetMemRaw(m, 2, out m)) return false; return PushFPU((Int64)SignExtend(m, 1));
@@ -2234,7 +2234,7 @@ namespace CSX64
                     if (!GetAddressAdv(out UInt64 m)) return false;
                     switch (s & 15)
                     {
-                        case 3: case 4: if (!GetMemRaw(m, 4, out m)) return false; b = AsFloat(m); break;
+                        case 3: case 4: if (!GetMemRaw(m, 4, out m)) return false; b = AsFloat((UInt32)m); break;
                         case 5: case 6: if (!GetMemRaw(m, 8, out m)) return false; b = AsDouble(m); break;
 
                         case 7: case 8: if (!GetMemRaw(m, 2, out m)) return false; b = (Int64)SignExtend(m, 1); break;

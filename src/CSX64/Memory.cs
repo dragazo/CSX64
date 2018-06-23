@@ -252,7 +252,7 @@ namespace CSX64
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
         public bool GetMem(UInt64 pos, out float res)
         {
-            if (GetMemRaw(pos, 4, out UInt64 temp)) { res = AsFloat(temp); return true; }
+            if (GetMemRaw(pos, 4, out UInt64 temp)) { res = AsFloat((UInt32)temp); return true; }
             else { res = 0; return false; }
         }
         /// <summary>
@@ -477,7 +477,7 @@ namespace CSX64
         /// <param name="_abide_slow">if the memory access should abide by SMF. only pass false if it makes sense, otherwise slow should be slow</param>
         public bool Pop(out float res)
         {
-            if (PopRaw(4, out UInt64 temp)) { res = AsFloat(temp); return true; }
+            if (PopRaw(4, out UInt64 temp)) { res = AsFloat((UInt32)temp); return true; }
             else { res = 0; return false; }
         }
         /// <summary>
@@ -590,9 +590,9 @@ namespace CSX64
             if ((settings & 0x80) != 0 && !GetMemAdv(Size(sizecode), out res)) return false;
 
             // if r1 was used, add that pre-multiplied by the multiplier
-            if ((settings & 2) != 0) res += Registers[regs >> 4][sizecode] << (UInt16)((settings >> 4) & 3);
+            if ((settings & 2) != 0) res += CPURegisters[regs >> 4][sizecode] << (UInt16)((settings >> 4) & 3);
             // if r2 was used, add that
-            if ((settings & 1) != 0) res += Registers[regs & 15][sizecode];
+            if ((settings & 1) != 0) res += CPURegisters[regs & 15][sizecode];
 
             // got an address
             return true;

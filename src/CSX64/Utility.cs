@@ -22,19 +22,6 @@ namespace CSX64
         }
 
         /// <summary>
-        /// Removes all white space from a string
-        /// </summary>
-        public static string RemoveWhiteSpace(this string str)
-        {
-            StringBuilder res = new StringBuilder();
-
-            for (int i = 0; i < str.Length; ++i)
-                if (!char.IsWhiteSpace(str[i])) res.Append(str[i]);
-
-            return res.ToString();
-        }
-
-        /// <summary>
         /// Returns true if this value is a power of two. (zero returns false)
         /// </summary>
         /// <param name="val">the value to test</param>
@@ -107,53 +94,22 @@ namespace CSX64
         {
             return sig * Math.Pow(2, exp);
         }
-
-        public static bool GetHexValue(char ch, out int val)
-        {
-            if (ch >= '0' && ch <= '9') val = ch - '0';
-            else if (ch >= 'a' && ch <= 'f') val = ch - 'a' + 10;
-            else if (ch >= 'A' && ch <= 'F') val = ch - 'A' + 10;
-            else { val = 0; return false; }
-
-            return true;
-        }
-
+        
         /// <summary>
-        /// Creates a table from an arrays of column entries and pads each row to a specified width
+        /// Gets a random UInt64 value
         /// </summary>
-        /// <param name="col_width">the width for each column</param>
-        /// <param name="rows">
-        /// array of rows, which are arrays of column elementes.
-        /// A null row is empty (new line).
-        /// A null column entry will be skipped (filled with white space).
-        /// If there are too few column entries, the ones not specified are ignored (immediate new line).
-        /// If there are too many column entries, triggers an exception.
-        /// </param>
-        public static string CreateTable(int[] col_width, string[][] rows)
+        /// <param name="rand">random object to use</param>
+        public static UInt64 NextUInt64(this Random rand)
         {
-            StringBuilder b = new StringBuilder();
-
-            // process all the rows
-            foreach (string[] row in rows)
-            {
-                // null allows for easy empty rows
-                if (row != null)
-                {
-                    // for all the columns in this row
-                    for (int i = 0; i < row.Length; ++i)
-                    {
-                        // append the cell (null allows for column skip)
-                        if (row[i] != null) b.Append(row[i]);
-                        // pad to column width
-                        for (int j = row[i] != null ? row[i].Length : 0; j < col_width[i]; ++j) b.Append(' ');
-                    }
-                }
-
-                // next line
-                b.Append('\n');
-            }
-
-            return b.ToString();
+            return ((UInt64)(UInt32)rand.Next() << 32) | (UInt32)rand.Next();
+        }
+        /// <summary>
+        /// Gets a random boolean
+        /// </summary>
+        /// <param name="rand">the random object to use</param>
+        public static bool NextBool(this Random rand)
+        {
+            return rand.Next(2) == 1;
         }
 
         // -- memory utilities -- //
@@ -180,7 +136,7 @@ namespace CSX64
 
             return true;
         }
-        public static bool Write(this byte[] arr, UInt64 pos, UInt64 size, UInt64 val)
+        public static bool Write(this byte[] arr, UInt64 pos, UInt64 size, UInt64 val) // this template specialization is for speed
         {
             // make sure we're not exceeding memory bounds
             if (pos >= (UInt64)arr.Length || pos + size > (UInt64)arr.Length) return false;
@@ -274,9 +230,61 @@ namespace CSX64
             str = b.ToString();
             return true;
         }
-        
-        // -- misc utilities -- //
 
+        // -- string stuff -- //
+
+        /// <summary>
+        /// Creates a table from an arrays of column entries and pads each row to a specified width
+        /// </summary>
+        /// <param name="col_width">the width for each column</param>
+        /// <param name="rows">
+        /// array of rows, which are arrays of column elementes.
+        /// A null row is empty (new line).
+        /// A null column entry will be skipped (filled with white space).
+        /// If there are too few column entries, the ones not specified are ignored (immediate new line).
+        /// If there are too many column entries, triggers an exception.
+        /// </param>
+        public static string CreateTable(int[] col_width, string[][] rows)
+        {
+            StringBuilder b = new StringBuilder();
+
+            // process all the rows
+            foreach (string[] row in rows)
+            {
+                // null allows for easy empty rows
+                if (row != null)
+                {
+                    // for all the columns in this row
+                    for (int i = 0; i < row.Length; ++i)
+                    {
+                        // append the cell (null allows for column skip)
+                        if (row[i] != null) b.Append(row[i]);
+                        // pad to column width
+                        for (int j = row[i] != null ? row[i].Length : 0; j < col_width[i]; ++j) b.Append(' ');
+                    }
+                }
+
+                // next line
+                b.Append('\n');
+            }
+
+            return b.ToString();
+        }
+
+        /// <summary>
+        /// Gets the numeric value of a hexadecimal digit. returns true if the character was in the hex range.
+        /// </summary>
+        /// <param name="ch">the character to test</param>
+        /// <param name="val">the character's value [0-15]</param>
+        public static bool GetHexValue(char ch, out int val)
+        {
+            if (ch >= '0' && ch <= '9') val = ch - '0';
+            else if (ch >= 'a' && ch <= 'f') val = ch - 'a' + 10;
+            else if (ch >= 'A' && ch <= 'F') val = ch - 'A' + 10;
+            else { val = 0; return false; }
+
+            return true;
+        }
         /// <summary>
         /// Attempts to parse the string into an unsigned integer. Returns true on success.
         /// </summary>
@@ -316,6 +324,102 @@ namespace CSX64
         }
 
         /// <summary>
+        /// Returns true if the string contains at least one occurrence of the specified character
+        /// </summary>
+        /// <param name="str">the string to test</param>
+        /// <param name="ch">the character to look for</param>
+        public static bool Contains(this string str, char ch)
+        {
+            for (int i = 0; i < str.Length; ++i)
+                if (str[i] == ch) return true;
+
+            return false;
+        }
+        /// <summary>
+        /// Removes ALL white space from a string
+        /// </summary>
+        public static string RemoveWhiteSpace(this string str)
+        {
+            StringBuilder res = new StringBuilder();
+
+            for (int i = 0; i < str.Length; ++i)
+                if (!char.IsWhiteSpace(str[i])) res.Append(str[i]);
+
+            return res.ToString();
+        }
+
+        /// <summary>
+        /// Returns true if the string starts with the specified character
+        /// </summary>
+        /// <param name="str">the string to test</param>
+        /// <param name="ch">the character it must start with</param>
+        public static bool StartsWith(this string str, char ch)
+        {
+            return str.Length > 0 && str[0] == ch;
+        }
+        /// <summary>
+        /// Returns true if the the string is equal to the specified value or begins with it and is followed by white space.
+        /// </summary>
+        /// <param name="str">the string to search in</param>
+        /// <param name="val">the header value to test for</param>
+        public static bool StartsWithToken(this string str, string val)
+        {
+            return str.StartsWith(val) && (str.Length == val.Length || char.IsWhiteSpace(str[val.Length]));
+        }
+
+        /// <summary>
+        /// returns a binary dump representation of the data
+        /// </summary>
+        /// <param name="data">the data to dump</param>
+        /// <param name="start">the index at which to begin dumping</param>
+        /// <param name="count">the number of bytes to write</param>
+        public static string Dump(this byte[] data, int start, int count)
+        {
+            StringBuilder dump = new StringBuilder();
+
+            // make a header
+            dump.Append("           ");
+            for (int i = 0; i < 16; ++i) dump.Append($" {i:x} ");
+
+            // if it's not starting on a new row
+            if (start % 16 != 0)
+            {
+                // we need to write a line header
+                dump.Append($"\n{start - start % 16:x8} - ");
+
+                // and tack on some white space
+                for (int i = 0; i < start % 16; ++i) dump.Append("   ");
+            }
+
+            // write the data
+            for (int i = 0; i < count; ++i)
+            {
+                // start of new row gets a line header
+                if ((start + i) % 16 == 0) dump.Append($"\n{start + i:x8} - ");
+
+                dump.Append($"{data[start + i]:x2} ");
+            }
+
+            // end with a new line
+            dump.Append('\n');
+
+            return dump.ToString();
+        }
+        /// <summary>
+        /// returns a binary dump representation of the data
+        /// </summary>
+        /// <param name="data">the data to dump</param>
+        /// <param name="start">the index at which to begin dumping</param>
+        public static string Dump(this byte[] data, int start) => data.Dump(start, data.Length - start);
+        /// <summary>
+        /// returns a binary dump representation of the data
+        /// </summary>
+        /// <param name="data">the data to dump</param>
+        public static string Dump(this byte[] data) => data.Dump(0, data.Length);
+
+        // -- serialization utilities -- //
+
+        /// <summary>
         /// Writes an ASCII C-style string to the <see cref="BinaryWriter"/>
         /// </summary>
         /// <param name="writer">the writer to use</param>
@@ -350,101 +454,6 @@ namespace CSX64
 
             // assign result
             return b.ToString();
-        }
-
-        /// <summary>
-        /// Returns true if the string starts with the specified character
-        /// </summary>
-        /// <param name="str">the string to test</param>
-        /// <param name="ch">the character it must start with</param>
-        public static bool StartsWith(this string str, char ch)
-        {
-            return str.Length > 0 && str[0] == ch;
-        }
-        /// <summary>
-        /// Returns true if the string contains at least one occurrence of the specified character
-        /// </summary>
-        /// <param name="str">the string to test</param>
-        /// <param name="ch">the character to look for</param>
-        public static bool Contains(this string str, char ch)
-        {
-            for (int i = 0; i < str.Length; ++i)
-                if (str[i] == ch) return true;
-
-            return false;
-        }
-
-        /// <summary>
-        /// Returns true if the the string is equal to the specified value or begins with it and is followed by white space.
-        /// </summary>
-        /// <param name="str">the string to search in</param>
-        /// <param name="val">the header value to test for</param>
-        public static bool StartsWithToken(this string str, string val)
-        {
-            return str.StartsWith(val) && (str.Length == val.Length || char.IsWhiteSpace(str[val.Length]));
-        }
-
-        /// <summary>
-        /// Writes a binary dump representation of the data to the console
-        /// </summary>
-        /// <param name="data">the data to dump</param>
-        /// <param name="start">the index at which to begin dumping</param>
-        /// <param name="count">the number of bytes to write</param>
-        public static void Dump(this byte[] data, int start, int count)
-        {
-            // make a header
-            Console.Write("           ");
-            for (int i = 0; i < 16; ++i) Console.Write($" {i:x} ");
-
-            // if it's not starting on a new row
-            if (start % 16 != 0)
-            {
-                // we need to write a line header
-                Console.Write($"\n{start - start % 16:x8} - ");
-
-                // and tack on some white space
-                for (int i = 0; i < start % 16; ++i) Console.Write("   ");
-            }
-
-            // write the data
-            for (int i = 0; i < count; ++i)
-            {
-                // start of new row gets a line header
-                if ((start + i) % 16 == 0) Console.Write($"\n{start + i:x8} - ");
-
-                Console.Write($"{data[start + i]:x2} ");
-            }
-
-            // end with a new line
-            Console.WriteLine();
-        }
-        /// <summary>
-        /// Writes a binary dump representation of the data to the console
-        /// </summary>
-        /// <param name="data">the data to dump</param>
-        /// <param name="start">the index at which to begin dumping</param>
-        public static void Dump(this byte[] data, int start) => data.Dump(start, data.Length - start);
-        /// <summary>
-        /// Writes a binary dump representation of the data to the console
-        /// </summary>
-        /// <param name="data">the data to dump</param>
-        public static void Dump(this byte[] data) => data.Dump(0, data.Length);
-
-        /// <summary>
-        /// Gets a random UInt64 value
-        /// </summary>
-        /// <param name="rand">random object to use</param>
-        public static UInt64 NextUInt64(this Random rand)
-        {
-            return ((UInt64)(UInt32)rand.Next() << 32) | (UInt32)rand.Next();
-        }
-        /// <summary>
-        /// Gets a random boolean
-        /// </summary>
-        /// <param name="rand">the random object to use</param>
-        public static bool NextBool(this Random rand)
-        {
-            return rand.Next(2) == 1;
         }
 
         // -- CSX64 encoding utilities -- //
@@ -551,10 +560,9 @@ namespace CSX64
         /// Interprets raw bits as a float (low 32 bits)
         /// </summary>
         /// <param name="val">the bits to interpret</param>
-        public static unsafe float AsFloat(UInt64 val)
+        public static unsafe float AsFloat(UInt32 val)
         {
-            UInt32 bits = (UInt32)val; // getting the low bits allows this code to work even on big-endian platforms
-            return *(float*)&bits;
+            return *(float*)&val;
         }
     }
 }

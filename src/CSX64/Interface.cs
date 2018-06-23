@@ -13,27 +13,30 @@ namespace CSX64
         public const UInt64 Version = 0x0413;
 
         /// <summary>
-        /// The bitmask representing the flags that can be modified by executing code
-        /// </summary>
-        public const UInt64 PublicFlags = 0xffff_ffff;
-
-        /// <summary>
         /// Indicates if rmdir will remove non-empty directories recursively
         /// </summary>
         public const bool RecursiveRmdir = false;
 
         /// <summary>
-        /// The number of file descriptors available to the processor
+        /// Gets the current time as used by the assembler
         /// </summary>
-        public const int NFileDescriptors = 16;
+        public static UInt64 Time => (UInt64)DateTime.UtcNow.Ticks;
 
         // ----------------------------------------
 
-        protected byte[] Memory = new byte[0];
-
-        protected FileDescriptor[] FileDescriptors = new FileDescriptor[NFileDescriptors];
+        protected byte[] Memory = { };
+        protected FileDescriptor[] FileDescriptors = new FileDescriptor[16];
 
         protected Random Rand = new Random();
+
+        /// <summary>
+        /// Gets the total amount of memory the processor currently has access to
+        /// </summary>
+        public UInt64 MemorySize => (UInt64)Memory.Length;
+        /// <summary>
+        /// Gets the maximum number of file descriptors
+        /// </summary>
+        public int FDCount => FileDescriptors.Length;
 
         /// <summary>
         /// Flag marking if the program is still executing (still true even in halted state)
@@ -53,11 +56,6 @@ namespace CSX64
         public int ReturnValue { get; protected set; }
 
         /// <summary>
-        /// Gets the total amount of memory the processor currently has access to
-        /// </summary>
-        public UInt64 MemorySize => (UInt64)Memory.Length;
-
-        /// <summary>
         /// The barrier before which memory is executable
         /// </summary>
         public UInt64 ExeBarrier { get; protected set; }
@@ -70,11 +68,6 @@ namespace CSX64
         /// </summary>
         public UInt64 StackBarrier { get; protected set; }
 
-        /// <summary>
-        /// Gets the current time as used by the assembler
-        /// </summary>
-        public static UInt64 Time => (UInt64)DateTime.UtcNow.Ticks;
-
         // ----------------------------------------
 
         /// <summary>
@@ -82,8 +75,11 @@ namespace CSX64
         /// </summary>
         public Computer()
         {
+            // allocate vpu registers
+            for (int i = 0; i < VPURegisters.Length; ++i) VPURegisters[i] = new VPURegister[8];
+
             // allocate file descriptors
-            for (int i = 0; i < NFileDescriptors; ++i) FileDescriptors[i] = new FileDescriptor();
+            for (int i = 0; i < FileDescriptors.Length; ++i) FileDescriptors[i] = new FileDescriptor();
 
             // define initial state
             Running = false;
@@ -116,23 +112,24 @@ namespace CSX64
             // randomize the heap/stack segments (C# won't let us create an uninitialized array and bit-zero is too safe - more realistic danger)
             for (int i = exe.Length - 32 + (int)bss_seglen; i < Memory.Length; ++i) Memory[i] = (byte)Rand.Next();
 
-            // set up mmory barriers
+            // set up memory barriers
             ExeBarrier = text_seglen;
             ReadonlyBarrier = text_seglen + rodata_seglen;
             StackBarrier = text_seglen + rodata_seglen + data_seglen + bss_seglen;
 
-            // randomize registers
-            for (int i = 0; i < Registers.Length; ++i) Registers[i].x64 = Rand.NextUInt64();
-            // set public flags: make sure flag 1 is set (from Intel x86_64 standard)
-            EFLAGS = 2;
+            // set up cpu registers
+            for (int i = 0; i < CPURegisters.Length; ++i) CPURegisters[i].x64 = Rand.NextUInt64();
 
-            // free FPU registers
+            // set up fpu registers
             for (int i = 0; i < FPURegisters.Length; ++i) FPURegisters[i].InUse = false;
-            // set TOP to 0 (for consistency when storing FPU status word to memory)
-            TOP = 0;
+            TOP = 0; // set TOP to 0 (for consistency when storing FPU status word to memory)
+
+            // set up vpu registers
+            foreach (var reg in VPURegisters) for (int i = 0; i < reg.Length; ++i) reg[i].int64 = Rand.NextUInt64();
 
             // set execution state
             RIP = 0;
+            EFLAGS = 2; // x86 standard dictates this initial state
             Running = true;
             SuspendedRead = false;
             Error = ErrorCode.None;
@@ -274,7 +271,7 @@ namespace CSX64
                 case (UInt64)SyscallCode.Mkdir: return Sys_Mkdir();
                 case (UInt64)SyscallCode.Rmdir: return Sys_Rmdir();
 
-                case (UInt64)SyscallCode.Exit: Exit((int)Registers[1].x64); return true;
+                case (UInt64)SyscallCode.Exit: Exit((int)CPURegisters[1].x64); return true;
 
                 // ----------------------------------
 
@@ -299,7 +296,6 @@ namespace CSX64
             // fetch the instruction
             if (!GetMemAdv(1, out op)) return false;
 
-            //for (int i = 0; i < 8; ++i) Console.WriteLine($"st{i}: {(FPURegisters[(TOP + i) & 7].InUse ? FPURegisters[(TOP + i) & 7].Value.ToString() : "Not In Use")}");
             //Console.WriteLine($"{RIP:x8} - {(OPCode)op}\n");
 
             // switch through the opcodes
@@ -417,6 +413,14 @@ namespace CSX64
                 case OPCode.FINCDECSTP: return ProcessFINCDECSTP();
                 case OPCode.FFREE: return ProcessFFREE();
 
+                // SIMD instructions
+
+
+
+                // misc instructions
+
+                case OPCode.DEBUG: Console.WriteLine(); Console.WriteLine(GetDebugString()); return true;
+                
                 // otherwise, unknown opcode
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }

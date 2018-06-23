@@ -6,6 +6,94 @@ namespace CSX64
 {
     public partial class Computer
     {
+        private CPURegister[] CPURegisters = new CPURegister[16];
+
+        private FPURegister[] FPURegisters = new FPURegister[8];
+        private UInt16 FPU_status;
+
+        private VPURegister[][] VPURegisters = new VPURegister[32][];
+
+        public UInt64 RFLAGS;
+        public UInt32 EFLAGS { get => (UInt32)RFLAGS; set => RFLAGS = RFLAGS & ~0xfffffffful | value; }
+        public UInt16 FLAGS { get => (UInt16)RFLAGS; set => RFLAGS = RFLAGS & ~0xfffful | value; }
+
+        public UInt64 RIP;
+        public UInt32 EIP { get => (UInt32)RIP; set => RIP = RIP & ~0xfffffffful | value; }
+        public UInt16 IP { get => (UInt16)RIP; set => RIP = RIP & ~0xfffful | value; }
+
+        public UInt64 RAX { get => CPURegisters[0].x64; set => CPURegisters[0].x64 = value; }
+        public UInt64 RBX { get => CPURegisters[1].x64; set => CPURegisters[1].x64 = value; }
+        public UInt64 RCX { get => CPURegisters[2].x64; set => CPURegisters[2].x64 = value; }
+        public UInt64 RDX { get => CPURegisters[3].x64; set => CPURegisters[3].x64 = value; }
+        public UInt64 RSI { get => CPURegisters[4].x64; set => CPURegisters[4].x64 = value; }
+        public UInt64 RDI { get => CPURegisters[5].x64; set => CPURegisters[5].x64 = value; }
+        public UInt64 RBP { get => CPURegisters[6].x64; set => CPURegisters[6].x64 = value; }
+        public UInt64 RSP { get => CPURegisters[7].x64; set => CPURegisters[7].x64 = value; }
+        public UInt64 R8 { get => CPURegisters[8].x64; set => CPURegisters[8].x64 = value; }
+        public UInt64 R9 { get => CPURegisters[9].x64; set => CPURegisters[9].x64 = value; }
+        public UInt64 R10 { get => CPURegisters[10].x64; set => CPURegisters[10].x64 = value; }
+        public UInt64 R11 { get => CPURegisters[11].x64; set => CPURegisters[11].x64 = value; }
+        public UInt64 R12 { get => CPURegisters[12].x64; set => CPURegisters[12].x64 = value; }
+        public UInt64 R13 { get => CPURegisters[13].x64; set => CPURegisters[13].x64 = value; }
+        public UInt64 R14 { get => CPURegisters[14].x64; set => CPURegisters[14].x64 = value; }
+        public UInt64 R15 { get => CPURegisters[15].x64; set => CPURegisters[15].x64 = value; }
+
+        public UInt32 EAX { get => CPURegisters[0].x32; set => CPURegisters[0].x32 = value; }
+        public UInt32 EBX { get => CPURegisters[1].x32; set => CPURegisters[1].x32 = value; }
+        public UInt32 ECX { get => CPURegisters[2].x32; set => CPURegisters[2].x32 = value; }
+        public UInt32 EDX { get => CPURegisters[3].x32; set => CPURegisters[3].x32 = value; }
+        public UInt32 ESI { get => CPURegisters[4].x32; set => CPURegisters[4].x32 = value; }
+        public UInt32 EDI { get => CPURegisters[5].x32; set => CPURegisters[5].x32 = value; }
+        public UInt32 EBP { get => CPURegisters[6].x32; set => CPURegisters[6].x32 = value; }
+        public UInt32 ESP { get => CPURegisters[7].x32; set => CPURegisters[7].x32 = value; }
+        public UInt32 R8D { get => CPURegisters[8].x32; set => CPURegisters[8].x32 = value; }
+        public UInt32 R9D { get => CPURegisters[9].x32; set => CPURegisters[9].x32 = value; }
+        public UInt32 R10D { get => CPURegisters[10].x32; set => CPURegisters[10].x32 = value; }
+        public UInt32 R11D { get => CPURegisters[11].x32; set => CPURegisters[11].x32 = value; }
+        public UInt32 R12D { get => CPURegisters[12].x32; set => CPURegisters[12].x32 = value; }
+        public UInt32 R13D { get => CPURegisters[13].x32; set => CPURegisters[13].x32 = value; }
+        public UInt32 R14D { get => CPURegisters[14].x32; set => CPURegisters[14].x32 = value; }
+        public UInt32 R15D { get => CPURegisters[15].x32; set => CPURegisters[15].x32 = value; }
+
+        public UInt16 AX { get => CPURegisters[0].x16; set => CPURegisters[0].x16 = value; }
+        public UInt16 BX { get => CPURegisters[1].x16; set => CPURegisters[1].x16 = value; }
+        public UInt16 CX { get => CPURegisters[2].x16; set => CPURegisters[2].x16 = value; }
+        public UInt16 DX { get => CPURegisters[3].x16; set => CPURegisters[3].x16 = value; }
+        public UInt16 SI { get => CPURegisters[4].x16; set => CPURegisters[4].x16 = value; }
+        public UInt16 DI { get => CPURegisters[5].x16; set => CPURegisters[5].x16 = value; }
+        public UInt16 BP { get => CPURegisters[6].x16; set => CPURegisters[6].x16 = value; }
+        public UInt16 SP { get => CPURegisters[7].x16; set => CPURegisters[7].x16 = value; }
+        public UInt16 R8W { get => CPURegisters[8].x16; set => CPURegisters[8].x16 = value; }
+        public UInt16 R9W { get => CPURegisters[9].x16; set => CPURegisters[9].x16 = value; }
+        public UInt16 R10W { get => CPURegisters[10].x16; set => CPURegisters[10].x16 = value; }
+        public UInt16 R11W { get => CPURegisters[11].x16; set => CPURegisters[11].x16 = value; }
+        public UInt16 R12W { get => CPURegisters[12].x16; set => CPURegisters[12].x16 = value; }
+        public UInt16 R13W { get => CPURegisters[13].x16; set => CPURegisters[13].x16 = value; }
+        public UInt16 R14W { get => CPURegisters[14].x16; set => CPURegisters[14].x16 = value; }
+        public UInt16 R15W { get => CPURegisters[15].x16; set => CPURegisters[15].x16 = value; }
+
+        public byte AL { get => CPURegisters[0].x8; set => CPURegisters[0].x8 = value; }
+        public byte BL { get => CPURegisters[1].x8; set => CPURegisters[1].x8 = value; }
+        public byte CL { get => CPURegisters[2].x8; set => CPURegisters[2].x8 = value; }
+        public byte DL { get => CPURegisters[3].x8; set => CPURegisters[3].x8 = value; }
+        public byte SIL { get => CPURegisters[4].x8; set => CPURegisters[4].x8 = value; }
+        public byte DIL { get => CPURegisters[5].x8; set => CPURegisters[5].x8 = value; }
+        public byte BPL { get => CPURegisters[6].x8; set => CPURegisters[6].x8 = value; }
+        public byte SPL { get => CPURegisters[7].x8; set => CPURegisters[7].x8 = value; }
+        public byte R8B { get => CPURegisters[8].x8; set => CPURegisters[8].x8 = value; }
+        public byte R9B { get => CPURegisters[9].x8; set => CPURegisters[9].x8 = value; }
+        public byte R10B { get => CPURegisters[10].x8; set => CPURegisters[10].x8 = value; }
+        public byte R11B { get => CPURegisters[11].x8; set => CPURegisters[11].x8 = value; }
+        public byte R12B { get => CPURegisters[12].x8; set => CPURegisters[12].x8 = value; }
+        public byte R13B { get => CPURegisters[13].x8; set => CPURegisters[13].x8 = value; }
+        public byte R14B { get => CPURegisters[14].x8; set => CPURegisters[14].x8 = value; }
+        public byte R15B { get => CPURegisters[15].x8; set => CPURegisters[15].x8 = value; }
+
+        public byte AH { get => CPURegisters[0].x8h; set => CPURegisters[0].x8h = value; }
+        public byte BH { get => CPURegisters[1].x8h; set => CPURegisters[1].x8h = value; }
+        public byte CH { get => CPURegisters[2].x8h; set => CPURegisters[2].x8h = value; }
+        public byte DH { get => CPURegisters[3].x8h; set => CPURegisters[3].x8h = value; }
+
         // source: https://en.wikipedia.org/wiki/FLAGS_register
         // source: http://www.eecg.toronto.edu/~amza/www.mindsec.com/files/x86regs.html
 
@@ -90,31 +178,21 @@ namespace CSX64
             get => (RFLAGS & 0x0010_0000ul) != 0;
             set => RFLAGS = (RFLAGS & ~0x0010_0000ul) | (value ? 0x0010_0000ul : 0);
         }
-        public bool ID1
+        public bool ID
         {
             get => (RFLAGS & 0x0020_0000ul) != 0;
             set => RFLAGS = (RFLAGS & ~0x0020_0000ul) | (value ? 0x0020_0000ul : 0);
         }
-        public bool ID2
-        {
-            get => (RFLAGS & 0x0040_0000ul) != 0;
-            set => RFLAGS = (RFLAGS & ~0x0040_0000ul) | (value ? 0x0040_0000ul : 0);
-        }
-        public UInt16 VAD
-        {
-            get => (UInt16)((RFLAGS >> 23) & 0x1ff);
-            set => RFLAGS = (RFLAGS & ~0xff80_0000ul) | ((UInt64)(value & 0x1ff) << 23);
-        }
 
-        public bool cc_b { get => CF; }
-        public bool cc_be { get => CF || ZF; }
-        public bool cc_a { get => !CF && !ZF; }
-        public bool cc_ae { get => !CF; }
+        public bool cc_b => CF;
+        public bool cc_be => CF || ZF;
+        public bool cc_a => !CF && !ZF;
+        public bool cc_ae => !CF;
 
-        public bool cc_l { get => SF != OF; }
-        public bool cc_le { get => ZF || SF != OF; }
-        public bool cc_g { get => !ZF && SF == OF; }
-        public bool cc_ge { get => SF == OF; }
+        public bool cc_l => SF != OF;
+        public bool cc_le => ZF || SF != OF;
+        public bool cc_g => !ZF && SF == OF;
+        public bool cc_ge => SF == OF;
 
         /// <summary>
         /// Indicates that we're allowed to run file system instructions
@@ -124,94 +202,6 @@ namespace CSX64
             get => (RFLAGS & 0x000_0001_0000_0000ul) != 0;
             set => RFLAGS = (RFLAGS & ~0x000_0001_0000_0000ul) | (value ? 0x000_0001_0000_0000ul : 0);
         }
-
-        // --------------------------------------------
-
-        private Register[] Registers = new Register[16];
-
-        private FPURegister[] FPURegisters = new FPURegister[8];
-        private UInt16 FPU_status;
-
-        public UInt64 RFLAGS;
-        public UInt32 EFLAGS { get => (UInt32)RFLAGS; set => RFLAGS = RFLAGS & ~0xfffffffful | value; }
-        public UInt16 FLAGS { get => (UInt16)RFLAGS; set => RFLAGS = RFLAGS & ~0xfffful | value; }
-
-        public UInt64 RIP;
-        public UInt32 EIP { get => (UInt32)RIP; set => RIP = RIP & ~0xfffffffful | value; }
-        public UInt16 IP { get => (UInt16)RIP; set => RIP = RIP & ~0xfffful | value; }
-
-        public UInt64 RAX { get => Registers[0].x64; set => Registers[0].x64 = value; }
-        public UInt64 RBX { get => Registers[1].x64; set => Registers[1].x64 = value; }
-        public UInt64 RCX { get => Registers[2].x64; set => Registers[2].x64 = value; }
-        public UInt64 RDX { get => Registers[3].x64; set => Registers[3].x64 = value; }
-        public UInt64 RSI { get => Registers[4].x64; set => Registers[4].x64 = value; }
-        public UInt64 RDI { get => Registers[5].x64; set => Registers[5].x64 = value; }
-        public UInt64 RBP { get => Registers[6].x64; set => Registers[6].x64 = value; }
-        public UInt64 RSP { get => Registers[7].x64; set => Registers[7].x64 = value; }
-        public UInt64 R8 { get => Registers[8].x64; set => Registers[8].x64 = value; }
-        public UInt64 R9 { get => Registers[9].x64; set => Registers[9].x64 = value; }
-        public UInt64 R10 { get => Registers[10].x64; set => Registers[10].x64 = value; }
-        public UInt64 R11 { get => Registers[11].x64; set => Registers[11].x64 = value; }
-        public UInt64 R12 { get => Registers[12].x64; set => Registers[12].x64 = value; }
-        public UInt64 R13 { get => Registers[13].x64; set => Registers[13].x64 = value; }
-        public UInt64 R14 { get => Registers[14].x64; set => Registers[14].x64 = value; }
-        public UInt64 R15 { get => Registers[15].x64; set => Registers[15].x64 = value; }
-
-        public UInt32 EAX { get => Registers[0].x32; set => Registers[0].x32 = value; }
-        public UInt32 EBX { get => Registers[1].x32; set => Registers[1].x32 = value; }
-        public UInt32 ECX { get => Registers[2].x32; set => Registers[2].x32 = value; }
-        public UInt32 EDX { get => Registers[3].x32; set => Registers[3].x32 = value; }
-        public UInt32 ESI { get => Registers[4].x32; set => Registers[4].x32 = value; }
-        public UInt32 EDI { get => Registers[5].x32; set => Registers[5].x32 = value; }
-        public UInt32 EBP { get => Registers[6].x32; set => Registers[6].x32 = value; }
-        public UInt32 ESP { get => Registers[7].x32; set => Registers[7].x32 = value; }
-        public UInt32 R8D { get => Registers[8].x32; set => Registers[8].x32 = value; }
-        public UInt32 R9D { get => Registers[9].x32; set => Registers[9].x32 = value; }
-        public UInt32 R10D { get => Registers[10].x32; set => Registers[10].x32 = value; }
-        public UInt32 R11D { get => Registers[11].x32; set => Registers[11].x32 = value; }
-        public UInt32 R12D { get => Registers[12].x32; set => Registers[12].x32 = value; }
-        public UInt32 R13D { get => Registers[13].x32; set => Registers[13].x32 = value; }
-        public UInt32 R14D { get => Registers[14].x32; set => Registers[14].x32 = value; }
-        public UInt32 R15D { get => Registers[15].x32; set => Registers[15].x32 = value; }
-
-        public UInt16 AX { get => Registers[0].x16; set => Registers[0].x16 = value; }
-        public UInt16 BX { get => Registers[1].x16; set => Registers[1].x16 = value; }
-        public UInt16 CX { get => Registers[2].x16; set => Registers[2].x16 = value; }
-        public UInt16 DX { get => Registers[3].x16; set => Registers[3].x16 = value; }
-        public UInt16 SI { get => Registers[4].x16; set => Registers[4].x16 = value; }
-        public UInt16 DI { get => Registers[5].x16; set => Registers[5].x16 = value; }
-        public UInt16 BP { get => Registers[6].x16; set => Registers[6].x16 = value; }
-        public UInt16 SP { get => Registers[7].x16; set => Registers[7].x16 = value; }
-        public UInt16 R8W { get => Registers[8].x16; set => Registers[8].x16 = value; }
-        public UInt16 R9W { get => Registers[9].x16; set => Registers[9].x16 = value; }
-        public UInt16 R10W { get => Registers[10].x16; set => Registers[10].x16 = value; }
-        public UInt16 R11W { get => Registers[11].x16; set => Registers[11].x16 = value; }
-        public UInt16 R12W { get => Registers[12].x16; set => Registers[12].x16 = value; }
-        public UInt16 R13W { get => Registers[13].x16; set => Registers[13].x16 = value; }
-        public UInt16 R14W { get => Registers[14].x16; set => Registers[14].x16 = value; }
-        public UInt16 R15W { get => Registers[15].x16; set => Registers[15].x16 = value; }
-
-        public byte AL { get => Registers[0].x8; set => Registers[0].x8 = value; }
-        public byte BL { get => Registers[1].x8; set => Registers[1].x8 = value; }
-        public byte CL { get => Registers[2].x8; set => Registers[2].x8 = value; }
-        public byte DL { get => Registers[3].x8; set => Registers[3].x8 = value; }
-        public byte SIL { get => Registers[4].x8; set => Registers[4].x8 = value; }
-        public byte DIL { get => Registers[5].x8; set => Registers[5].x8 = value; }
-        public byte BPL { get => Registers[6].x8; set => Registers[6].x8 = value; }
-        public byte SPL { get => Registers[7].x8; set => Registers[7].x8 = value; }
-        public byte R8B { get => Registers[8].x8; set => Registers[8].x8 = value; }
-        public byte R9B { get => Registers[9].x8; set => Registers[9].x8 = value; }
-        public byte R10B { get => Registers[10].x8; set => Registers[10].x8 = value; }
-        public byte R11B { get => Registers[11].x8; set => Registers[11].x8 = value; }
-        public byte R12B { get => Registers[12].x8; set => Registers[12].x8 = value; }
-        public byte R13B { get => Registers[13].x8; set => Registers[13].x8 = value; }
-        public byte R14B { get => Registers[14].x8; set => Registers[14].x8 = value; }
-        public byte R15B { get => Registers[15].x8; set => Registers[15].x8 = value; }
-
-        public byte AH { get => Registers[0].x8h; set => Registers[0].x8h = value; }
-        public byte BH { get => Registers[1].x8h; set => Registers[1].x8h = value; }
-        public byte CH { get => Registers[2].x8h; set => Registers[2].x8h = value; }
-        public byte DH { get => Registers[3].x8h; set => Registers[3].x8h = value; }
 
         // source : http://www.website.masmforum.com/tutorials/fptute/fpuchap1.htm
         public bool C0

@@ -5,6 +5,7 @@ using System.Windows.Forms;
 using System.Drawing;
 using System.IO;
 using System.Runtime.Serialization;
+using System.Runtime.InteropServices;
 using System.Security;
 using System.Text;
 

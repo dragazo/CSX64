@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Runtime.InteropServices;
 using static CSX64.Utility;
 
 // -- Types -- //
@@ -49,7 +50,15 @@ namespace CSX64
         F2XM1, FABS, FCHS, FPREM, FPREM1, FRNDINT, FSQRT, FYL2X, FYL2XP1, FXTRACT, FSCALE,
         FXAM, FTST, FCOM, FUCOM, FCOMI,
         FSIN, FCOS, FSINCOS, FPTAN, FPATAN,
-        FINCDECSTP, FFREE
+        FINCDECSTP, FFREE,
+
+        // SIMD instructions
+
+
+
+        // misc instructions
+
+        DEBUG = 255
     }
     public enum SyscallCode
     {
@@ -67,48 +76,15 @@ namespace CSX64
     /// <summary>
     /// Represents a 64 bit register
     /// </summary>
-    public struct Register
+    [StructLayout(LayoutKind.Explicit)]
+    public struct CPURegister
     {
-        /// <summary>
-        /// gets/sets the full qword
-        /// </summary>
-        public UInt64 x64;
+        [FieldOffset(0)] public UInt64 x64;
+        [FieldOffset(0)] public UInt32 x32;
+        [FieldOffset(0)] public UInt16 x16;
+        [FieldOffset(0)] public byte x8;
 
-        /// <summary>
-        /// gets/sets the low dword. As per Intel standard, setting the low dword zeroes the high dword.
-        /// </summary>
-        public UInt32 x32
-        {
-            get => (UInt32)x64;
-            set => x64 = value;
-        }
-
-        /// <summary>
-        /// gets/sets the low word
-        /// </summary>
-        public UInt16 x16
-        {
-            get => (UInt16)x64;
-            set => x64 = x64 & ~0xfffful | value;
-        }
-        
-        /// <summary>
-        /// gets/sets the high byte of the low word
-        /// </summary>
-        public byte x8h
-        {
-            get => (byte)(x64 >> 8);
-            set => x64 = x64 & ~0xff00ul | ((UInt64)value << 8);
-        }
-
-        /// <summary>
-        /// gets/sets the low byte
-        /// </summary>
-        public byte x8
-        {
-            get => (byte)x64;
-            set => x64 = x64 & ~0xfful | value;
-        }
+        [FieldOffset(1)] public byte x8h;
 
         /// <summary>
         /// Gets/sets the register partition with the specified size code
@@ -118,7 +94,6 @@ namespace CSX64
         {
             get
             {
-                //(((1ul << (8 << (ushort)sizecode)) & ~1ul) - 1) & x64;
                 switch (sizecode)
                 {
                     case 3: return x64;
@@ -131,7 +106,6 @@ namespace CSX64
             }
             set
             {
-                //x64 = ~(((1ul << (8 << (ushort)sizecode)) & ~1ul) - 1) & x64 | (((1ul << (8 << (ushort)sizecode)) & ~1ul) - 1) & value;
                 switch (sizecode)
                 {
                     case 3: x64 = value; return;
@@ -152,6 +126,37 @@ namespace CSX64
     {
         public double Value;
         public bool InUse;
+    }
+
+    /// <summary>
+    /// Represents a 64-bit segment in a VPU register
+    /// </summary>
+    [StructLayout(LayoutKind.Explicit)]
+    public struct VPURegister
+    {
+        [FieldOffset(0)] public UInt64 int64;
+
+        [FieldOffset(0)] public UInt32 int32_0;
+        [FieldOffset(4)] public UInt32 int32_1;
+
+        [FieldOffset(0)] public UInt16 int16_0;
+        [FieldOffset(2)] public UInt16 int16_1;
+        [FieldOffset(4)] public UInt16 int16_2;
+        [FieldOffset(6)] public UInt16 int16_3;
+
+        [FieldOffset(0)] public byte int8_0;
+        [FieldOffset(1)] public byte int8_1;
+        [FieldOffset(2)] public byte int8_2;
+        [FieldOffset(3)] public byte int8_3;
+        [FieldOffset(4)] public byte int8_4;
+        [FieldOffset(5)] public byte int8_5;
+        [FieldOffset(6)] public byte int8_6;
+        [FieldOffset(7)] public byte int8_7;
+
+        [FieldOffset(0)] public double fp64;
+
+        [FieldOffset(0)] public float fp32_0;
+        [FieldOffset(4)] public float fp32_1;
     }
 
     /// <summary>
