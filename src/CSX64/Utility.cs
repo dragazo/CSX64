@@ -514,21 +514,29 @@ namespace CSX64
         }
 
         /// <summary>
-        /// Gets the multiplier from a 3-bit mult code. 0:0  1:1  2:2  3:4  4:8  5:16  6:32  7:64
+        /// Gets the sizecode of the specified size. Throws <see cref="ArgumentException"/> if the size is not a power of 2
         /// </summary>
-        /// <param name="multcode">the code to parse</param>
-        public static UInt64 Mult(UInt64 multcode)
+        /// <param name="size">the size</param>
+        /// <exception cref="ArgumentException"></exception>
+        public static UInt64 Sizecode(UInt64 size)
         {
-            return multcode == 0 ? 0ul : 1ul << (ushort)(multcode - 1);
+            if (!IsPowerOf2(size)) throw new ArgumentException("argument to Sizecode() was not a power of 2");
+
+            // compute sizecode by repeated shifting
+            for (int i = 0; ; ++i)
+            {
+                size >>= 1;
+                if (size == 0) return (UInt64)i;
+            }
         }
-        /// <summary>
-        /// As MultCode but returns negative value if neg is nonzero
-        /// </summary>
-        /// <param name="multcode">the code to parse</param>
-        /// <param name="neg">the negative boolean</param>
-        public static UInt64 Mult(UInt64 multcode, UInt64 neg)
+
+        public static UInt64 VPUMaskSize(UInt64 elem_count)
         {
-            return neg == 0 ? Mult(multcode) : ~Mult(multcode) + 1;
+            if (elem_count <= 8) return 1;
+            else if (elem_count <= 16) return 2;
+            else if (elem_count <= 32) return 4;
+            else if (elem_count <= 64) return 8;
+            else throw new ArgumentException($"elem_count out of range. got: {elem_count}");
         }
 
         /// <summary>

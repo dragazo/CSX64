@@ -2415,5 +2415,145 @@ namespace CSX64
             
             return true;
         }
+
+        // -- vpu stuff -- //
+
+        /*
+        [5: reg][1: has_mask][2: reg_size]   [1: aligned][3:][2: elem_size][2: mode]   ([count: mask])
+            mode = 0: [3:][5: src]   reg <- src
+            mode = 1: [address]      reg <- M[address]
+            mode = 2: [address]      M[address] <- src
+            else UND
+        */
+        private bool ProcessVPUMove()
+        {
+            // read settings bytes
+            if (!GetMemAdv(1, out UInt64 s1) || !GetMemAdv(1, out UInt64 s2)) return false;
+            UInt64 reg_sizecode = s1 & 3;
+            UInt64 elem_sizecode = (s2 >> 2) & 3;
+
+            // get the register to work with
+            if (reg_sizecode == 3) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+            if (reg_sizecode != 2 && (s1 & 0x80) != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+            VPURegister[] reg = VPURegisters[s1 >> 3];
+
+            UInt64 temp, elem_count = Size(reg_sizecode + 4) >> (UInt16)elem_sizecode;
+
+            // get the mask (default of all 1's)
+            UInt64 mask = UInt64.MaxValue;
+            if ((s1 & 4) != 0 && !GetMemAdv(VPUMaskSize(elem_count), out mask)) return false;
+            
+            // switch through mode
+            switch (s2 & 3)
+            {
+                case 0:
+                    if (!GetMemAdv(1, out UInt64 src)) return false;
+                    if (reg_sizecode != 2 && (src & 0x10) != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+                    VPURegister[] src_reg = VPURegisters[src & 0x1f];
+
+                    switch (elem_sizecode)
+                    {
+                        case 0:
+                            for (UInt64 i = 0; i < elem_count / 8; ++i)
+                                for (int j = 0; j < 8; ++j, mask >>= 1)
+                                    if ((mask & 1) != 0) reg[i].int8(j, src_reg[i].int8(j));
+                            break;
+                        case 1:
+                            for (UInt64 i = 0; i < elem_count / 4; ++i)
+                                for (int j = 0; j < 4; ++j, mask >>= 1)
+                                    if ((mask & 1) != 0) reg[i].int16(j, src_reg[i].int16(j));
+                            break;
+                        case 2:
+                            for (UInt64 i = 0; i < elem_count / 2; ++i)
+                                for (int j = 0; j < 2; ++j, mask >>= 1)
+                                    if ((mask & 1) != 0) reg[i].int32(j, src_reg[i].int32(j));
+                            break;
+                        case 3:
+                            for (UInt64 i = 0; i < elem_count; ++i, mask >>= 1)
+                                if ((mask & 1) != 0) reg[i].int64 = src_reg[i].int64;
+                            break;
+                    }
+
+                    break;
+                case 1:
+                    if (!GetAddressAdv(out UInt64 m)) return false;
+                    // if aligned flag is set, make sure address is aligned
+                    if ((s2 & 0x80) != 0 && m % Size(reg_sizecode + 4) != 0) { Terminate(ErrorCode.AlignmentViolation); return false; }
+
+                    switch (elem_sizecode)
+                    {
+                        case 0:
+                            for (UInt64 i = 0; i < elem_count / 8; ++i)
+                                for (int j = 0; j < 8; ++j, mask >>= 1)
+                                    if ((mask & 1) != 0)
+                                    {
+                                        if (!GetMemRaw(m + (i * 8 + (UInt64)j) * 1, 1, out temp)) return false;
+                                        reg[i].int8(j, (byte)temp);
+                                    }
+                            break;
+                        case 1:
+                            for (UInt64 i = 0; i < elem_count / 4; ++i)
+                                for (int j = 0; j < 4; ++j, mask >>= 1)
+                                    if ((mask & 1) != 0)
+                                    {
+                                        if (!GetMemRaw(m + (i * 4 + (UInt64)j) * 2, 2, out temp)) return false;
+                                        reg[i].int16(j, (UInt16)temp);
+                                    }
+                            break;
+                        case 2:
+                            for (UInt64 i = 0; i < elem_count / 2; ++i)
+                                for (int j = 0; j < 2; ++j, mask >>= 1)
+                                    if ((mask & 1) != 0)
+                                    {
+                                        if (!GetMemRaw(m + (i * 2 + (UInt64)j) * 4, 4, out temp)) return false;
+                                        reg[i].int32(j, (UInt32)temp);
+                                    }
+                            break;
+                        case 3:
+                            for (UInt64 i = 0; i < elem_count; ++i, mask >>= 1)
+                                if ((mask & 1) != 0)
+                                {
+                                    if (!GetMemRaw(m + (i * 1) * 8, 8, out temp)) return false;
+                                    reg[i].int64 = temp;
+                                }
+                            break;
+                    }
+
+                    break;
+                case 2:
+                    if (!GetAddressAdv(out m)) return false;
+                    // if aligned flag is set, make sure address is aligned
+                    if ((s2 & 0x80) != 0 && m % Size(reg_sizecode + 4) != 0) { Terminate(ErrorCode.AlignmentViolation); return false; }
+
+                    switch (elem_sizecode)
+                    {
+                        case 0:
+                            for (UInt64 i = 0; i < elem_count / 8; ++i)
+                                for (int j = 0; j < 8; ++j, mask >>= 1)
+                                    if ((mask & 1) != 0 && !SetMemRaw(m + (i * 8 + (UInt64)j) * 1, 1, reg[i].int8(j))) return false;
+                            break;
+                        case 1:
+                            for (UInt64 i = 0; i < elem_count / 4; ++i)
+                                for (int j = 0; j < 4; ++j, mask >>= 1)
+                                    if ((mask & 1) != 0 && !SetMemRaw(m + (i * 4 + (UInt64)j) * 2, 2, reg[i].int16(j))) return false;
+                            break;
+                        case 2:
+                            for (UInt64 i = 0; i < elem_count / 2; ++i)
+                                for (int j = 0; j < 2; ++j, mask >>= 1)
+                                    if ((mask & 1) != 0 && !SetMemRaw(m + (i * 2 + (UInt64)j) * 4, 4, reg[i].int32(j))) return false;
+                            break;
+                        case 3:
+                            for (UInt64 i = 0; i < elem_count; ++i, mask >>= 1)
+                                if ((mask & 1) != 0 && !SetMemRaw(m + (i * 1) * 8, 8, reg[i].int64)) return false;
+                            break;
+                    }
+
+                    break;
+
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
+            }
+            
+            return true;
+        }
     }
 }

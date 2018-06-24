@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Text;
 using static CSX64.Utility;
 
 // -- Interface -- //
@@ -413,13 +414,22 @@ namespace CSX64
                 case OPCode.FINCDECSTP: return ProcessFINCDECSTP();
                 case OPCode.FFREE: return ProcessFFREE();
 
-                // SIMD instructions
+                // vpu instructions
 
-
+                case OPCode.VPU_MOV: return ProcessVPUMove();
 
                 // misc instructions
 
-                case OPCode.DEBUG: Console.WriteLine(); Console.WriteLine(GetDebugString()); return true;
+                case OPCode.DEBUG: // all debugging features
+                    if (!GetMemAdv(1, out op)) return false;
+                    switch (op)
+                    {
+                        case 0: Console.WriteLine(GetCPUDebugString()); return true;
+                        case 1: Console.WriteLine(GetVPUDebugString()); return true;
+                        case 2: Console.WriteLine(GetFullDebugString()); return true;
+
+                        default: Terminate(ErrorCode.UndefinedBehavior); return false;
+                    }
                 
                 // otherwise, unknown opcode
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
@@ -427,10 +437,9 @@ namespace CSX64
         }
 
         /// <summary>
-        /// Creates a string containing all register/flag states"/>
+        /// Creates a string containing all non-vpu register/flag states"/>
         /// </summary>
-        /// <param name="c">computer objet to log</param>
-        public string GetDebugString()
+        public string GetCPUDebugString()
         {
             return CreateTable(new int[] { 26, 10, 0 }, new string[][]
                {
@@ -451,6 +460,33 @@ namespace CSX64
                 new string[] { $"R14: {R14:x16}", $"g:  {(cc_g ? 1 : 0)}",$"C2: {(C2 ? 1 : 0)}" },
                 new string[] { $"R15: {R15:x16}", $"ge: {(cc_ge ? 1 : 0)}", $"C3: {(C3 ? 1 : 0)}" },
                });
+        }
+        /// <summary>
+        /// Creates a string containing all vpu register states
+        /// </summary>
+        public string GetVPUDebugString()
+        {
+            StringBuilder b = new StringBuilder();
+
+            for (int i = 0; i < VPURegisters.Length; ++i)
+            {
+                b.Append($"ZMM{i}: ");
+                if (i < 10) b.Append(' ');
+
+                for (int j = VPURegisters[i].Length - 1; j >= 0; --j)
+                    b.Append($"{VPURegisters[i][j].int64:x16} ");
+
+                b.Append('\n');
+            }
+
+            return b.ToString();
+        }
+        /// <summary>
+        /// Creates a string containing both <see cref="GetCPUDebugString"/> and <see cref="GetVPUDebugString"/>
+        /// </summary>
+        public string GetFullDebugString()
+        {
+            return GetCPUDebugString() + "\n" + GetVPUDebugString();
         }
     }
 }

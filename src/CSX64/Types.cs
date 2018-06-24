@@ -54,7 +54,7 @@ namespace CSX64
 
         // SIMD instructions
 
-
+        VPU_MOV,
 
         // misc instructions
 
@@ -80,7 +80,7 @@ namespace CSX64
     public struct CPURegister
     {
         [FieldOffset(0)] public UInt64 x64;
-        [FieldOffset(0)] public UInt32 x32;
+        public UInt32 x32 { get => (UInt32)x64; set => x64 = value; }
         [FieldOffset(0)] public UInt16 x16;
         [FieldOffset(0)] public byte x8;
 
@@ -157,6 +157,108 @@ namespace CSX64
 
         [FieldOffset(0)] public float fp32_0;
         [FieldOffset(4)] public float fp32_1;
+
+        // ------------------------------------------
+
+        public UInt32 int32(int index)
+        {
+            switch (index)
+            {
+                case 0: return int32_0;
+                case 1: return int32_1;
+
+                default: throw new ArgumentOutOfRangeException("index out of bounds");
+            }
+        }
+        public void int32(int index, UInt32 val)
+        {
+            switch (index)
+            {
+                case 0: int32_0 = val; return;
+                case 1: int32_1 = val; return;
+
+                default: throw new ArgumentOutOfRangeException("index out of bounds");
+            }
+        }
+
+        public UInt16 int16(int index)
+        {
+            switch (index)
+            {
+                case 0: return int16_0;
+                case 1: return int16_1;
+                case 2: return int16_2;
+                case 3: return int16_3;
+
+                default: throw new ArgumentOutOfRangeException("index out of bounds");
+            }
+        }
+        public void int16(int index, UInt16 val)
+        {
+            switch (index)
+            {
+                case 0: int16_0 = val; return;
+                case 1: int16_1 = val; return;
+                case 2: int16_2 = val; return;
+                case 3: int16_3 = val; return;
+
+                default: throw new ArgumentOutOfRangeException("index out of bounds");
+            }
+        }
+
+        public byte int8(int index)
+        {
+            switch (index)
+            {
+                case 0: return int8_0;
+                case 1: return int8_1;
+                case 2: return int8_2;
+                case 3: return int8_3;
+                case 4: return int8_4;
+                case 5: return int8_5;
+                case 6: return int8_6;
+                case 7: return int8_7;
+
+                default: throw new ArgumentOutOfRangeException("index out of bounds");
+            }
+        }
+        public void int8(int index, byte val)
+        {
+            switch (index)
+            {
+                case 0: int8_0 = val; return;
+                case 1: int8_1 = val; return;
+                case 2: int8_2 = val; return;
+                case 3: int8_3 = val; return;
+                case 4: int8_4 = val; return;
+                case 5: int8_5 = val; return;
+                case 6: int8_6 = val; return;
+                case 7: int8_7 = val; return;
+
+                default: throw new ArgumentOutOfRangeException("index out of bounds");
+            }
+        }
+
+        public float fp32(int index)
+        {
+            switch (index)
+            {
+                case 0: return fp32_0;
+                case 1: return fp32_1;
+
+                default: throw new ArgumentOutOfRangeException("index out of bounds");
+            }
+        }
+        public void fp32(int index, float val)
+        {
+            switch (index)
+            {
+                case 0: fp32_0 = val; return;
+                case 1: fp32_1 = val; return;
+
+                default: throw new ArgumentOutOfRangeException("index out of bounds");
+            }
+        }
     }
 
     /// <summary>
