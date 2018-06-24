@@ -1037,9 +1037,6 @@ namespace CSX64
         private const string CurrentLineMacro = "$";
         private const string StartOfSegMacro = "$$";
 
-        private const string EmissionMultPrefix = "#";
-        private const UInt64 EmissionMaxMultiplier = 1000000;
-
         private static readonly Dictionary<Expr.OPs, int> Precedence = new Dictionary<Expr.OPs, int>()
         {
             { Expr.OPs.Mul, 5 },
@@ -1070,7 +1067,7 @@ namespace CSX64
             { Expr.OPs.Pair, 100 },
             { Expr.OPs.Condition, 100 }
         };
-        private static readonly char[] UnaryOps = { '+', '-', '~', '!', '*', '/' };
+        private static readonly HashSet<char> UnaryOps = new HashSet<char>() { '+', '-', '~', '!', '*', '/' };
 
         private static readonly string[] VerifyLegalExpressionIgnores =
         {
@@ -1182,7 +1179,85 @@ namespace CSX64
             ["ST(6)"] = 6,
             ["ST(7)"] = 7
         };
+        /// <summary>
+        /// Maps VPU register names (all caps) to tuples of (id, sizecode)
+        /// </summary>
+        private static readonly Dictionary<string, Tuple<byte, byte>> VPURegisterInfo = new Dictionary<string, Tuple<byte, byte>>()
+        {
+            ["XMM0"] = new Tuple<byte, byte>(0, 4),
+            ["XMM1"] = new Tuple<byte, byte>(1, 4),
+            ["XMM2"] = new Tuple<byte, byte>(2, 4),
+            ["XMM3"] = new Tuple<byte, byte>(3, 4),
+            ["XMM4"] = new Tuple<byte, byte>(4, 4),
+            ["XMM5"] = new Tuple<byte, byte>(5, 4),
+            ["XMM6"] = new Tuple<byte, byte>(6, 4),
+            ["XMM7"] = new Tuple<byte, byte>(7, 4),
+            ["XMM8"] = new Tuple<byte, byte>(8, 4),
+            ["XMM9"] = new Tuple<byte, byte>(9, 4),
+            ["XMM10"] = new Tuple<byte, byte>(10, 4),
+            ["XMM11"] = new Tuple<byte, byte>(11, 4),
+            ["XMM12"] = new Tuple<byte, byte>(12, 4),
+            ["XMM13"] = new Tuple<byte, byte>(13, 4),
+            ["XMM14"] = new Tuple<byte, byte>(14, 4),
+            ["XMM15"] = new Tuple<byte, byte>(15, 4),
 
+            ["YMM0"] = new Tuple<byte, byte>(0, 5),
+            ["YMM1"] = new Tuple<byte, byte>(1, 5),
+            ["YMM2"] = new Tuple<byte, byte>(2, 5),
+            ["YMM3"] = new Tuple<byte, byte>(3, 5),
+            ["YMM4"] = new Tuple<byte, byte>(4, 5),
+            ["YMM5"] = new Tuple<byte, byte>(5, 5),
+            ["YMM6"] = new Tuple<byte, byte>(6, 5),
+            ["YMM7"] = new Tuple<byte, byte>(7, 5),
+            ["YMM8"] = new Tuple<byte, byte>(8, 5),
+            ["YMM9"] = new Tuple<byte, byte>(9, 5),
+            ["YMM10"] = new Tuple<byte, byte>(10, 5),
+            ["YMM11"] = new Tuple<byte, byte>(11, 5),
+            ["YMM12"] = new Tuple<byte, byte>(12, 5),
+            ["YMM13"] = new Tuple<byte, byte>(13, 5),
+            ["YMM14"] = new Tuple<byte, byte>(14, 5),
+            ["YMM15"] = new Tuple<byte, byte>(15, 5),
+
+            ["ZMM0"] = new Tuple<byte, byte>(0, 6),
+            ["ZMM1"] = new Tuple<byte, byte>(1, 6),
+            ["ZMM2"] = new Tuple<byte, byte>(2, 6),
+            ["ZMM3"] = new Tuple<byte, byte>(3, 6),
+            ["ZMM4"] = new Tuple<byte, byte>(4, 6),
+            ["ZMM5"] = new Tuple<byte, byte>(5, 6),
+            ["ZMM6"] = new Tuple<byte, byte>(6, 6),
+            ["ZMM7"] = new Tuple<byte, byte>(7, 6),
+            ["ZMM8"] = new Tuple<byte, byte>(8, 6),
+            ["ZMM9"] = new Tuple<byte, byte>(9, 6),
+            ["ZMM10"] = new Tuple<byte, byte>(10, 6),
+            ["ZMM11"] = new Tuple<byte, byte>(11, 6),
+            ["ZMM12"] = new Tuple<byte, byte>(12, 6),
+            ["ZMM13"] = new Tuple<byte, byte>(13, 6),
+            ["ZMM14"] = new Tuple<byte, byte>(14, 6),
+            ["ZMM15"] = new Tuple<byte, byte>(15, 6),
+            ["ZMM16"] = new Tuple<byte, byte>(16, 6),
+            ["ZMM17"] = new Tuple<byte, byte>(17, 6),
+            ["ZMM18"] = new Tuple<byte, byte>(18, 6),
+            ["ZMM19"] = new Tuple<byte, byte>(19, 6),
+            ["ZMM20"] = new Tuple<byte, byte>(20, 6),
+            ["ZMM21"] = new Tuple<byte, byte>(21, 6),
+            ["ZMM22"] = new Tuple<byte, byte>(22, 6),
+            ["ZMM23"] = new Tuple<byte, byte>(23, 6),
+            ["ZMM24"] = new Tuple<byte, byte>(24, 6),
+            ["ZMM25"] = new Tuple<byte, byte>(25, 6),
+            ["ZMM26"] = new Tuple<byte, byte>(26, 6),
+            ["ZMM27"] = new Tuple<byte, byte>(27, 6),
+            ["ZMM28"] = new Tuple<byte, byte>(28, 6),
+            ["ZMM29"] = new Tuple<byte, byte>(29, 6),
+            ["ZMM30"] = new Tuple<byte, byte>(30, 6),
+            ["ZMM31"] = new Tuple<byte, byte>(31, 6)
+        };
+
+        /// <summary>
+        /// Converts a string token into its character internals (accouting for C-style escapes in the case of `backquotes`)
+        /// </summary>
+        /// <param name="token">the string token to process (with quotes around it)</param>
+        /// <param name="chars">the resulting character internals (without quotes around it)</param>
+        /// <param name="err">the error message if there was an error</param>
         internal static bool TryExtractStringChars(string token, out string chars, ref string err)
         {
             chars = null; // null result so compiler won't complain
@@ -1260,6 +1335,19 @@ namespace CSX64
             // return extracted chars
             chars = b.ToString();
             return true;
+        }
+
+        /// <summary>
+        /// Gets the smallest size code that will support the unsigned value
+        /// </summary>
+        /// <param name="val">the value to test</param>
+        internal static UInt64 SmallestUnsignedSizeCode(UInt64 val)
+        {
+            // filter through till we get a size that will contain it
+            if (val <= 0xfful) return 0;
+            else if (val <= 0xfffful) return 1;
+            else if (val <= 0xfffffffful) return 2;
+            else return 3;
         }
 
         /// <summary>
@@ -1893,7 +1981,7 @@ namespace CSX64
                     high = info.Item3;
                     return true;
                 }
-                // otherwise is not a register
+                // otherwise it's not a cpu register
                 else
                 {
                     res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{token}\" as a cpu register");
@@ -1916,30 +2004,24 @@ namespace CSX64
                     return false;
                 }
             }
-
-            public bool TryParseMultcode(string token, out UInt64 val)
+            public bool TryParseVPURegister(string token, out UInt64 reg, out UInt64 sizecode)
             {
-                // mult code must be instant imm
-                if (!TryParseInstantImm(token, out val, out bool floating)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to parse mult code \"{token}\"\n-> {res.ErrorMsg}"); return false; }
-
-                // ensure not floating
-                if (floating) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to use floating point value to specify size multiplier \"{token}\""); return false; }
-
-                // convert to mult code
-                switch (val)
+                // copy data if we can parse it
+                if (VPURegisterInfo.TryGetValue(token.ToUpper(), out var info))
                 {
-                    case 0: val = 0; return true;
-                    case 1: val = 1; return true;
-                    case 2: val = 2; return true;
-                    case 4: val = 3; return true;
-                    case 8: val = 4; return true;
-                    case 16: val = 5; return true;
-                    case 32: val = 6; return true;
-                    case 64: val = 7; return true;
-
-                    default: res = new AssembleResult(AssembleError.ArgError, $"line {line}: Invalid size multiplier: {val}"); return false;
+                    reg = info.Item1;
+                    sizecode = info.Item2;
+                    return true;
+                }
+                // otherwise it's not a vpu register
+                else
+                {
+                    res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{token}\" as a vpu register");
+                    reg = sizecode = 0;
+                    return false;
                 }
             }
+
             public bool TryParseAddressReg(string label, ref Expr hole, out bool present, out UInt64 m)
             {
                 m = 0; present = false; // initialize out params
@@ -2108,6 +2190,9 @@ namespace CSX64
                 else if (utoken.StartsWithToken("WORD")) { sizecode = 1; explicit_size = true; utoken = utoken.Substring(4).TrimStart(); }
                 else if (utoken.StartsWithToken("DWORD")) { sizecode = 2; explicit_size = true; utoken = utoken.Substring(5).TrimStart(); }
                 else if (utoken.StartsWithToken("QWORD")) { sizecode = 3; explicit_size = true; utoken = utoken.Substring(5).TrimStart(); }
+                else if (utoken.StartsWithToken("XMMWORD")) { sizecode = 4; explicit_size = true; utoken = utoken.Substring(7).TrimStart(); }
+                else if (utoken.StartsWithToken("YMMWORD")) { sizecode = 5; explicit_size = true; utoken = utoken.Substring(7).TrimStart(); }
+                else if (utoken.StartsWithToken("ZMMWORD")) { sizecode = 6; explicit_size = true; utoken = utoken.Substring(7).TrimStart(); }
 
                 // if there was an explicit size
                 if (explicit_size)
@@ -2191,19 +2276,6 @@ namespace CSX64
                 return true;
             }
 
-            /// <summary>
-            /// Gets the smallest size code that will support the unsigned value
-            /// </summary>
-            /// <param name="val">the value to test</param>
-            public UInt64 SmallestUnsignedSizeCode(UInt64 val)
-            {
-                // filter through till we get a size that will contain it
-                if (val <= 0xfful) return 0;
-                else if (val <= 0xfffful) return 1;
-                else if (val <= 0xfffffffful) return 2;
-                else return 3;
-            }
-
             public bool VerifyLegalExpression(Expr expr)
             {
                 // if it's a leaf, it must be something that is defined
@@ -2233,6 +2305,8 @@ namespace CSX64
                 // make sure all hole expressions were valid
                 foreach (HoleData hole in file.TextHoles)
                     if (!VerifyLegalExpression(hole.Expr)) return false;
+                foreach (HoleData hole in file.RodataHoles)
+                    if (!VerifyLegalExpression(hole.Expr)) return false;
                 foreach (HoleData hole in file.DataHoles)
                     if (!VerifyLegalExpression(hole.Expr)) return false;
 
@@ -2242,6 +2316,12 @@ namespace CSX64
 
             // -- misc -- //
 
+            public bool IsReservedSymbol(string symbol)
+            {
+                symbol = symbol.ToUpper();
+
+                return CPURegisterInfo.ContainsKey(symbol) || FPURegisterInfo.ContainsKey(symbol) || VPURegisterInfo.ContainsKey(symbol);
+            }
             public bool TryProcessLabel()
             {
                 if (label_def != null)
@@ -2258,20 +2338,22 @@ namespace CSX64
                     if (!MutateName(ref label_def)) return false;
                     if (!IsValidName(label_def, ref err)) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: {err}"); return false; }
 
-                    // can't name same as a register (could be problematic) (not in IsValidName() because then address parser would fail if address contained a register)
-                    if (CPURegisterInfo.ContainsKey(label_def.ToUpper())) { res = new AssembleResult(AssembleError.InvalidLabel, $"Symbol \"{label_def}\" is reserved"); return false; }
+                    // it can't be a reserved symbol
+                    if (IsReservedSymbol(label_def)) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: Symbol \"{label_def}\" is reserved"); return false; }
 
                     // ensure we don't redefine a symbol
                     if (file.Symbols.ContainsKey(label_def)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Symbol \"{label_def}\" was already defined"); return false; }
                     // ensure we don't define an external
                     if (file.ExternalSymbols.Contains(label_def)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Cannot define external symbol \"{label_def}\" internally"); return false; }
 
-                    // must be in a segment unless op is EQU
-                    if (current_seg == AsmSegment.INVALID && op.ToUpper() != "EQU")
-                    { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to take an address outside of a segment"); return false; }
+                    // if it's not an EQU expression, inject a label
+                    if (op.ToUpper() != "EQU")
+                    {
+                        // addresses must be in a valid segment
+                        if (current_seg == AsmSegment.INVALID) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to take an address outside of a segment"); return false; }
 
-                    // add the symbol as an address (uses illegal symbol #base, which will be defined at link time)
-                    file.Symbols.Add(label_def, new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Token = $"#{current_seg}" }, Right = new Expr() { IntResult = line_pos_in_seg } });
+                        file.Symbols.Add(label_def, new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Token = $"#{current_seg}" }, Right = new Expr() { IntResult = line_pos_in_seg } });
+                    }
                 }
 
                 return true;
@@ -2329,43 +2411,19 @@ namespace CSX64
 
             public bool TryProcessDeclare(UInt64 size)
             {
-                if (args.Length == 0) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Emission expected at least one value"); return false; }
-
-                Expr hole = new Expr() { IntResult = 0 }; // initially integral zero (shorthand for empty buffer)
-                UInt64 mult;
-                bool floating;
+                Expr expr;
+                string chars;
 
                 string err = null;
 
+                // for each argument
                 for (int i = 0; i < args.Length; ++i)
                 {
-                    if (args[i].Length == 0) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Emission encountered empty argument"); return false; }
-
-                    // if a multiplier
-                    if (args[i].StartsWith(EmissionMultPrefix))
-                    {
-                        // cannot be used immediately following another multiplier
-                        if (i > 0 && args[i - 1].StartsWith(EmissionMultPrefix)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Emission multiplier cannot immediately follow an emission multiplier"); return false; }
-                        // cannot be used immediately following a string
-                        if (i > 0 && args[i - 1][0] == '"') { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Emission multiplier cannot immediately follow a string argument"); return false; }
-
-                        // get the prefixed multiplier
-                        if (!TryParseInstantPrefixedImm(args[i], EmissionMultPrefix, out mult, out floating)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[i]}\" as an emission multiplier\n-> {res.ErrorMsg}"); return false; }
-
-                        // ensure the multiplier we got was valid
-                        if (floating) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Emission multiplier cannot be floating point"); return false; }
-                        if (mult > EmissionMaxMultiplier) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Emission multiplier cannot exceed {EmissionMaxMultiplier}. Got {mult}"); return false; }
-                        if (mult == 0) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Emission multiplier cannot be zero"); return false; }
-
-                        // already wrote 1 copy, now write the others
-                        for (UInt64 j = 1; j < mult; ++j)
-                            if (!TryAppendExpr(size, hole)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
-                    }
-                    // if a string
-                    else if (args[i][0] == '"' || args[i][0] == '\'' || args[i][0] == '`')
+                    // if it's a string
+                    if (args[i][0] == '"' || args[i][0] == '\'' || args[i][0] == '`')
                     {
                         // get its chars
-                        if (!TryExtractStringChars(args[i], out string chars, ref err)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Invalid string literal: {args[i]}\n-> {err}"); return false; }
+                        if (!TryExtractStringChars(args[i], out chars, ref err)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Invalid string literal: {args[i]}\n-> {err}"); return false; }
 
                         // dump into memory (one byte each)
                         for (int j = 0; j < chars.Length; ++j)
@@ -2379,14 +2437,17 @@ namespace CSX64
                                 if (!TryAppendVal(1, 0)) return false;
                         }
                     }
-                    // otherwise is a value
+                    // otherwise it's a value
                     else
                     {
+                        // can only use standard sizes
+                        if (size > 8) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to write a numeric value in an unsuported format"); return false; }
+
                         // get the value
-                        if (!TryParseImm(args[i], out hole)) return false;
+                        if (!TryParseImm(args[i], out expr)) return false;
 
                         // make one of them
-                        if (!TryAppendExpr(size, hole)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                        if (!TryAppendExpr(size, expr)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
                     }
                 }
 
@@ -2394,13 +2455,12 @@ namespace CSX64
             }
             public bool TryProcessReserve(UInt64 size)
             {
-                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: RES expected one arg"); return false; }
+                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Reserve expected one arg"); return false; }
 
                 // parse the number to reserve
                 if (!TryParseInstantImm(args[0], out UInt64 count, out bool floating)) return false;
-
                 // make sure it's not floating
-                if (floating) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: RES value cannot be floating-point"); return false; }
+                if (floating) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Reserve count cannot be floating-point"); return false; }
 
                 // reserve the space
                 if (!TryReserve(count * size)) return false;
@@ -2415,14 +2475,11 @@ namespace CSX64
                 // make sure we have a label on this line
                 if (label_def == null) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: EQU requires a label to attach the expression to"); return false; }
 
-                // start by invalidating the label so if the EQU imm references it it won't be evaluated with a value that's about to be unrepresentative
-                file.Symbols[label_def].Token = "#EQU_TEMP";
-
                 // get the expression
                 if (!TryParseImm(args[0], out Expr expr)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: EQU expected an expression\n-> {res.ErrorMsg}"); return false; }
 
-                // redefine this line's label to expr
-                file.Symbols[label_def] = expr;
+                // inject the symbol
+                file.Symbols.Add(label_def, expr);
 
                 return true;
             }
@@ -2766,8 +2823,6 @@ namespace CSX64
                 if (a_sizecode == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not allow 8-bit addressing"); return false; }
 
                 if (!TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out UInt64 b_sizecode, out bool explicit_size)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} expected address as second arg\n-> {res.ErrorMsg}"); return false; }
-
-                if (explicit_size && a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Argument size missmatch"); return false; }
                 
                 if (!TryAppendVal(1, (UInt64)op)) return false;
                 if (!TryAppendVal(1, (dest << 4) | (a_sizecode << 2))) return false;
@@ -2787,7 +2842,8 @@ namespace CSX64
                 // reg
                 if (TryParseCPURegister(args[0], out UInt64 reg, out a_sizecode, out bool a_high))
                 {
-                    if (a_sizecode == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support 8-bit operands"); return false; }
+                    // apply the size mask
+                    if ((Size(a_sizecode) & 14) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified operand size"); return false; }
 
                     if (!TryAppendVal(1, (reg << 4) | (a_sizecode << 2))) return false;
                 }
@@ -2796,7 +2852,8 @@ namespace CSX64
                 {
                     if (!explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce data size"); return false; }
 
-                    if (a_sizecode == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support 8-bit operands"); return false; }
+                    // apply the size mask
+                    if ((Size(a_sizecode) & 14) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified operand size"); return false; }
 
                     if (!TryAppendVal(1, (a_sizecode << 2) | 1)) return false;
                     if (!TryAppendAddress(a, b, ptr_base)) return false;
@@ -2817,14 +2874,14 @@ namespace CSX64
 
             private bool __TryProcessShift_mid()
             {
-                // reg, reg
+                // reg/mem, reg
                 if (TryParseCPURegister(args[1], out UInt64 src, out UInt64 b_sizecode, out bool b_high))
                 {
                     if (src != 2 || b_sizecode != 0 || b_high) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Shifts using a register as count source must use CL"); return false; }
 
                     if (!TryAppendVal(1, 0x80)) return false;
                 }
-                // reg, imm
+                // reg/mem, imm
                 else if (TryParseImm(args[1], out Expr imm))
                 {
                     // mask the shift count to 6 bits (we just need to make sure it can't set the CL flag)
@@ -2854,6 +2911,9 @@ namespace CSX64
                 {
                     if (!explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce operand size"); return false; }
 
+                    // make sure we're using a normal word size
+                    if (a_sizecode > 3) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified operand size"); return false; }
+
                     if (!TryAppendVal(1, (a_sizecode << 2) | 1)) return false;
                     if (!__TryProcessShift_mid()) return false;
                     if (!TryAppendAddress(1, b, ptr_base)) return false;
@@ -2876,7 +2936,7 @@ namespace CSX64
                     else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: The specified size combination is not supported by this instruction"); return false; }
                 }
                 // 32/64, *
-                else
+                else if (dest_sizecode == 2 || dest_sizecode == 3)
                 {
                     // 32/64, 8
                     if (src_sizecode == 0)
@@ -2890,6 +2950,7 @@ namespace CSX64
                     }
                     else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: The specified size combination is not supported by this instruction"); return false; }
                 }
+                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: The specified destination size is not suported"); return false; }
 
                 return true;
             }
@@ -2899,9 +2960,6 @@ namespace CSX64
 
                 if (!TryParseCPURegister(args[0], out UInt64 dest, out UInt64 dest_sizecode, out bool __dest_high))
                 { res = new AssembleResult(AssembleError.UsageError, $"line {line}: First operand must be a CPU register"); return false; }
-                
-                // can't extend into an 8-bit register (DO NOT REMOVE THIS, NOT HANDLED ELSEWHERE)
-                if (dest_sizecode == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: First operand cannot be 8-bit"); return false; }
 
                 // write op code
                 if (!TryAppendVal(1, (UInt64)op)) return false;
@@ -2919,6 +2977,7 @@ namespace CSX64
                 else if (TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out src_sizecode, out bool explicit_size))
                 {
                     if (!explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce second operand's size"); return false; }
+                    
                     // write the settings byte
                     if (!__TryProcessMOVxX_settings_byte(sign, dest, dest_sizecode, src_sizecode)) return false;
 
@@ -2957,7 +3016,7 @@ namespace CSX64
 
                     if (!explicit_size) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Could not deduce data size"); return false; }
 
-                    // intregal
+                    // integral
                     if (integral)
                     {
                         if (sizecode == 1) { if (!TryAppendVal(1, 5)) return false; }
@@ -3038,7 +3097,7 @@ namespace CSX64
                     // handle integral cases
                     if (integral)
                     {
-                        if (sizecode == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Instruction does not support 8-bit integral operands"); return false; }
+                        if (sizecode != 1 && sizecode != 2 && sizecode != 3) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Instruction does not support the specified operand size"); return false; }
 
                         if (!TryAppendVal(1, sizecode + 2)) return false;
                     }
@@ -3080,8 +3139,7 @@ namespace CSX64
                     // if this is integral (i.e. truncation store)
                     if (integral)
                     {
-                        if (sizecode == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Integral {op} does not allow 8-bit operands"); return false; }
-                        else if (sizecode == 1) { if (!TryAppendVal(1, pop ? 7 : 6ul)) return false; }
+                        if (sizecode == 1) { if (!TryAppendVal(1, pop ? 7 : 6ul)) return false; }
                         else if (sizecode == 2) { if (!TryAppendVal(1, pop ? 9 : 8ul)) return false; }
                         else if (sizecode == 3)
                         {
@@ -3090,6 +3148,7 @@ namespace CSX64
 
                             if (!TryAppendVal(1, 10)) return false;
                         }
+                        else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Integral {op} does not support the specified operand size"); return false; }
                     }
                     // otherwise is floating-point
                     else
@@ -3136,8 +3195,7 @@ namespace CSX64
                         if (!explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce operand size"); return false; }
 
                         // handle size cases
-                        if (sizecode == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support 8-bit operands"); return false; }
-                        else if (sizecode == 1)
+                        if (sizecode == 1)
                         {
                             if (!integral) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support 16-bit floating-point"); return false; }
 
@@ -3153,6 +3211,7 @@ namespace CSX64
 
                             if (!TryAppendVal(1, pop ? 6 : 5ul)) return false;
                         }
+                        else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified operand size"); return false; }
 
                         // and write the address
                         if (!TryAppendAddress(a, b, ptr_base)) return false;
@@ -3355,12 +3414,17 @@ namespace CSX64
                         case "DW": if (!args.TryProcessDeclare(2)) return args.res; goto op_done;
                         case "DD": if (!args.TryProcessDeclare(4)) return args.res; goto op_done;
                         case "DQ": if (!args.TryProcessDeclare(8)) return args.res; goto op_done;
+                        case "DX": if (!args.TryProcessDeclare(16)) return args.res; goto op_done;
+                        case "DY": if (!args.TryProcessDeclare(32)) return args.res; goto op_done;
+                        case "DZ": if (!args.TryProcessDeclare(64)) return args.res; goto op_done;
 
                         case "RESB": if (!args.TryProcessReserve(1)) return args.res; goto op_done;
                         case "RESW": if (!args.TryProcessReserve(2)) return args.res; goto op_done;
                         case "RESD": if (!args.TryProcessReserve(4)) return args.res; goto op_done;
                         case "RESQ": if (!args.TryProcessReserve(8)) return args.res; goto op_done;
-                        case "REST": if (!args.TryProcessReserve(10)) return args.res; goto op_done;
+                        case "RESX": if (!args.TryProcessReserve(16)) return args.res; goto op_done;
+                        case "RESY": if (!args.TryProcessReserve(32)) return args.res; goto op_done;
+                        case "RESZ": if (!args.TryProcessReserve(64)) return args.res; goto op_done;
 
                         case "EQU": if (!args.TryProcessEQU()) return args.res; goto op_done;
 
