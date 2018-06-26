@@ -3367,13 +3367,13 @@ namespace CSX64
                     {
                         if (dest_explicit && dest_sizecode != (scalar ? elem_sizecode : src_sizecode)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size mismatch"); return false; }
 
-                        UInt64 elem_count = scalar ? 1 : Size(dest_sizecode) >> (UInt16)elem_sizecode;
+                        UInt64 elem_count = scalar ? 1 : Size(src_sizecode) >> (UInt16)elem_sizecode;
                         bool mask_present = VPUMaskPresent(mask, elem_count);
 
                         // if we're in vector mode and the mask is not present, we can kick it up to 64-bit mode (for performance)
                         if (!scalar && !mask_present) elem_sizecode = 3;
 
-                        if (!TryAppendVal(1, (dest << 3) | (aligned ? 4 : 0ul) | (dest_sizecode - 4))) return false;
+                        if (!TryAppendVal(1, (src << 3) | (aligned ? 4 : 0ul) | (src_sizecode - 4))) return false;
                         if (!TryAppendVal(1, (mask_present ? 128 : 0ul) | (zmask ? 64 : 0ul) | (scalar ? 32 : 0ul) | (elem_sizecode << 2) | 2)) return false;
                         if (mask_present && !TryAppendExpr(BitsToBytes(elem_count), mask)) return false;
                         if (!TryAppendAddress(a, b, ptr_base)) return false;

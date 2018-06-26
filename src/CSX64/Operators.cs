@@ -2436,7 +2436,7 @@ namespace CSX64
             if (reg_sizecode == 3) { Terminate(ErrorCode.UndefinedBehavior); return false; }
             if (reg_sizecode != 2 && (s1 & 0x80) != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
             int reg = (int)(s1 >> 3);
-
+            
             // get number of elements to process (accounting for scalar flag)
             int elem_count = (s2 & 0x20) != 0 ? 1 : (int)(Size(reg_sizecode + 4) >> (UInt16)elem_sizecode);
 
@@ -2483,7 +2483,7 @@ namespace CSX64
                         {
                             if (!SetMemRaw(m, Size(elem_sizecode), ZMMRegisters[reg]._uint(elem_sizecode, i))) return false;
                         }
-                        else if(!SetMemRaw(m, Size(elem_sizecode), 0)) return false;
+                        else if(zmask && !SetMemRaw(m, Size(elem_sizecode), 0)) return false;
 
                     break;
 

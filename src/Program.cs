@@ -49,7 +49,7 @@ namespace CSX64
 
         private const string HelpMessage =
             "\n" +
-            "usage: csx64 [<options>] [--] <pathspec>...\n" +
+            "usage: csx [<options>] [--] <pathspec>...\n" +
             "\n" +
             "    -h, --help             shows this help mesage\n" +
             "    -g, --graphical        executes a graphical program\n" +
@@ -60,6 +60,8 @@ namespace CSX64
             "        --fs               sets the file system flag\n" +
             "\n" +
             "if no -g/-a/-l provided, executes a console program\n" +
+            "\n" +
+            "report bugs to https://github.com/dragazo/CSX64/issues\n" +
             "";
 
         /// <summary>
