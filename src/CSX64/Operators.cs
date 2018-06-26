@@ -2419,7 +2419,7 @@ namespace CSX64
         // -- vpu stuff -- //
 
         /*
-        [5: reg][1: has_mask][2: reg_size]   [1: aligned][3:][2: elem_size][2: mode]   ([count: mask])
+        [5: reg][1: aligned][2: reg_size]   [1: has_mask][1: zmask][1: scalar][1:][2: elem_size][2: mode]   ([count: mask])
             mode = 0: [3:][5: src]   reg <- src
             mode = 1: [address]      reg <- M[address]
             mode = 2: [address]      M[address] <- src
@@ -2435,118 +2435,55 @@ namespace CSX64
             // get the register to work with
             if (reg_sizecode == 3) { Terminate(ErrorCode.UndefinedBehavior); return false; }
             if (reg_sizecode != 2 && (s1 & 0x80) != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
-            VPURegister[] reg = VPURegisters[s1 >> 3];
+            int reg = (int)(s1 >> 3);
 
-            UInt64 temp, elem_count = Size(reg_sizecode + 4) >> (UInt16)elem_sizecode;
+            // get number of elements to process (accounting for scalar flag)
+            int elem_count = (s2 & 0x20) != 0 ? 1 : (int)(Size(reg_sizecode + 4) >> (UInt16)elem_sizecode);
 
             // get the mask (default of all 1's)
             UInt64 mask = UInt64.MaxValue;
-            if ((s1 & 4) != 0 && !GetMemAdv(VPUMaskSize(elem_count), out mask)) return false;
-            
+            if ((s2 & 0x80) != 0 && !GetMemAdv(BitsToBytes((UInt64)elem_count), out mask)) return false;
+            // get the zmask flag
+            bool zmask = (s2 & 0x40) != 0;
+
             // switch through mode
             switch (s2 & 3)
             {
                 case 0:
-                    if (!GetMemAdv(1, out UInt64 src)) return false;
-                    if (reg_sizecode != 2 && (src & 0x10) != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
-                    VPURegister[] src_reg = VPURegisters[src & 0x1f];
+                    if (!GetMemAdv(1, out UInt64 _src)) return false;
+                    if (reg_sizecode != 2 && (_src & 0x10) != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+                    int src = (int)_src & 0x1f;
 
-                    switch (elem_sizecode)
-                    {
-                        case 0:
-                            for (UInt64 i = 0; i < elem_count / 8; ++i)
-                                for (int j = 0; j < 8; ++j, mask >>= 1)
-                                    if ((mask & 1) != 0) reg[i].int8(j, src_reg[i].int8(j));
-                            break;
-                        case 1:
-                            for (UInt64 i = 0; i < elem_count / 4; ++i)
-                                for (int j = 0; j < 4; ++j, mask >>= 1)
-                                    if ((mask & 1) != 0) reg[i].int16(j, src_reg[i].int16(j));
-                            break;
-                        case 2:
-                            for (UInt64 i = 0; i < elem_count / 2; ++i)
-                                for (int j = 0; j < 2; ++j, mask >>= 1)
-                                    if ((mask & 1) != 0) reg[i].int32(j, src_reg[i].int32(j));
-                            break;
-                        case 3:
-                            for (UInt64 i = 0; i < elem_count; ++i, mask >>= 1)
-                                if ((mask & 1) != 0) reg[i].int64 = src_reg[i].int64;
-                            break;
-                    }
+                    for (int i = 0; i < elem_count; ++i, mask >>= 1)
+                        if ((mask & 1) != 0) ZMMRegisters[reg]._uint(elem_sizecode, i, ZMMRegisters[src]._uint(elem_sizecode, i));
+                        else if (zmask) ZMMRegisters[reg]._uint(elem_sizecode, i, 0);
 
                     break;
                 case 1:
                     if (!GetAddressAdv(out UInt64 m)) return false;
-                    // if aligned flag is set, make sure address is aligned
-                    if ((s2 & 0x80) != 0 && m % Size(reg_sizecode + 4) != 0) { Terminate(ErrorCode.AlignmentViolation); return false; }
+                    // if we're in vector mode and aligned flag is set, make sure address is aligned
+                    if (elem_count > 1 && (s1 & 4) != 0 && m % Size(reg_sizecode + 4) != 0) { Terminate(ErrorCode.AlignmentViolation); return false; }
 
-                    switch (elem_sizecode)
-                    {
-                        case 0:
-                            for (UInt64 i = 0; i < elem_count / 8; ++i)
-                                for (int j = 0; j < 8; ++j, mask >>= 1)
-                                    if ((mask & 1) != 0)
-                                    {
-                                        if (!GetMemRaw(m + (i * 8 + (UInt64)j) * 1, 1, out temp)) return false;
-                                        reg[i].int8(j, (byte)temp);
-                                    }
-                            break;
-                        case 1:
-                            for (UInt64 i = 0; i < elem_count / 4; ++i)
-                                for (int j = 0; j < 4; ++j, mask >>= 1)
-                                    if ((mask & 1) != 0)
-                                    {
-                                        if (!GetMemRaw(m + (i * 4 + (UInt64)j) * 2, 2, out temp)) return false;
-                                        reg[i].int16(j, (UInt16)temp);
-                                    }
-                            break;
-                        case 2:
-                            for (UInt64 i = 0; i < elem_count / 2; ++i)
-                                for (int j = 0; j < 2; ++j, mask >>= 1)
-                                    if ((mask & 1) != 0)
-                                    {
-                                        if (!GetMemRaw(m + (i * 2 + (UInt64)j) * 4, 4, out temp)) return false;
-                                        reg[i].int32(j, (UInt32)temp);
-                                    }
-                            break;
-                        case 3:
-                            for (UInt64 i = 0; i < elem_count; ++i, mask >>= 1)
-                                if ((mask & 1) != 0)
-                                {
-                                    if (!GetMemRaw(m + (i * 1) * 8, 8, out temp)) return false;
-                                    reg[i].int64 = temp;
-                                }
-                            break;
-                    }
+                    for (int i = 0; i < elem_count; ++i, mask >>= 1, m += Size(elem_sizecode))
+                        if ((mask & 1) != 0)
+                        {
+                            if (!GetMemRaw(m, Size(elem_sizecode), out UInt64 temp)) return false;
+                            ZMMRegisters[reg]._uint(elem_sizecode, i, temp);
+                        }
+                        else if (zmask) ZMMRegisters[reg]._uint(elem_sizecode, i, 0);
 
                     break;
                 case 2:
                     if (!GetAddressAdv(out m)) return false;
-                    // if aligned flag is set, make sure address is aligned
-                    if ((s2 & 0x80) != 0 && m % Size(reg_sizecode + 4) != 0) { Terminate(ErrorCode.AlignmentViolation); return false; }
+                    // if we're in vector mode and aligned flag is set, make sure address is aligned
+                    if (elem_count > 1 && (s1 & 4) != 0 && m % Size(reg_sizecode + 4) != 0) { Terminate(ErrorCode.AlignmentViolation); return false; }
 
-                    switch (elem_sizecode)
-                    {
-                        case 0:
-                            for (UInt64 i = 0; i < elem_count / 8; ++i)
-                                for (int j = 0; j < 8; ++j, mask >>= 1)
-                                    if ((mask & 1) != 0 && !SetMemRaw(m + (i * 8 + (UInt64)j) * 1, 1, reg[i].int8(j))) return false;
-                            break;
-                        case 1:
-                            for (UInt64 i = 0; i < elem_count / 4; ++i)
-                                for (int j = 0; j < 4; ++j, mask >>= 1)
-                                    if ((mask & 1) != 0 && !SetMemRaw(m + (i * 4 + (UInt64)j) * 2, 2, reg[i].int16(j))) return false;
-                            break;
-                        case 2:
-                            for (UInt64 i = 0; i < elem_count / 2; ++i)
-                                for (int j = 0; j < 2; ++j, mask >>= 1)
-                                    if ((mask & 1) != 0 && !SetMemRaw(m + (i * 2 + (UInt64)j) * 4, 4, reg[i].int32(j))) return false;
-                            break;
-                        case 3:
-                            for (UInt64 i = 0; i < elem_count; ++i, mask >>= 1)
-                                if ((mask & 1) != 0 && !SetMemRaw(m + (i * 1) * 8, 8, reg[i].int64)) return false;
-                            break;
-                    }
+                    for (int i = 0; i < elem_count; ++i, mask >>= 1, m += Size(elem_sizecode))
+                        if ((mask & 1) != 0)
+                        {
+                            if (!SetMemRaw(m, Size(elem_sizecode), ZMMRegisters[reg]._uint(elem_sizecode, i))) return false;
+                        }
+                        else if(!SetMemRaw(m, Size(elem_sizecode), 0)) return false;
 
                     break;
 

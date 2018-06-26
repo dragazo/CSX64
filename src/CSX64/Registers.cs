@@ -11,7 +11,7 @@ namespace CSX64
         private FPURegister[] FPURegisters = new FPURegister[8];
         private UInt16 FPU_status;
 
-        private VPURegister[][] VPURegisters = new VPURegister[32][];
+        private ZMMRegister[] ZMMRegisters = new ZMMRegister[32];
 
         public UInt64 RFLAGS;
         public UInt32 EFLAGS { get => (UInt32)RFLAGS; set => RFLAGS = RFLAGS & ~0xfffffffful | value; }

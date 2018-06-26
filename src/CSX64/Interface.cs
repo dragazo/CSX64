@@ -76,9 +76,6 @@ namespace CSX64
         /// </summary>
         public Computer()
         {
-            // allocate vpu registers
-            for (int i = 0; i < VPURegisters.Length; ++i) VPURegisters[i] = new VPURegister[8];
-
             // allocate file descriptors
             for (int i = 0; i < FileDescriptors.Length; ++i) FileDescriptors[i] = new FileDescriptor();
 
@@ -126,7 +123,8 @@ namespace CSX64
             TOP = 0; // set TOP to 0 (for consistency when storing FPU status word to memory)
 
             // set up vpu registers
-            foreach (var reg in VPURegisters) for (int i = 0; i < reg.Length; ++i) reg[i].int64 = Rand.NextUInt64();
+            for (int i = 0; i < ZMMRegisters.Length; ++i)
+                for (int j = 0; j < 8; ++j) ZMMRegisters[i].uint64(j, Rand.NextUInt64());
 
             // set execution state
             RIP = 0;
@@ -468,13 +466,12 @@ namespace CSX64
         {
             StringBuilder b = new StringBuilder();
 
-            for (int i = 0; i < VPURegisters.Length; ++i)
+            for (int i = 0; i < ZMMRegisters.Length; ++i)
             {
                 b.Append($"ZMM{i}: ");
                 if (i < 10) b.Append(' ');
 
-                for (int j = VPURegisters[i].Length - 1; j >= 0; --j)
-                    b.Append($"{VPURegisters[i][j].int64:x16} ");
+                for (int j = 7; j >= 0; --j) b.Append($"{ZMMRegisters[i].int64(j):x16} ");
 
                 b.Append('\n');
             }

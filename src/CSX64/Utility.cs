@@ -530,13 +530,17 @@ namespace CSX64
             }
         }
 
-        public static UInt64 VPUMaskSize(UInt64 elem_count)
+        /// <summary>
+        /// returns an elementary word size in bytes sufficient to hold the specified number of bits
+        /// </summary>
+        /// <param name="bits">the number of bits in the representation</param>
+        public static UInt64 BitsToBytes(UInt64 bits)
         {
-            if (elem_count <= 8) return 1;
-            else if (elem_count <= 16) return 2;
-            else if (elem_count <= 32) return 4;
-            else if (elem_count <= 64) return 8;
-            else throw new ArgumentException($"elem_count out of range. got: {elem_count}");
+            if (bits <= 8) return 1;
+            else if (bits <= 16) return 2;
+            else if (bits <= 32) return 4;
+            else if (bits <= 64) return 8;
+            else throw new ArgumentException($"There is no elementary word size sufficient to hold {bits} bits");
         }
 
         /// <summary>

@@ -3253,15 +3253,31 @@ namespace CSX64
 
             // -- SIMD op formats -- //
 
-            public bool TryExtractVPUMask(ref string arg, out Expr mask)
+            public bool TryExtractVPUMask(ref string arg, out Expr mask, out bool zmask)
             {
-                // if it ends in a closing bracket, there's a white mask
+                mask = null;   // no mask is denoted by null
+                zmask = false; // by default, mask is not a zmask
+
+                // if it ends in z or Z, it's a zmask
+                if (arg[arg.Length - 1] == 'z' || arg[arg.Length - 1] == 'Z')
+                {
+                    // remove the z
+                    arg = arg.Substring(0, arg.Length - 1).TrimEnd();
+
+                    // ensure validity - must be preceded by }
+                    if (arg.Length == 0 || arg[arg.Length - 1] != '}') { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Zmask declarator encountered without a corresponding mask"); return false; }
+
+                    // mark as being a zmask
+                    zmask = true;
+                }
+                
+                // if it ends in }, there's a white mask
                 if (arg[arg.Length - 1] == '}')
                 {
                     // find the opening bracket
                     int pos = arg.IndexOf('{');
-                    if (pos < 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Ill-formed vpu whitemask encountered"); mask = null; return false; }
-                    if (pos == 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Lone vpu whitemask encountered"); mask = null; return false; }
+                    if (pos < 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Ill-formed vpu whitemask encountered"); return false; }
+                    if (pos == 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Lone vpu whitemask encountered");; return false; }
 
                     // extract the whitemask internals
                     string innards = arg.Substring(pos + 1, arg.Length - 2 - pos);
@@ -3269,21 +3285,25 @@ namespace CSX64
                     arg = arg.Substring(0, pos).TrimEnd();
 
                     // parse the mask expression
-                    return TryParseImm(innards, out mask);
+                    if (!TryParseImm(innards, out mask)) return false;
                 }
-                // otherwise default mask to all 1's
-                else { mask = new Expr() { IntResult = UInt64.MaxValue }; return true; }
+
+                return true;
             }
             public bool VPUMaskPresent(Expr mask, UInt64 elem_count)
             {
                 string err = null;
 
+                // if it's null, it's not present
+                if (mask == null) return false;
+
                 // if we can't evaluate it, it's present
                 if (!mask.Evaluate(file.Symbols, out UInt64 val, out bool _f, ref err)) return true;
 
-                // if the mask val is all 1's over the relevant region, it's not present
+                // otherwise, if the mask value isn't all 1's over the relevant region, it's present
                 switch (elem_count)
                 {
+                    case 1: return (val & 1) != 1;
                     case 2: return (val & 3) != 3;
                     case 4: return (val & 0xf) != 0xf;
                     case 8: return (byte)val != byte.MaxValue;
@@ -3295,7 +3315,7 @@ namespace CSX64
                 }
             }
 
-            public bool TryProcessVPUMove(OPCode op, UInt64 elem_sizecode, bool aligned)
+            public bool TryProcessVPUMove(OPCode op, UInt64 elem_sizecode, bool maskable, bool aligned, bool scalar)
             {
                 if (args.Length != 2) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected 2 operands"); return false; }
 
@@ -3303,32 +3323,37 @@ namespace CSX64
                 if (!TryAppendVal(1, (UInt64)op)) return false;
 
                 // extract the mask
-                if (!TryExtractVPUMask(ref args[0], out Expr mask)) return false;
+                if (!TryExtractVPUMask(ref args[0], out Expr mask, out bool zmask)) return false;
+                // if it had an explicit mask and we were told not to allow that, it's an error
+                if (mask != null && !maskable) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Instruction does not support masking"); return false; }
 
                 // vreg, *
                 if (TryParseVPURegister(args[0], out UInt64 dest, out UInt64 dest_sizecode))
                 {
-                    UInt64 elem_count = Size(dest_sizecode) >> (UInt16)elem_sizecode;
+                    UInt64 elem_count = scalar ? 1 : Size(dest_sizecode) >> (UInt16)elem_sizecode;
                     bool mask_present = VPUMaskPresent(mask, elem_count);
+
+                    // if we're in vector mode and the mask is not present, we can kick it up to 64-bit mode (for performance)
+                    if (!scalar && !mask_present) elem_sizecode = 3;
 
                     // vreg, vreg
                     if (TryParseVPURegister(args[1], out UInt64 src, out UInt64 src_sizecode))
                     {
                         if (dest_sizecode != src_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size mismatch"); return false; }
 
-                        if (!TryAppendVal(1, (dest << 3) | (mask_present ? 4 : 0ul) | (dest_sizecode - 4))) return false;
-                        if (!TryAppendVal(1, (aligned ? 128 : 0ul) | (elem_sizecode << 2) | 0)) return false;
-                        if (mask_present && !TryAppendExpr(VPUMaskSize(elem_count), mask)) return false;
+                        if (!TryAppendVal(1, (dest << 3) | (aligned ? 4 : 0ul) | (dest_sizecode - 4))) return false;
+                        if (!TryAppendVal(1, (mask_present ? 128 : 0ul) | (zmask ? 64 : 0ul) | (scalar ? 32 : 0ul) | (elem_sizecode << 2) | 0)) return false;
+                        if (mask_present && !TryAppendExpr(BitsToBytes(elem_count), mask)) return false;
                         if (!TryAppendVal(1, src)) return false;
                     }
                     // vreg, mem
                     else if (TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out src_sizecode, out bool src_explicit))
                     {
-                        if (src_explicit && dest_sizecode != src_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size mismatch"); return false; }
+                        if (src_explicit && src_sizecode != (scalar ? elem_sizecode : dest_sizecode)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size mismatch"); return false; }
 
-                        if (!TryAppendVal(1, (dest << 3) | (mask_present ? 4 : 0ul) | (dest_sizecode - 4))) return false;
-                        if (!TryAppendVal(1, (aligned ? 128 : 0ul) | (elem_sizecode << 2) | 1)) return false;
-                        if (mask_present && !TryAppendExpr(VPUMaskSize(elem_count), mask)) return false;
+                        if (!TryAppendVal(1, (dest << 3) | (aligned ? 4 : 0ul) | (dest_sizecode - 4))) return false;
+                        if (!TryAppendVal(1, (mask_present ? 128 : 0ul) | (zmask ? 64 : 0ul) | (scalar ? 32 : 0ul) | (elem_sizecode << 2) | 1)) return false;
+                        if (mask_present && !TryAppendExpr(BitsToBytes(elem_count), mask)) return false;
                         if (!TryAppendAddress(a, b, ptr_base)) return false;
                     }
                     // vreg, imm
@@ -3340,14 +3365,17 @@ namespace CSX64
                     // mem, vreg
                     if (TryParseVPURegister(args[1], out UInt64 src, out UInt64 src_sizecode))
                     {
-                        if (dest_explicit && dest_sizecode != src_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size mismatch"); return false; }
+                        if (dest_explicit && dest_sizecode != (scalar ? elem_sizecode : src_sizecode)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size mismatch"); return false; }
 
-                        UInt64 elem_count = Size(src_sizecode) >> (UInt16)elem_sizecode;
+                        UInt64 elem_count = scalar ? 1 : Size(dest_sizecode) >> (UInt16)elem_sizecode;
                         bool mask_present = VPUMaskPresent(mask, elem_count);
 
-                        if (!TryAppendVal(1, (src << 3) | (mask_present ? 4 : 0ul) | (src_sizecode - 4))) return false;
-                        if (!TryAppendVal(1, (aligned ? 128 : 0ul) | (elem_sizecode << 2) | 2)) return false;
-                        if (mask_present && !TryAppendExpr(VPUMaskSize(elem_count), mask)) return false;
+                        // if we're in vector mode and the mask is not present, we can kick it up to 64-bit mode (for performance)
+                        if (!scalar && !mask_present) elem_sizecode = 3;
+
+                        if (!TryAppendVal(1, (dest << 3) | (aligned ? 4 : 0ul) | (dest_sizecode - 4))) return false;
+                        if (!TryAppendVal(1, (mask_present ? 128 : 0ul) | (zmask ? 64 : 0ul) | (scalar ? 32 : 0ul) | (elem_sizecode << 2) | 2)) return false;
+                        if (mask_present && !TryAppendExpr(BitsToBytes(elem_count), mask)) return false;
                         if (!TryAppendAddress(a, b, ptr_base)) return false;
                     }
                     // mem, mem/imm
@@ -3823,21 +3851,30 @@ namespace CSX64
 
                         // vpu instructions
 
-                        case "MOVAPD": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, true)) return args.res; break;
-                        case "MOVAPS": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 2, true)) return args.res; break;
+                        case "MOVQ": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, false, false, true)) return args.res; break;
+                        case "MOVD": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 2, false, false, true)) return args.res; break;
 
-                        case "MOVUPD": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, false)) return args.res; break;
-                        case "MOVUPS": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 2, false)) return args.res; break;
+                        case "MOVSD": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, false, false, true)) return args.res; break;
+                        case "MOVSS": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 2, false, false, true)) return args.res; break;
 
-                        case "MOVAPI64": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, true)) return args.res; break;
-                        case "MOVAPI32": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 2, true)) return args.res; break;
-                        case "MOVAPI16": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 1, true)) return args.res; break;
-                        case "MOVAPI8": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 0, true)) return args.res; break;
+                        case "MOVDQA": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, false, true, false)) return args.res; break; // size codes for these 2 don't matter
+                        case "MOVDQU": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, false, false, false)) return args.res; break;
 
-                        case "MOVUPI64": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, false)) return args.res; break;
-                        case "MOVUPI32": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 2, false)) return args.res; break;
-                        case "MOVUPI16": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 1, false)) return args.res; break;
-                        case "MOVUPI8": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 0, false)) return args.res; break;
+                        case "MOVDQA64": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, true, true, false)) return args.res; break;
+                        case "MOVDQA32": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 2, true, true, false)) return args.res; break;
+                        case "MOVDQA16": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 1, true, true, false)) return args.res; break;
+                        case "MOVDQA8": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 0, true, true, false)) return args.res; break;
+
+                        case "MOVDQU64": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, true, false, false)) return args.res; break;
+                        case "MOVDQU32": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 2, true, false, false)) return args.res; break;
+                        case "MOVDQU16": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 1, true, false, false)) return args.res; break;
+                        case "MOVDQU8": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 0, true, false, false)) return args.res; break;
+
+                        case "MOVAPD": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, true, true, false)) return args.res; break;
+                        case "MOVAPS": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 2, true, true, false)) return args.res; break;
+
+                        case "MOVUPD": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, true, false, false)) return args.res; break;
+                        case "MOVUPS": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 2, true, false, false)) return args.res; break;
 
                         // misc instructions
 
