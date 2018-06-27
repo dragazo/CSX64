@@ -416,6 +416,11 @@ namespace CSX64
 
                 case OPCode.VPU_MOV: return ProcessVPUMove();
 
+                case OPCode.VPU_FADD: return TryProcessVEC_FADD();
+                case OPCode.VPU_FSUB: return TryProcessVEC_FSUB();
+                case OPCode.VPU_FMUL: return TryProcessVEC_FMUL();
+                case OPCode.VPU_FDIV: return TryProcessVEC_FDIV();
+
                 // misc instructions
 
                 case OPCode.DEBUG: // all debugging features

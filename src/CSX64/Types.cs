@@ -55,6 +55,7 @@ namespace CSX64
         // SIMD instructions
 
         VPU_MOV,
+        VPU_FADD, VPU_FSUB, VPU_FMUL, VPU_FDIV,
 
         // misc instructions
 

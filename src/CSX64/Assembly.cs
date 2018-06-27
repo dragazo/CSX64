@@ -3385,6 +3385,92 @@ namespace CSX64
 
                 return true;
             }
+            public bool TryProcessVPUBinary(OPCode op, UInt64 elem_sizecode, bool maskable, bool aligned, bool scalar)
+            {
+                if (args.Length != 2 && args.Length != 3) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected 2 or 3 operands"); return false; }
+
+                // write the op code
+                if (!TryAppendVal(1, (UInt64)op)) return false;
+
+                // extract the mask
+                if (!TryExtractVPUMask(ref args[0], out Expr mask, out bool zmask)) return false;
+                // if it had an explicit mask and we were told not to allow that, it's an error
+                if (mask != null && !maskable) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Instruction does not support masking"); return false; }
+
+                // vreg, *
+                if (TryParseVPURegister(args[0], out UInt64 dest, out UInt64 dest_sizecode))
+                {
+                    UInt64 elem_count = scalar ? 1 : Size(dest_sizecode) >> (UInt16)elem_sizecode;
+                    bool mask_present = VPUMaskPresent(mask, elem_count);
+
+                    // 2 args case
+                    if (args.Length == 2)
+                    {
+                        // vreg, vreg
+                        if (TryParseVPURegister(args[1], out UInt64 src, out UInt64 src_sizecode))
+                        {
+                            if (dest_sizecode != src_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size mismatch"); return false; }
+
+                            if (!TryAppendVal(1, (dest << 3) | (aligned ? 4 : 0ul) | (dest_sizecode - 4))) return false;
+                            if (!TryAppendVal(1, (mask_present ? 128 : 0ul) | (zmask ? 64 : 0ul) | (scalar ? 32 : 0ul) | (elem_sizecode << 2) | 0)) return false;
+                            if (mask_present && !TryAppendExpr(BitsToBytes(elem_count), mask)) return false;
+                            if (!TryAppendVal(1, dest)) return false;
+                            if (!TryAppendVal(1, src)) return false;
+                        }
+                        // vreg, mem
+                        else if (TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out src_sizecode, out bool src_explicit))
+                        {
+                            if (src_explicit && src_sizecode != (scalar ? elem_sizecode : dest_sizecode)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size mismatch"); return false; }
+
+                            if (!TryAppendVal(1, (dest << 3) | (aligned ? 4 : 0ul) | (dest_sizecode - 4))) return false;
+                            if (!TryAppendVal(1, (mask_present ? 128 : 0ul) | (zmask ? 64 : 0ul) | (scalar ? 32 : 0ul) | (elem_sizecode << 2) | 1)) return false;
+                            if (mask_present && !TryAppendExpr(BitsToBytes(elem_count), mask)) return false;
+                            if (!TryAppendVal(1, dest)) return false;
+                            if (!TryAppendAddress(a, b, ptr_base)) return false;
+                        }
+                        // vreg, imm
+                        else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected vpu register or memory value as second operand"); return false; }
+                    }
+                    // 3 args case
+                    else
+                    {
+                        // vreg, vreg, *
+                        if (TryParseVPURegister(args[1], out UInt64 src1, out UInt64 src1_sizecode))
+                        {
+                            // vreg, vreg, vreg
+                            if (TryParseVPURegister(args[2], out UInt64 src2, out UInt64 src2_sizecode))
+                            {
+                                if (dest_sizecode != src1_sizecode || src1_sizecode != src2_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size mismatch"); return false; }
+
+                                if (!TryAppendVal(1, (dest << 3) | (aligned ? 4 : 0ul) | (dest_sizecode - 4))) return false;
+                                if (!TryAppendVal(1, (mask_present ? 128 : 0ul) | (zmask ? 64 : 0ul) | (scalar ? 32 : 0ul) | (elem_sizecode << 2) | 0)) return false;
+                                if (mask_present && !TryAppendExpr(BitsToBytes(elem_count), mask)) return false;
+                                if (!TryAppendVal(1, src1)) return false;
+                                if (!TryAppendVal(1, src2)) return false;
+                            }
+                            // vreg, vreg, mem
+                            else if (TryParseAddress(args[2], out UInt64 a, out UInt64 b, out Expr ptr_base, out src2_sizecode, out bool src2_explicit))
+                            {
+                                if (dest_sizecode != src1_sizecode || src2_explicit && src2_sizecode != (scalar ? elem_sizecode : dest_sizecode)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size mismatch"); return false; }
+
+                                if (!TryAppendVal(1, (dest << 3) | (aligned ? 4 : 0ul) | (dest_sizecode - 4))) return false;
+                                if (!TryAppendVal(1, (mask_present ? 128 : 0ul) | (zmask ? 64 : 0ul) | (scalar ? 32 : 0ul) | (elem_sizecode << 2) | 1)) return false;
+                                if (mask_present && !TryAppendExpr(BitsToBytes(elem_count), mask)) return false;
+                                if (!TryAppendVal(1, src1)) return false;
+                                if (!TryAppendAddress(a, b, ptr_base)) return false;
+                            }
+                            // vreg, imm
+                            else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected vpu register or memory value as third operand"); return false; }
+                        }
+                        // vreg, mem/imm, *
+                        else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected vpu register as second operand"); return false; }
+                    }
+                }
+                // mem/imm, *
+                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: First operand must be a vpu register"); return false; }
+
+                return true;
+            }
         }
 
         /// <summary>
@@ -3875,6 +3961,26 @@ namespace CSX64
 
                         case "MOVUPD": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, true, false, false)) return args.res; break;
                         case "MOVUPS": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 2, true, false, false)) return args.res; break;
+
+                        case "ADDSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FADD, 3, false, false, true)) return args.res; break;
+                        case "SUBSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FSUB, 3, false, false, true)) return args.res; break;
+                        case "MULSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FMUL, 3, false, false, true)) return args.res; break;
+                        case "DIVSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FDIV, 3, false, false, true)) return args.res; break;
+
+                        case "ADDSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FADD, 2, false, false, true)) return args.res; break;
+                        case "SUBSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FSUB, 2, false, false, true)) return args.res; break;
+                        case "MULSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FMUL, 2, false, false, true)) return args.res; break;
+                        case "DIVSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FDIV, 2, false, false, true)) return args.res; break;
+
+                        case "ADDPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FADD, 3, true, true, false)) return args.res; break;
+                        case "SUBPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FSUB, 3, true, true, false)) return args.res; break;
+                        case "MULPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FMUL, 3, true, true, false)) return args.res; break;
+                        case "DIVPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FDIV, 3, true, true, false)) return args.res; break;
+
+                        case "ADDPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FADD, 2, true, true, false)) return args.res; break;
+                        case "SUBPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FSUB, 2, true, true, false)) return args.res; break;
+                        case "MULPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FMUL, 2, true, true, false)) return args.res; break;
+                        case "DIVPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FDIV, 2, true, true, false)) return args.res; break;
 
                         // misc instructions
 

@@ -2418,6 +2418,8 @@ namespace CSX64
 
         // -- vpu stuff -- //
 
+        private delegate bool VPUBinaryDelegate(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b);
+
         /*
         [5: reg][1: aligned][2: reg_size]   [1: has_mask][1: zmask][1: scalar][1:][2: elem_size][2: mode]   ([count: mask])
             mode = 0: [3:][5: src]   reg <- src
@@ -2492,5 +2494,118 @@ namespace CSX64
             
             return true;
         }
+        /*
+        [5: dest][1: aligned][2: dest_size]   [1: has_mask][1: zmask][1: scalar][1:][2: elem_size][1:][1: mem]   ([count: mask])   [3:][5: src1]
+            mem = 0: [3:][5: src2]   dest <- f(src1, src2)
+            mem = 1: [address]       dest <- F(src1, M[address])
+        */
+        private bool ProcessVPUBinary(UInt64 elem_size_mask, VPUBinaryDelegate func)
+        {
+            // read settings bytes
+            if (!GetMemAdv(1, out UInt64 s1) || !GetMemAdv(1, out UInt64 s2)) return false;
+            UInt64 dest_sizecode = s1 & 3;
+            UInt64 elem_sizecode = (s2 >> 2) & 3;
+
+            // make sure this element size is allowed
+            if ((Size(elem_sizecode) & elem_size_mask) == 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+
+            // get the register to work with
+            if (dest_sizecode == 3) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+            if (dest_sizecode != 2 && (s1 & 0x80) != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+            int dest = (int)(s1 >> 3);
+
+            // get number of elements to process (accounting for scalar flag)
+            int elem_count = (s2 & 0x20) != 0 ? 1 : (int)(Size(dest_sizecode + 4) >> (UInt16)elem_sizecode);
+
+            // get the mask (default of all 1's)
+            UInt64 mask = UInt64.MaxValue;
+            if ((s2 & 0x80) != 0 && !GetMemAdv(BitsToBytes((UInt64)elem_count), out mask)) return false;
+            // get the zmask flag
+            bool zmask = (s2 & 0x40) != 0;
+
+            // get src1
+            if (!GetMemAdv(1, out UInt64 _src1)) return false;
+            if (dest_sizecode != 2 && (_src1 & 0x10) != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+            int src1 = (int)(_src1 & 0x1f);
+
+            // if src2 is a register
+            if ((s2 & 1) == 0)
+            {
+                if (!GetMemAdv(1, out UInt64 _src2)) return false;
+                if (dest_sizecode != 2 && (_src2 & 0x10) != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+                int src2 = (int)(_src2 & 0x1f);
+
+                for (int i = 0; i < elem_count; ++i, mask >>= 1)
+                    if ((mask & 1) != 0)
+                    {
+                        // hand over to the delegate for processing
+                        if (!func(elem_sizecode, out UInt64 res, ZMMRegisters[src1]._uint(elem_sizecode, i), ZMMRegisters[src2]._uint(elem_sizecode, i))) return false;
+                        ZMMRegisters[dest]._uint(elem_sizecode, i, res);
+                    }
+                    else if (zmask) ZMMRegisters[dest]._uint(elem_sizecode, i, 0);
+            }
+            // otherwise src is memory
+            else
+            {
+                if (!GetAddressAdv(out UInt64 m)) return false;
+                // if we're in vector mode and aligned flag is set, make sure address is aligned
+                if (elem_count > 1 && (s1 & 4) != 0 && m % Size(dest_sizecode + 4) != 0) { Terminate(ErrorCode.AlignmentViolation); return false; }
+
+                for (int i = 0; i < elem_count; ++i, mask >>= 1, m += Size(elem_sizecode))
+                    if ((mask & 1) != 0)
+                    {
+                        if (!GetMemRaw(m, Size(elem_sizecode), out UInt64 res)) return false;
+
+                        // hand over to the delegate for processing
+                        if (!func(elem_sizecode, out res, ZMMRegisters[src1]._uint(elem_sizecode, i), res)) return false;
+                        ZMMRegisters[dest]._uint(elem_sizecode, i, res);
+                    }
+                    else if (zmask) ZMMRegisters[dest]._uint(elem_sizecode, i, 0);
+            }
+
+            return true;
+        }
+
+        private bool __TryPerformVEC_FADD(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        {
+            // 64-bit fp
+            if (elem_sizecode == 3) res = DoubleAsUInt64(AsDouble(a) + AsDouble(b));
+            // 32-bit fp
+            else res = FloatAsUInt64(AsFloat((UInt32)a) + AsFloat((UInt32)b));
+
+            return true;
+        }
+        private bool __TryPerformVEC_FSUB(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        {
+            // 64-bit fp
+            if (elem_sizecode == 3) res = DoubleAsUInt64(AsDouble(a) - AsDouble(b));
+            // 32-bit fp
+            else res = FloatAsUInt64(AsFloat((UInt32)a) - AsFloat((UInt32)b));
+
+            return true;
+        }
+        private bool __TryPerformVEC_FMUL(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        {
+            // 64-bit fp
+            if (elem_sizecode == 3) res = DoubleAsUInt64(AsDouble(a) * AsDouble(b));
+            // 32-bit fp
+            else res = FloatAsUInt64(AsFloat((UInt32)a) * AsFloat((UInt32)b));
+
+            return true;
+        }
+        private bool __TryPerformVEC_FDIV(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        {
+            // 64-bit fp
+            if (elem_sizecode == 3) res = DoubleAsUInt64(AsDouble(a) / AsDouble(b));
+            // 32-bit fp
+            else res = FloatAsUInt64(AsFloat((UInt32)a) / AsFloat((UInt32)b));
+
+            return true;
+        }
+
+        private bool TryProcessVEC_FADD() => ProcessVPUBinary(12, __TryPerformVEC_FADD);
+        private bool TryProcessVEC_FSUB() => ProcessVPUBinary(12, __TryPerformVEC_FSUB);
+        private bool TryProcessVEC_FMUL() => ProcessVPUBinary(12, __TryPerformVEC_FMUL);
+        private bool TryProcessVEC_FDIV() => ProcessVPUBinary(12, __TryPerformVEC_FDIV);
     }
 }
