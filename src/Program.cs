@@ -8,6 +8,7 @@ using System.Runtime.Serialization;
 using System.Runtime.InteropServices;
 using System.Security;
 using System.Text;
+using System.Diagnostics;
 
 namespace CSX64
 {
@@ -51,13 +52,14 @@ namespace CSX64
             "\n" +
             "usage: csx [<options>] [--] <pathspec>...\n" +
             "\n" +
-            "    -h, --help             shows this help mesage\n" +
+            "    -h, --help             shows help info\n" +
             "    -g, --graphical        executes a graphical program\n" +
             "    -a, --assemble         assembe files into object files\n" +
             "    -l, --link             link object files into an executable\n" +
+            "        --entry <entry>    main entry point for linker\n" +
             "    -o, --out <pathspec>   specifies explicit output path\n" +
-            "        --end              remaining args are pathspec\n" +
             "        --fs               sets the file system flag\n" +
+            "        --end              remaining args are pathspec\n" +
             "\n" +
             "if no -g/-a/-l provided, executes a console program\n" +
             "\n" +
@@ -87,47 +89,13 @@ namespace CSX64
 
             // run statics fom client sources
             GraphicalComputer.InitStatics();
-            
-            List<string> pathspec = new List<string>();          // input paths
-            string output = null;                                // output path
+
             ProgramAction action = ProgramAction.ExecuteConsole; // requested action
-            bool accepting_options = true;                       // marks that we're still accepting options
+            List<string> pathspec = new List<string>();          // input paths
+            string entry_point = null;                           // main entry point for linker
+            string output = null;                                // output path
             bool fsf = false;                                    // fsf flag
-
-            /*
-            double[] vals = { 0.0001254, double.Epsilon, 1.00001, 2.123, 3.345, 1000.21, 204, 34356, 38654, -234576, 23643, -346.3465, -1.674e123,
-                double.NegativeInfinity, double.PositiveInfinity, double.NaN};
-            
-            // extract utility testing
-            foreach (double val in vals)
-            {
-                Utility.ExtractDouble(val, out double exp, out double sig);
-                double res = Utility.AssembleDouble(exp, sig);
-
-                Console.WriteLine($"{val,-24} -> {sig,24} *2^ {exp,-8} -> {res,-24} d {res-val,-32:e17} exact? {val == res}");
-            }
-            Console.ReadLine();
-            */
-
-            /*
-            // performance testing stuff
-
-            Random rand = new Random();
-            byte[] data = new byte[1024];
-            rand.NextBytes(data);
-            Console.WriteLine("starting");
-            UInt64 temp;
-            DateTime start = DateTime.Now;
-            
-            for (int i = 0; i < 100000000; ++i)
-            {
-                data.Read((UInt64)rand.Next(900), 1ul << rand.Next(4), out temp);
-            }
-
-            TimeSpan ts = DateTime.Now - start;
-            Console.WriteLine($"t: {ts.TotalMilliseconds}ms");
-            Console.ReadLine();
-            */
+            bool accepting_options = true;                       // marks that we're still accepting options
 
             // process the terminal args
             for (int i = 0; i < args.Length; ++i)
@@ -139,13 +107,15 @@ namespace CSX64
                     switch (args[i])
                     {
                         // do the long names
-                        case "--help": Print(HelpMessage); return 0;
+                        case "--help": Process.Start("https://github.com/dragazo/CSX64/blob/master/CSX64 Specification.pdf"); return 0;
                         case "--graphical": if (action != ProgramAction.ExecuteConsole) { Print("usage error - see -h for help"); return 0; } action = ProgramAction.ExecuteGraphical; break;
                         case "--assemble": if (action != ProgramAction.ExecuteConsole) { Print("usage error - see -h for help"); return 0; } action = ProgramAction.Assemble; break;
                         case "--link": if (action != ProgramAction.ExecuteConsole) { Print("usage error - see -h for help"); return 0; } action = ProgramAction.Link; break;
                         case "--output": if (output != null || i + 1 >= args.Length) { Print("usage error - see -h for help"); return 0; } output = args[++i]; break;
+                        case "--entry": if (entry_point != null || i + 1 >= args.Length) { Print("usage error - see -h for help"); return 0; } entry_point = args[++i]; break;
                         case "--end": accepting_options = false; break;
                         case "--fs": fsf = true; break;
+                        
                         case "--": break; // -- is a no-op separator
 
                         default:
@@ -181,39 +151,33 @@ namespace CSX64
             switch (action)
             {
                 case ProgramAction.ExecuteConsole:
-                    if (pathspec.Count == 0) { Print("Execution mode expected a file to execute"); return 0; }
-
-                    // first path is file to run, then pass all of pathspec as command line args for client code
+                    if (pathspec.Count == 0) { Print("Expected a file to execute"); return 0; }
                     return RunRawConsole(pathspec[0], pathspec.ToArray(), fsf);
-                case ProgramAction.ExecuteGraphical:
-                    if (pathspec.Count == 0) { Print("Graphical execution mode expected a file to execute"); return 0; }
 
-                    // first path is file to run, then pass all of pathspec as command line args for client code
+                case ProgramAction.ExecuteGraphical:
+                    if (pathspec.Count == 0) { Print("Expected a file to execute"); return 0; }
                     return RunGraphicalClient(pathspec[0], pathspec.ToArray(), fsf);
 
                 case ProgramAction.Assemble:
-                    // if no output is provided, batch process
-                    if (output == null)
+                    if (pathspec.Count == 0) { Print("Assembler expected at least 1 file to assemble"); return 0; }
+                    if (output == null) // if no output is provided, batch process each pathspec
                     {
                         foreach (string path in pathspec)
                         {
                             int res = Assemble(path);
                             if (res != 0) return res;
                         }
+                        return 0;
                     }
-                    // otherwise, we're expecting only one input with a named output
-                    else
+                    else // otherwise, we're expecting only one input with a named output
                     {
-                        if (pathspec.Count != 1) { Print("Assemble mode with an explicit output expected only one input assembly file\n"); return 0; }
+                        if (pathspec.Count != 1) { Print("Assembler with an explicit output expected only one input\n"); return 0; }
                         return Assemble(pathspec[0], output);
                     }
-                    break;
-                case ProgramAction.Link:
-                    // if no output was specified, provide a default
-                    if (output == null) output = "a.exe";
 
-                    Link(pathspec, output);
-                    break;
+                case ProgramAction.Link:
+                    if (pathspec.Count == 0) { Print("Linker expected at least 1 file to link"); return 0; }
+                    return Link(pathspec, output ?? "a.exe", entry_point ?? "main");
             }
 
             return 0;
@@ -497,7 +461,8 @@ namespace CSX64
         /// </summary>
         /// <param name="paths">the object files to link</param>
         /// <param name="to">destination for the resulting executable</param>
-        private static int Link(List<string> paths, string to)
+        /// <param name="entry_point">the main entry point</param>
+        private static int Link(List<string> paths, string to, string entry_point)
         {
             // get all the object files
             ObjectFile[] objs = new ObjectFile[paths.Count];
@@ -508,7 +473,7 @@ namespace CSX64
             }
 
             // link the object files
-            LinkResult res = Assembly.Link(out byte[] exe, objs);
+            LinkResult res = Assembly.Link(out byte[] exe, objs, entry_point);
 
             // if there was no error
             if (res.Error == LinkError.None)

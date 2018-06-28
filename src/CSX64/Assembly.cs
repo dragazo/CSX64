@@ -4165,7 +4165,7 @@ namespace CSX64
             }
 
             // ensure the entry point was defined
-            if (!global_to_obj.TryGetValue(entry_point, out ObjectFile main_obj)) return new LinkResult(LinkError.MissingSymbol, "No entry point");
+            if (!global_to_obj.TryGetValue(entry_point, out ObjectFile main_obj)) return new LinkResult(LinkError.MissingSymbol, $"No entry point \"{entry_point}\"");
 
             // make sure we start the merge process with the main object file
             include_queue.Enqueue(main_obj);
