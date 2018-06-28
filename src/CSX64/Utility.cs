@@ -459,13 +459,31 @@ namespace CSX64
         // -- CSX64 encoding utilities -- //
 
         /// <summary>
+        /// Gets the bitmask for the sign bit of an integer with the specified sizecode
+        /// </summary>
+        /// <param name="sizecode">the sizecode specifying the width of integer to examine</param>
+        public static UInt64 SignMask(UInt64 sizecode)
+        {
+            return 1ul << ((8 << (UInt16)sizecode) - 1);
+        }
+        /// <summary>
+        /// Gets the bitmask that includes the entire valid domain of an integer with the specified width
+        /// </summary>
+        /// <param name="sizecode">the sizecode specifying the width of integer to examine</param>
+        public static UInt64 TruncMask(UInt64 sizecode)
+        {
+            UInt64 res = SignMask(sizecode);
+            return res | (res - 1);
+        }
+
+        /// <summary>
         /// Returns if the value with specified size code is positive
         /// </summary>
         /// <param name="val">the value to process</param>
         /// <param name="sizecode">the current size code of the value</param>
         public static bool Positive(UInt64 val, UInt64 sizecode)
         {
-            return ((val >> ((8 << (ushort)sizecode) - 1)) & 1) == 0;
+            return (val & SignMask(sizecode)) == 0;
         }
         /// <summary>
         /// Returns if the value with specified size code is negative
@@ -474,7 +492,7 @@ namespace CSX64
         /// <param name="sizecode">the current size code of the value</param>
         public static bool Negative(UInt64 val, UInt64 sizecode)
         {
-            return ((val >> ((8 << (ushort)sizecode) - 1)) & 1) != 0;
+            return (val & SignMask(sizecode)) != 0;
         }
 
         /// <summary>
@@ -484,7 +502,7 @@ namespace CSX64
         /// <param name="sizecode">the current size code</param>
         public static UInt64 SignExtend(UInt64 val, UInt64 sizecode)
         {
-            return Positive(val, sizecode) ? val : ~(((1ul << (8 << (ushort)sizecode)) & ~1ul) - 1) | val;
+            return Positive(val, sizecode) ? val : val | ~TruncMask(sizecode);
         }
         /// <summary>
         /// Truncates the value to the specified size code (can also be used to zero extend a value)
@@ -493,7 +511,7 @@ namespace CSX64
         /// <param name="sizecode">the size code to truncate to</param>
         public static UInt64 Truncate(UInt64 val, UInt64 sizecode)
         {
-            return (((1ul << (8 << (ushort)sizecode)) & ~1ul) - 1) & val;
+            return val & TruncMask(sizecode);
         }
 
         /// <summary>

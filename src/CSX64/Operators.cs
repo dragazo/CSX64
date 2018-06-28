@@ -2607,5 +2607,90 @@ namespace CSX64
         private bool TryProcessVEC_FSUB() => ProcessVPUBinary(12, __TryPerformVEC_FSUB);
         private bool TryProcessVEC_FMUL() => ProcessVPUBinary(12, __TryPerformVEC_FMUL);
         private bool TryProcessVEC_FDIV() => ProcessVPUBinary(12, __TryPerformVEC_FDIV);
+
+        private bool __TryPerformVEC_AND(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        {
+            res = a & b;
+            return true;
+        }
+        private bool __TryPerformVEC_OR(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        {
+            res = a | b;
+            return true;
+        }
+        private bool __TryPerformVEC_XOR(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        {
+            res = a ^ b;
+            return true;
+        }
+        private bool __TryPerformVEC_ANDN(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        {
+            res = ~a & b;
+            return true;
+        }
+
+        private bool TryProcessVEC_AND() => ProcessVPUBinary(15, __TryPerformVEC_AND);
+        private bool TryProcessVEC_OR() => ProcessVPUBinary(15, __TryPerformVEC_OR);
+        private bool TryProcessVEC_XOR() => ProcessVPUBinary(15, __TryPerformVEC_XOR);
+        private bool TryProcessVEC_ANDN() => ProcessVPUBinary(15, __TryPerformVEC_ANDN);
+
+        private bool __TryPerformVEC_ADD(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        {
+            res = a + b;
+            return true;
+        }
+        private bool __TryPerformVEC_ADDS(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        {
+            // get sign mask
+            UInt64 smask = SignMask(elem_sizecode);
+
+            res = a + b;
+
+            // get sign bits
+            bool res_sign = (res & smask) != 0;
+            bool a_sign = (a & smask) != 0;
+            bool b_sign = (b & smask) != 0;
+
+            // if there was an over/underflow, handle saturation cases
+            if (a_sign == b_sign && a_sign != res_sign) res = a_sign ? smask : smask - 1;
+
+            return true;
+        }
+        private bool __TryPerformVEC_ADDUS(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        {
+            // get trunc mask
+            UInt64 tmask = TruncMask(elem_sizecode);
+
+            res = (a + b) & tmask; // truncated for logic below
+
+            // if there was an over/underflow, handle saturation cases
+            if (res < a && res < b) res = tmask;
+
+            return true;
+        }
+
+        private bool TryProcessVEC_ADD() => ProcessVPUBinary(15, __TryPerformVEC_ADD);
+        private bool TryProcessVEC_ADDS() => ProcessVPUBinary(15, __TryPerformVEC_ADDS);
+        private bool TryProcessVEC_ADDUS() => ProcessVPUBinary(15, __TryPerformVEC_ADDUS);
+
+        private bool __TryPerformVEC_SUB(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        {
+            res = a - b;
+            return true;
+        }
+        private bool __TryPerformVEC_SUBS(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        {
+            // refer to addition form
+            return __TryPerformVEC_ADDS(elem_sizecode, out res, a, Truncate(~b + 1, elem_sizecode));
+        }
+        private bool __TryPerformVEC_SUBUS(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        {
+            // refer to addition form
+            return __TryPerformVEC_ADDUS(elem_sizecode, out res, a, Truncate(~b + 1, elem_sizecode));
+        }
+
+        private bool TryProcessVEC_SUB() => ProcessVPUBinary(15, __TryPerformVEC_SUB);
+        private bool TryProcessVEC_SUBS() => ProcessVPUBinary(15, __TryPerformVEC_SUBS);
+        private bool TryProcessVEC_SUBUS() => ProcessVPUBinary(15, __TryPerformVEC_SUBUS);
     }
 }

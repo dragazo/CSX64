@@ -56,6 +56,10 @@ namespace CSX64
 
         VPU_MOV,
         VPU_FADD, VPU_FSUB, VPU_FMUL, VPU_FDIV,
+        VPU_AND, VPU_OR, VPU_XOR, VPU_ANDN,
+        VPU_ADD, VPU_ADDS, VPU_ADDUS,
+        VPU_SUB, VPU_SUBS, VPU_SUBUS,
+        VPU_MUL,
 
         // misc instructions
 

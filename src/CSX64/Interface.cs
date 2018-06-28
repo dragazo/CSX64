@@ -421,6 +421,19 @@ namespace CSX64
                 case OPCode.VPU_FMUL: return TryProcessVEC_FMUL();
                 case OPCode.VPU_FDIV: return TryProcessVEC_FDIV();
 
+                case OPCode.VPU_AND: return TryProcessVEC_AND();
+                case OPCode.VPU_OR: return TryProcessVEC_OR();
+                case OPCode.VPU_XOR: return TryProcessVEC_XOR();
+                case OPCode.VPU_ANDN: return TryProcessVEC_ANDN();
+
+                case OPCode.VPU_ADD: return TryProcessVEC_ADD();
+                case OPCode.VPU_ADDS: return TryProcessVEC_ADDS();
+                case OPCode.VPU_ADDUS: return TryProcessVEC_ADDUS();
+
+                case OPCode.VPU_SUB: return TryProcessVEC_SUB();
+                case OPCode.VPU_SUBS: return TryProcessVEC_SUBS();
+                case OPCode.VPU_SUBUS: return TryProcessVEC_SUBUS();
+
                 // misc instructions
 
                 case OPCode.DEBUG: // all debugging features

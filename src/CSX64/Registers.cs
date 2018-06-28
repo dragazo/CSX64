@@ -248,5 +248,38 @@ namespace CSX64
         public bool ST5_InUse { get => FPURegisters[(TOP + 5) & 7].InUse; set => FPURegisters[(TOP + 5) & 7].InUse = value; }
         public bool ST6_InUse { get => FPURegisters[(TOP + 6) & 7].InUse; set => FPURegisters[(TOP + 6) & 7].InUse = value; }
         public bool ST7_InUse { get => FPURegisters[(TOP + 7) & 7].InUse; set => FPURegisters[(TOP + 7) & 7].InUse = value; }
+
+        public ZMMRegister ZMM0 { get => ZMMRegisters[0]; set => ZMMRegisters[0] = value; }
+        public ZMMRegister ZMM1 { get => ZMMRegisters[1]; set => ZMMRegisters[1] = value; }
+        public ZMMRegister ZMM2 { get => ZMMRegisters[2]; set => ZMMRegisters[2] = value; }
+        public ZMMRegister ZMM3 { get => ZMMRegisters[3]; set => ZMMRegisters[3] = value; }
+        public ZMMRegister ZMM4 { get => ZMMRegisters[4]; set => ZMMRegisters[4] = value; }
+        public ZMMRegister ZMM5 { get => ZMMRegisters[5]; set => ZMMRegisters[5] = value; }
+        public ZMMRegister ZMM6 { get => ZMMRegisters[6]; set => ZMMRegisters[6] = value; }
+        public ZMMRegister ZMM7 { get => ZMMRegisters[7]; set => ZMMRegisters[7] = value; }
+        public ZMMRegister ZMM8 { get => ZMMRegisters[8]; set => ZMMRegisters[8] = value; }
+        public ZMMRegister ZMM9 { get => ZMMRegisters[9]; set => ZMMRegisters[9] = value; }
+        public ZMMRegister ZMM10 { get => ZMMRegisters[10]; set => ZMMRegisters[10] = value; }
+        public ZMMRegister ZMM11 { get => ZMMRegisters[11]; set => ZMMRegisters[11] = value; }
+        public ZMMRegister ZMM12 { get => ZMMRegisters[12]; set => ZMMRegisters[12] = value; }
+        public ZMMRegister ZMM13 { get => ZMMRegisters[13]; set => ZMMRegisters[13] = value; }
+        public ZMMRegister ZMM14 { get => ZMMRegisters[14]; set => ZMMRegisters[14] = value; }
+        public ZMMRegister ZMM15 { get => ZMMRegisters[15]; set => ZMMRegisters[15] = value; }
+        public ZMMRegister ZMM16 { get => ZMMRegisters[16]; set => ZMMRegisters[16] = value; }
+        public ZMMRegister ZMM17 { get => ZMMRegisters[17]; set => ZMMRegisters[17] = value; }
+        public ZMMRegister ZMM18 { get => ZMMRegisters[18]; set => ZMMRegisters[18] = value; }
+        public ZMMRegister ZMM19 { get => ZMMRegisters[19]; set => ZMMRegisters[19] = value; }
+        public ZMMRegister ZMM20 { get => ZMMRegisters[20]; set => ZMMRegisters[20] = value; }
+        public ZMMRegister ZMM21 { get => ZMMRegisters[21]; set => ZMMRegisters[21] = value; }
+        public ZMMRegister ZMM22 { get => ZMMRegisters[22]; set => ZMMRegisters[22] = value; }
+        public ZMMRegister ZMM23 { get => ZMMRegisters[23]; set => ZMMRegisters[23] = value; }
+        public ZMMRegister ZMM24 { get => ZMMRegisters[24]; set => ZMMRegisters[24] = value; }
+        public ZMMRegister ZMM25 { get => ZMMRegisters[25]; set => ZMMRegisters[25] = value; }
+        public ZMMRegister ZMM26 { get => ZMMRegisters[26]; set => ZMMRegisters[26] = value; }
+        public ZMMRegister ZMM27 { get => ZMMRegisters[27]; set => ZMMRegisters[27] = value; }
+        public ZMMRegister ZMM28 { get => ZMMRegisters[28]; set => ZMMRegisters[28] = value; }
+        public ZMMRegister ZMM29 { get => ZMMRegisters[29]; set => ZMMRegisters[29] = value; }
+        public ZMMRegister ZMM30 { get => ZMMRegisters[30]; set => ZMMRegisters[30] = value; }
+        public ZMMRegister ZMM31 { get => ZMMRegisters[31]; set => ZMMRegisters[31] = value; }
     }
 }

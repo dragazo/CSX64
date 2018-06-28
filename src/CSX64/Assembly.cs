@@ -3982,6 +3982,33 @@ namespace CSX64
                         case "MULPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FMUL, 2, true, true, false)) return args.res; break;
                         case "DIVPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FDIV, 2, true, true, false)) return args.res; break;
 
+                        case "PAND": case "ANDPD": case "ANDPS": if (!args.TryProcessVPUBinary(OPCode.VPU_AND, 3, true, true, false)) return args.res; break;
+                        case "POR": case "ORPD": case "ORPS": if (!args.TryProcessVPUBinary(OPCode.VPU_OR, 3, true, true, false)) return args.res; break;
+                        case "PXOR": case "XORPD": case "XORPS": if (!args.TryProcessVPUBinary(OPCode.VPU_OR, 3, true, true, false)) return args.res; break;
+                        case "PANDN": case "ANDNPD": case "ANDNPS": if (!args.TryProcessVPUBinary(OPCode.VPU_ANDN, 3, true, true, false)) return args.res; break;
+
+                        case "PADDQ": if (!args.TryProcessVPUBinary(OPCode.VPU_ADD, 3, true, true, false)) return args.res; break;
+                        case "PADDD": if (!args.TryProcessVPUBinary(OPCode.VPU_ADD, 2, true, true, false)) return args.res; break;
+                        case "PADDW": if (!args.TryProcessVPUBinary(OPCode.VPU_ADD, 1, true, true, false)) return args.res; break;
+                        case "PADDB": if (!args.TryProcessVPUBinary(OPCode.VPU_ADD, 0, true, true, false)) return args.res; break;
+
+                        case "PADDSW": if (!args.TryProcessVPUBinary(OPCode.VPU_ADDS, 1, true, true, false)) return args.res; break;
+                        case "PADDSB": if (!args.TryProcessVPUBinary(OPCode.VPU_ADDS, 0, true, true, false)) return args.res; break;
+
+                        case "PADDUSW": if (!args.TryProcessVPUBinary(OPCode.VPU_ADDUS, 1, true, true, false)) return args.res; break;
+                        case "PADDUSB": if (!args.TryProcessVPUBinary(OPCode.VPU_ADDUS, 0, true, true, false)) return args.res; break;
+
+                        case "PSUBQ": if (!args.TryProcessVPUBinary(OPCode.VPU_SUB, 3, true, true, false)) return args.res; break;
+                        case "PSUBD": if (!args.TryProcessVPUBinary(OPCode.VPU_SUB, 2, true, true, false)) return args.res; break;
+                        case "PSUBW": if (!args.TryProcessVPUBinary(OPCode.VPU_SUB, 1, true, true, false)) return args.res; break;
+                        case "PSUBB": if (!args.TryProcessVPUBinary(OPCode.VPU_SUB, 0, true, true, false)) return args.res; break;
+
+                        case "PSUBSW": if (!args.TryProcessVPUBinary(OPCode.VPU_SUBS, 1, true, true, false)) return args.res; break;
+                        case "PSUBSB": if (!args.TryProcessVPUBinary(OPCode.VPU_SUBS, 0, true, true, false)) return args.res; break;
+
+                        case "PSUBUSW": if (!args.TryProcessVPUBinary(OPCode.VPU_SUBUS, 1, true, true, false)) return args.res; break;
+                        case "PSUBUSB": if (!args.TryProcessVPUBinary(OPCode.VPU_SUBUS, 0, true, true, false)) return args.res; break;
+
                         // misc instructions
 
                         case "DEBUG_CPU": if (!args.TryProcessNoArgOp(OPCode.DEBUG, true, 0)) return args.res; break;

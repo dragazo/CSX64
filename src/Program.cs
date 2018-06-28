@@ -570,10 +570,10 @@ namespace CSX64
                 computer.GetFD(0).Open(Console.OpenStandardInput(), false, false); 
                 computer.GetFD(1).Open(Console.OpenStandardOutput(), false, false);
                 computer.GetFD(2).Open(Console.OpenStandardError(), false, false);
-
+                
                 // begin execution
                 while (computer.Tick()) ;
-
+                
                 // if there was an error
                 if (computer.Error != ErrorCode.None)
                 {
