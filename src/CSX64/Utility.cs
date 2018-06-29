@@ -196,6 +196,16 @@ namespace CSX64
         }
 
         /// <summary>
+        /// Gets the amount to offset address by to make it a multiple of size. if address is already a multiple of size, returns 0.
+        /// </summary>
+        /// <param name="address">the address to examine</param>
+        /// <param name="size">the size to align to</param>
+        public static UInt64 AlignOffset(UInt64 address, UInt64 size)
+        {
+            UInt64 pos = address % size;
+            return pos == 0 ? 0 : size - pos;
+        }
+        /// <summary>
         /// Where address is the starting point, returns the next address aligned to the specified size
         /// </summary>
         /// <param name="address">the starting address</param>
@@ -203,12 +213,16 @@ namespace CSX64
         /// <returns></returns>
         public static UInt64 Align(UInt64 address, UInt64 size)
         {
-            // get position in alignment block
-            UInt64 pos = address % size;
-            if (pos == 0) return address;
-
-            // pad to reach the next boundary
-            return address + (size - pos);
+            return address + AlignOffset(address, size);
+        }
+        /// <summary>
+        /// Adds the specified amount of zeroed padding (in bytes) to the array
+        /// </summary>
+        /// <param name="arr">the data array to pad</param>
+        /// <param name="count">the amount of padding in bytes</param>
+        public static void Pad(this List<byte> arr, UInt64 count)
+        {
+            for (; count > 0; --count) arr.Add(0);
         }
         /// <summary>
         /// Pads the array with 0's until the length is a multiple of the specified size
@@ -217,12 +231,7 @@ namespace CSX64
         /// <param name="size">the size to align to</param>
         public static void Align(this List<byte> arr, UInt64 size)
         {
-            // get position in alignment block
-            int pos = arr.Count % (int)size;
-            if (pos == 0) return;
-
-            // pad to reach the next boundary
-            for (int i = (int)size - pos; i > 0; --i) arr.Add(0);
+            arr.Pad(AlignOffset((UInt64)arr.Count, size));
         }
 
         /// <summary>

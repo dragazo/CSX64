@@ -4321,9 +4321,10 @@ namespace CSX64
             }
 
             // account for segment alignments
-            text.Align(rodataalign);
-            rodata.Align(dataalign);
-            data.Align(bssalign);
+            text.Pad(AlignOffset((UInt64)(text.Count), rodataalign));
+            rodata.Pad(AlignOffset((UInt64)(text.Count + rodata.Count), dataalign));
+            data.Pad(AlignOffset((UInt64)(text.Count + rodata.Count + data.Count), bssalign));
+            bsslen += AlignOffset((UInt64)(text.Count + rodata.Count + data.Count + (int)bsslen), 2); // the whole executable is 16-bit aligned (for stack)
 
             // now that we're done merging we need to define segment offsets in the result
             foreach (var entry in included)
