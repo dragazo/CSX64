@@ -115,6 +115,23 @@ namespace CSX64
         internal UInt32 BssLen = 0;
 
         /// <summary>
+        /// The largest alignment in the text segment
+        /// </summary>
+        internal UInt32 TextAlign = 1;
+        /// <summary>
+        /// The largest alignment in the rodata segment
+        /// </summary>
+        internal UInt32 RodataAlign = 1;
+        /// <summary>
+        /// The largest alignment in the data segment
+        /// </summary>
+        internal UInt32 DataAlign = 1;
+        /// <summary>
+        /// The largest alignment in the bss segment
+        /// </summary>
+        internal UInt32 BSSAlign = 1;
+
+        /// <summary>
         /// Marks that this object file is in a valid, usable state
         /// </summary>
         public bool Clean { get; internal set; } = false;
@@ -181,6 +198,12 @@ namespace CSX64
 
             // write length of bss
             writer.Write(obj.BssLen);
+
+            // write alignments
+            writer.Write(obj.TextAlign);
+            writer.Write(obj.RodataAlign);
+            writer.Write(obj.DataAlign);
+            writer.Write(obj.BSSAlign);
         }
         /// <summary>
         /// Reads a binary representation of an object file from the stream
@@ -256,6 +279,12 @@ namespace CSX64
 
             // read the length of bss segment
             obj.BssLen = reader.ReadUInt32();
+
+            // read alignments
+            if (!(obj.TextAlign = reader.ReadUInt32()).IsPowerOf2()) throw new FormatException("Object file was corrupted");
+            if (!(obj.RodataAlign = reader.ReadUInt32()).IsPowerOf2()) throw new FormatException("Object file was corrupted");
+            if (!(obj.DataAlign = reader.ReadUInt32()).IsPowerOf2()) throw new FormatException("Object file was corrupted");
+            if (!(obj.BSSAlign = reader.ReadUInt32()).IsPowerOf2()) throw new FormatException("Object file was corrupted");
 
             // validate the object
             obj.Clean = true;
@@ -1495,7 +1524,7 @@ namespace CSX64
             {
                 switch (current_seg)
                 {
-                    // text and data segments are writable
+                    // text and ro/data segments are writable
                     case AsmSegment.TEXT: file.Text.Append(size, val); return true;
                     case AsmSegment.RODATA: file.Rodata.Append(size, val); return true;
                     case AsmSegment.DATA: file.Data.Append(size, val); return true;
@@ -1504,6 +1533,7 @@ namespace CSX64
                     default: res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to write to the {current_seg} segment"); return false;
                 }
             }
+
             private bool TryAppendExpr(UInt64 size, Expr expr, List<HoleData> holes, List<byte> segment)
             {
                 string err = null; // evaluation error parsing location
@@ -1543,6 +1573,33 @@ namespace CSX64
                 if ((a & 0x80) != 0) { if (!TryAppendExpr(Size((a >> 2) & 3), hole)) return false; }
 
                 return true;
+            }
+            public bool TryAlign(UInt64 size)
+            {
+                // it's really important that size is a power of 2, so do a (hopefully redundant) check
+                if (!size.IsPowerOf2()) throw new ArgumentException("alignment size must be a power of 2");
+
+                switch (current_seg)
+                {
+                    case AsmSegment.TEXT:
+                        file.Text.Align(size);
+                        file.TextAlign = (UInt32)Math.Max(file.TextAlign, size);
+                        return true;
+                    case AsmSegment.RODATA:
+                        file.Rodata.Align(size);
+                        file.RodataAlign = (UInt32)Math.Max(file.RodataAlign, size);
+                        return true;
+                    case AsmSegment.DATA:
+                        file.Data.Align(size);
+                        file.DataAlign = (UInt32)Math.Max(file.DataAlign, size);
+                        return true;
+                    case AsmSegment.BSS:
+                        file.BssLen = (UInt32)Align(file.BssLen, size);
+                        file.BSSAlign = (UInt32)Math.Max(file.BSSAlign, size);
+                        return true;
+
+                    default: res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to align the {current_seg} segment"); return false;
+                }
             }
 
             public static bool TryGetOp(string token, int pos, out Expr.OPs op, out int oplen)
@@ -2357,6 +2414,25 @@ namespace CSX64
                 }
 
                 return true;
+            }
+
+            public bool TryProcessAlignXX(UInt64 size)
+            {
+                if (args.Length != 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected no operands"); return false; }
+
+                return TryAlign(size);
+            }
+            public bool TryProcessAlign()
+            {
+                if (args.Length != 1) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: ALIGN expected 1 operand"); return false; }
+
+                if (!TryParseInstantImm(args[0], out UInt64 val, out bool floating)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: ALIGN value must be instant"); return false; }
+                if (floating) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Alignment size cannot be floating-point"); return false; }
+                if (val == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Attempt to align to a multiple of zero"); return false; }
+
+                if (!val.IsPowerOf2()) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Alignment value must be a power of 2"); return false; }
+
+                return TryAlign(val);
             }
 
             public bool TryProcessGlobal()
@@ -3631,6 +3707,16 @@ namespace CSX64
                         case "GLOBAL": if (!args.TryProcessGlobal()) return args.res; goto op_done;
                         case "EXTERN": if (!args.TryProcessExtern()) return args.res; goto op_done;
 
+                        case "ALIGN": if (!args.TryProcessAlign()) return args.res; goto op_done;
+
+                        case "ALIGNB": goto op_done;
+                        case "ALIGNW": if (!args.TryProcessAlignXX(2)) return args.res; goto op_done;
+                        case "ALIGND": if (!args.TryProcessAlignXX(4)) return args.res; goto op_done;
+                        case "ALIGNQ": if (!args.TryProcessAlignXX(8)) return args.res; goto op_done;
+                        case "ALIGNX": if (!args.TryProcessAlignXX(16)) return args.res; goto op_done;
+                        case "ALIGNY": if (!args.TryProcessAlignXX(32)) return args.res; goto op_done;
+                        case "ALIGNZ": if (!args.TryProcessAlignXX(64)) return args.res; goto op_done;
+
                         case "DB": if (!args.TryProcessDeclare(1)) return args.res; goto op_done;
                         case "DW": if (!args.TryProcessDeclare(2)) return args.res; goto op_done;
                         case "DD": if (!args.TryProcessDeclare(4)) return args.res; goto op_done;
@@ -4125,12 +4211,18 @@ namespace CSX64
             List<byte> data = new List<byte>();
             UInt64 bsslen = 0;
 
+            // segment alignments
+            UInt64 textalign = 1;
+            UInt64 rodataalign = 1;
+            UInt64 dataalign = 1;
+            UInt64 bssalign = 1;
+
             // a table for relating global symbols to their object file
             var global_to_obj = new Dictionary<string, ObjectFile>();
 
             // the queue of object files that need to be added to the executable
             var include_queue = new Queue<ObjectFile>();
-            // a table for relating included object files to their beginning positions in the resulting binary (text, data, bss) tuples
+            // a table for relating included object files to their beginning positions in the resulting binary (text, rodata, data, bss) tuples
             var included = new Dictionary<ObjectFile, Tuple<UInt64, UInt64, UInt64, UInt64>>();
 
             // parsing locations for evaluation
@@ -4170,7 +4262,8 @@ namespace CSX64
             // make sure we start the merge process with the main object file
             include_queue.Enqueue(main_obj);
 
-            // add a hole for the call location of the header
+            // add a hole for the call location of the header (must first fix text alignment)
+            text.Align(main_obj.TextAlign);
             main_obj.TextHoles.Add(new HoleData() { Address = 2 - (UInt32)text.Count, Size = 8, Expr = new Expr() { Token = entry_point }, Line = -1 });
 
             // -- merge things -- //
@@ -4182,6 +4275,18 @@ namespace CSX64
                 ObjectFile obj = include_queue.Dequeue();
                 // all included files are dirty
                 obj.Clean = false;
+
+                // account for alignment requirements
+                text.Align(obj.TextAlign);
+                rodata.Align(obj.RodataAlign);
+                data.Align(obj.DataAlign);
+                bsslen = Align(bsslen, obj.BSSAlign);
+
+                // update segment alignments
+                textalign = Math.Max(textalign, obj.TextAlign);
+                rodataalign = Math.Max(rodataalign, obj.RodataAlign);
+                dataalign = Math.Max(dataalign, obj.DataAlign);
+                bssalign = Math.Max(bssalign, obj.BSSAlign);
 
                 // add it to the set of included files
                 included.Add(obj, new Tuple<UInt64, UInt64, UInt64, UInt64>((UInt64)text.Count, (UInt64)rodata.Count, (UInt64)data.Count, bsslen));
@@ -4214,6 +4319,11 @@ namespace CSX64
                     else return new LinkResult(LinkError.MissingSymbol, $"No global symbol found to match external symbol \"{external}\"");
                 }
             }
+
+            // account for segment alignments
+            text.Align(rodataalign);
+            rodata.Align(dataalign);
+            data.Align(bssalign);
 
             // now that we're done merging we need to define segment offsets in the result
             foreach (var entry in included)
@@ -4301,7 +4411,7 @@ namespace CSX64
             }
 
             // -- finalize things -- //
-            
+
             // allocate executable space (header + text + data)
             exe = new byte[32 + (UInt64)text.Count + (UInt64)rodata.Count + (UInt64)data.Count];
 

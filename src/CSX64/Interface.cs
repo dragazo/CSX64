@@ -295,7 +295,7 @@ namespace CSX64
             // fetch the instruction
             if (!GetMemAdv(1, out op)) return false;
 
-            //Console.WriteLine($"{RIP:x8} - {(OPCode)op}\n");
+            //Console.WriteLine($"{RIP:x8} - {(OPCode)op}");
 
             // switch through the opcodes
             switch ((OPCode)op)

@@ -30,6 +30,15 @@ namespace CSX64
             return val != 0 && (val & (val - 1)) == 0;
         }
         /// <summary>
+        /// Returns true if this value is a power of two. (zero returns false)
+        /// </summary>
+        /// <param name="val">the value to test</param>
+        public static bool IsPowerOf2(this UInt32 val)
+        {
+            return val != 0 && (val & (val - 1)) == 0;
+        }
+
+        /// <summary>
         /// Extracts 2 distinct powers of 2 from the specified value. Returns true if the value is made up of exactly two non-zero powers of 2.
         /// </summary>
         /// <param name="val">the value to process</param>
@@ -184,6 +193,36 @@ namespace CSX64
                 arr.Add((byte)val);
                 val >>= 8;
             }
+        }
+
+        /// <summary>
+        /// Where address is the starting point, returns the next address aligned to the specified size
+        /// </summary>
+        /// <param name="address">the starting address</param>
+        /// <param name="size">the size to align to</param>
+        /// <returns></returns>
+        public static UInt64 Align(UInt64 address, UInt64 size)
+        {
+            // get position in alignment block
+            UInt64 pos = address % size;
+            if (pos == 0) return address;
+
+            // pad to reach the next boundary
+            return address + (size - pos);
+        }
+        /// <summary>
+        /// Pads the array with 0's until the length is a multiple of the specified size
+        /// </summary>
+        /// <param name="arr">the array to align</param>
+        /// <param name="size">the size to align to</param>
+        public static void Align(this List<byte> arr, UInt64 size)
+        {
+            // get position in alignment block
+            int pos = arr.Count % (int)size;
+            if (pos == 0) return;
+
+            // pad to reach the next boundary
+            for (int i = (int)size - pos; i > 0; --i) arr.Add(0);
         }
 
         /// <summary>
