@@ -816,8 +816,8 @@ namespace CSX64
             UInt64 res = Truncate(a + b, sizecode);
 
             UpdateFlagsZSP(res, sizecode);
-            CF = res < a && res < b; // if overflow is caused, some of one value must go toward it, so the truncated result must necessarily be less than both args
-            AF = (res & 0xf) < (a & 0xf) && (res & 0xf) < (b & 0xf); // AF is just like CF but only the low nibble
+            CF = res < a;
+            AF = (res & 0xf) < (a & 0xf); // AF is just like CF but only the low nibble
             OF = Positive(a, sizecode) == Positive(b, sizecode) && Positive(a, sizecode) != Positive(res, sizecode);
 
             return StoreBinaryOpFormatNew(s1, s2, m, res);
@@ -2665,7 +2665,7 @@ namespace CSX64
             res = (a + b) & tmask; // truncated for logic below
 
             // if there was an over/underflow, handle saturation cases
-            if (res < a && res < b) res = tmask;
+            if (res < a) res = tmask;
 
             return true;
         }

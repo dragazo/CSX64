@@ -4068,10 +4068,20 @@ namespace CSX64
                         case "MULPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FMUL, 2, true, true, false)) return args.res; break;
                         case "DIVPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FDIV, 2, true, true, false)) return args.res; break;
 
-                        case "PAND": case "ANDPD": case "ANDPS": if (!args.TryProcessVPUBinary(OPCode.VPU_AND, 3, true, true, false)) return args.res; break;
-                        case "POR": case "ORPD": case "ORPS": if (!args.TryProcessVPUBinary(OPCode.VPU_OR, 3, true, true, false)) return args.res; break;
-                        case "PXOR": case "XORPD": case "XORPS": if (!args.TryProcessVPUBinary(OPCode.VPU_OR, 3, true, true, false)) return args.res; break;
-                        case "PANDN": case "ANDNPD": case "ANDNPS": if (!args.TryProcessVPUBinary(OPCode.VPU_ANDN, 3, true, true, false)) return args.res; break;
+                        case "PAND": if (!args.TryProcessVPUBinary(OPCode.VPU_AND, 3, false, true, false)) return args.res; break;
+                        case "POR": if (!args.TryProcessVPUBinary(OPCode.VPU_OR, 3, false, true, false)) return args.res; break;
+                        case "PXOR": if (!args.TryProcessVPUBinary(OPCode.VPU_XOR, 3, false, true, false)) return args.res; break;
+                        case "PANDN": if (!args.TryProcessVPUBinary(OPCode.VPU_ANDN, 3, false, true, false)) return args.res; break;
+
+                        case "PANDQ": case "ANDPD": if (!args.TryProcessVPUBinary(OPCode.VPU_AND, 3, true, true, false)) return args.res; break;
+                        case "PORQ": case "ORPD": if (!args.TryProcessVPUBinary(OPCode.VPU_OR, 3, true, true, false)) return args.res; break;
+                        case "PXORQ": case "XORPD": if (!args.TryProcessVPUBinary(OPCode.VPU_XOR, 3, true, true, false)) return args.res; break;
+                        case "PANDNQ": case "ANDNPD": if (!args.TryProcessVPUBinary(OPCode.VPU_ANDN, 3, true, true, false)) return args.res; break;
+
+                        case "PANDD": case "ANDPS": if (!args.TryProcessVPUBinary(OPCode.VPU_AND, 2, true, true, false)) return args.res; break;
+                        case "PORD": case "ORPS": if (!args.TryProcessVPUBinary(OPCode.VPU_OR, 2, true, true, false)) return args.res; break;
+                        case "PXORD": case "XORPS": if (!args.TryProcessVPUBinary(OPCode.VPU_XOR, 2, true, true, false)) return args.res; break;
+                        case "PANDND": case "ANDNPS": if (!args.TryProcessVPUBinary(OPCode.VPU_ANDN, 2, true, true, false)) return args.res; break;
 
                         case "PADDQ": if (!args.TryProcessVPUBinary(OPCode.VPU_ADD, 3, true, true, false)) return args.res; break;
                         case "PADDD": if (!args.TryProcessVPUBinary(OPCode.VPU_ADD, 2, true, true, false)) return args.res; break;
