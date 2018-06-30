@@ -904,23 +904,24 @@ namespace CSX64
             switch (sizecode)
             {
                 case 0:
-                    res = AL * a;
+                    res = (sbyte)AL * a;
                     AX = (UInt16)res;
                     CF = OF = res != (sbyte)res;
                     break;
                 case 1:
-                    res = AX * a;
+                    res = (Int16)AX * a;
                     DX = (UInt16)(res >> 16); AX = (UInt16)res;
                     CF = OF = res != (Int16)res;
                     break;
                 case 2:
-                    res = EAX * a;
+                    res = (Int32)EAX * a;
                     EDX = (UInt32)(res >> 32); EAX = (UInt32)res;
                     CF = OF = res != (Int32)res;
                     break;
                 case 3:
-                    full = new BigInteger(RAX) * a;
-                    RDX = (UInt64)(full >> 64); RAX = (UInt64)(full & 0xffffffffffffffff);
+                    full = new BigInteger((Int64)RAX) * a;
+                    RDX = (UInt64)((full >> 64) & 0xfffffffffffffffful);
+                    RAX = (UInt64)(full & 0xfffffffffffffffful);
                     CF = OF = full != (Int64)RAX;
                     break;
             }
@@ -1079,13 +1080,13 @@ namespace CSX64
             switch ((s >> 2) & 3)
             {
                 case 0:
-                    full = AX;
+                    full = (Int16)AX;
                     quo = full / a; rem = full % a;
                     if (quo != (sbyte)quo) { Terminate(ErrorCode.ArithmeticError); return false; }
                     AL = (byte)quo; AH = (byte)rem;
                     break;
                 case 1:
-                    full = (DX << 16) | AX;
+                    full = ((Int32)DX << 16) | AX;
                     quo = full / a; rem = full % a;
                     if (quo != (Int16)quo) { Terminate(ErrorCode.ArithmeticError); return false; }
                     AX = (UInt16)quo; DX = (UInt16)rem;
@@ -1097,10 +1098,10 @@ namespace CSX64
                     EAX = (UInt32)quo; EDX = (UInt32)rem;
                     break;
                 case 3:
-                    bigfull = (new BigInteger((Int64)RDX) << 64) | (Int64)RAX;
+                    bigfull = (new BigInteger((Int64)RDX) << 64) | RAX;
                     bigquo = BigInteger.DivRem(bigfull, a, out bigrem);
                     if (bigquo > Int64.MaxValue || bigquo < Int64.MinValue) { Terminate(ErrorCode.ArithmeticError); return false; }
-                    RAX = (UInt64)bigquo; RDX = (UInt64)bigrem;
+                    RAX = (UInt64)(Int64)bigquo; RDX = (UInt64)(Int64)bigrem;
                     break;
             }
 
