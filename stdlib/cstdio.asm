@@ -9,7 +9,7 @@ global rename
 ;     int fd; (-1 for none)
 ;     int bpos; (pos for reading, len for writing)
 ;     char buffer[1016];
-FILE:
+FILE: equ 0
     .fd: equ 0
     .bpos: equ 4
     .buffer: equ 8
@@ -68,6 +68,6 @@ fopen:
 
 segment .rodata
 
-fopen_readd
+
 
 

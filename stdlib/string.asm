@@ -1,11 +1,7 @@
 ; source = http://www.cplusplus.com/reference/cstring/
-; todo: strcoll
+; todo: strcoll (these 2 are less important)
 ;       strxfrm
-;       strcspn
-;       strpbrk
-;       strrchr
-;       strspn
-;       strstr
+;
 ;       strtok
 ;       
 ;       + testing
@@ -25,6 +21,11 @@ global strncmp
 
 global memchr
 global strchr
+global strrchr
+global strcspn
+global strspn
+global strstr
+global strpbrk
 
 global memset
 global strerror
@@ -341,15 +342,167 @@ strchr:
         
     .ret_null: xor rax, rax
     .ret: ret
+
+; char *strrchr (char *str, int character);
+strrchr:
+    push rdi
+    push rsi
+    call strlen ; get string length
+    pop rsi
+    pop rdi
+    
+    ; store str pointer in rbx
+    mov rbx, rdi
+    ; make rdi point to end of string
+    add rdi, rax
+    dec rdi
+    
+    .top:
+        ; get a character
+        mov al, [rdi]
         
+        ; if it's the value, return str
+        cmp al, sil
+        move rax, rdi
+        je .ret
         
+        ; if back at start of string, we're done searching
+        cmp rdi, rbx
+        je .ret_null
         
+        ; dec str and on to next char
+        dec rdi
+        jmp .top
         
+    .ret_null: xor rax, rax
+    .ret: ret
+
+; size_t strcspn(const char *str1, const char *str2);
+strcspn:
+    ; look through each character in str1
+    xor rax, rax
+    .str1.top:
+        mov cl, [rdi + rax] ; str1 char
         
+        ; look through each character in str2
+        xor rbx, rbx
+        .str2.top:
+            mov dl, [rsi + rbx] ; str2 char
+            
+            ; if this is a match, return index in str1
+            cmp dl, cl
+            je .ret
+            
+            ; if st2 char is non-null, loop in str2
+            inc rbx
+            cmp dl, 0
+            jnz .str2.top
+        ; loop in str1
+        inc rax
+        jmp .str1.top
         
+    .ret: ret
         
+; size_t strspn(const char *str1, const char *str2);
+strspn:
+    ; look through each character in str1
+    xor rax, rax
+    .str1.top:
+        mov cl, [rdi + rax] ; str1 char
         
+        ; look through each character in str2
+        xor rbx, rbx
+        .str2.top:
+            mov dl, [rsi + rbx] ; str2 character
+            
+            ; if str2 char is null, we failed to match - return index in str1
+            cmp dl, 0
+            je .ret
+            
+            ; if it matches, loop in str1
+            cmp dl, cl
+            je .str1.aft
+            
+            ; loop in str2
+            inc rbx
+            jmp .str2.top
+        .str1.aft:
+        ; loop in str1
+        inc rax
+        jmp .str1.top
         
+    .ret: ret
+
+; char *strstr(const char * str1, const char * str2);
+strstr:
+    ; for each position in str1
+    .str1.top:
+        ; look for a match with str2
+        xor rax, rax
+        .match.top:
+            mov cl, [rdi + rax] ; str1 char
+            mov dl, [rsi + rax] ; str2 char
+            
+            ; if str2 char is null, we found a match
+            cmp dl, 0
+            jz .ret
+            
+            ; if str1 char is null, return null
+            cmp cl, 0
+            jz .ret_null
+            
+            ; otherwise, if they don't match, loop in str1
+            cmp cl, dl
+            jne .str1.aft
+            
+            ; they matched - loop in match
+            inc rax
+            jmp .match.top
+        .str1.aft:
+        inc rdi
+        jmp .str1.top
+    
+    .ret_null: xor rax, rax
+    .ret: ret
+
+; char *strpbrk(const char *str1, const char *str2);
+strpbrk:
+    ; for each character in str1
+    .str1.top:
+        mov cl, [rdi] ; str1 char
+        
+        ; if str1 char is null, return null
+        cmp cl, 0
+        jz .ret_null
+        
+        ; look for a match in str2
+        xor rcx, rcx
+        .match.top:
+            mov dl, [rsi + rcx] ; str2 char
+            
+            ; if str2 char is null, no match - loop in str1
+            cmp dl, 0
+            jz .str1.aft
+            
+            ; if it doesn't match, loop in match
+            cmp cl, dl
+            jne .match.aft
+            
+            ; otherwise they match - return pointer in str1
+            mov rax, rdi
+            ret
+            
+            .match.aft:
+            inc rcx
+            jmp .match.top
+            
+        .str1.aft:
+        inc rdi
+        jmp .str1.top
+    
+    .ret_null: xor rax, rax
+    .ret: ret
+
 
 
 

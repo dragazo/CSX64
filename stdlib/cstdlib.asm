@@ -1,12 +1,13 @@
 global malloc
 global free
 
-; (rdi:64 size) -> (rax:64 ptr or null if fail)
-; allocates a number of bytes of contiguous dynamic storage space
-; returns a pointer to the start of the allocated data
-; indexing outside of this range is undefined behavior
+; --------------------
+
+segment .text
+
+; void *malloc(unsigned long size);
 malloc:
-	; cannot allocate 0 bytes
+	; allocating 0 returns null
 	cmp rdi, 0
 	jnz .begin
 	xor rax, rax
@@ -38,10 +39,7 @@ malloc:
 		lea rax, [rcx+9]      ; store start of bucket data for ret
 	.end: ret
 
-; (rdi:64 address) -> ()
-; frees the memory provided by malloc
-; undefined if used on anything not returned by malloc
-; noop on null
+; void free(void *ptr);
 free:
 	cmp rdi, 0 ; cmp 0
 	jz .end
