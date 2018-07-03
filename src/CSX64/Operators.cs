@@ -2498,7 +2498,7 @@ namespace CSX64
         /*
         [5: dest][1: aligned][2: dest_size]   [1: has_mask][1: zmask][1: scalar][1:][2: elem_size][1:][1: mem]   ([count: mask])   [3:][5: src1]
             mem = 0: [3:][5: src2]   dest <- f(src1, src2)
-            mem = 1: [address]       dest <- F(src1, M[address])
+            mem = 1: [address]       dest <- f(src1, M[address])
         */
         private bool ProcessVPUBinary(UInt64 elem_size_mask, VPUBinaryDelegate func)
         {
@@ -2686,8 +2686,9 @@ namespace CSX64
         }
         private bool __TryPerformVEC_SUBUS(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
         {
-            // refer to addition form
-            return __TryPerformVEC_ADDUS(elem_sizecode, out res, a, Truncate(~b + 1, elem_sizecode));
+            // handle unsigned sub saturation
+            res = a > b ? a - b : 0;
+            return true;
         }
 
         private bool TryProcessVEC_SUB() => ProcessVPUBinary(15, __TryPerformVEC_SUB);
