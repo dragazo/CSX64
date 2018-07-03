@@ -1656,7 +1656,7 @@ namespace CSX64
                 // if nothing found, fail
                 return false;
             }
-            public bool TryParseImm(string token, out Expr expr)
+            private bool __TryParseImm(string token, out Expr expr)
             {
                 expr = null; // initially-nulled result
 
@@ -1738,7 +1738,7 @@ namespace CSX64
                     if (token[pos] == '(')
                     {
                         // parse the inside into temp
-                        if (!TryParseImm(token.Substring(pos + 1, end - pos - 2), out temp)) return false;
+                        if (!__TryParseImm(token.Substring(pos + 1, end - pos - 2), out temp)) return false;
                     }
                     // otherwise is value
                     else
@@ -1876,11 +1876,25 @@ namespace CSX64
 
                 return true;
             }
-            public bool TryParseInstantImm(string token, out UInt64 val, out bool floating)
+            public bool TryParseImm(string token, out Expr expr, out UInt64 sizecode, out bool explicit_size)
+            {
+                sizecode = 3; explicit_size = false; // initially no explicit size
+
+                // handle explicit sizes directives
+                string utoken = token.ToUpper();
+                if (utoken.StartsWithToken("BYTE")) { sizecode = 0; explicit_size = true; token = token.Substring(4).TrimStart(); }
+                else if (utoken.StartsWithToken("WORD")) { sizecode = 1; explicit_size = true; token = token.Substring(4).TrimStart(); }
+                else if (utoken.StartsWithToken("DWORD")) { sizecode = 2; explicit_size = true; token = token.Substring(5).TrimStart(); }
+                else if (utoken.StartsWithToken("QWORD")) { sizecode = 3; explicit_size = true; token = token.Substring(5).TrimStart(); }
+
+                // refer to helper
+                return __TryParseImm(token, out expr);
+            }
+            public bool TryParseInstantImm(string token, out UInt64 val, out bool floating, out UInt64 sizecode, out bool explicit_size)
             {
                 string err = null; // error location for evaluation
 
-                if (!TryParseImm(token, out Expr hole)) { val = 0; floating = false; return false; }
+                if (!TryParseImm(token, out Expr hole, out sizecode, out explicit_size)) { val = 0; floating = false; return false; }
                 if (!hole.Evaluate(file.Symbols, out val, out floating, ref err)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to parse instant imm \"{token}\"\n-> {err}"); return false; }
 
                 return true;
@@ -1985,10 +1999,10 @@ namespace CSX64
             /// <param name="prefix">the prefix the imm is required to have</param>
             /// <param name="val">resulting value</param>
             /// <param name="floating">results in true if val is floating-point</param>
-            public bool TryParseInstantPrefixedImm(string token, string prefix, out UInt64 val, out bool floating)
+            public bool TryParseInstantPrefixedImm(string token, string prefix, out UInt64 val, out bool floating, out UInt64 sizecode, out bool explicit_size)
             {
-                val = 0;
-                floating = false;
+                val = sizecode = 0;
+                floating = explicit_size = false;
 
                 // must begin with prefix
                 if (!token.StartsWith(prefix)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Token did not start with \"{prefix}\" prefix: \"{token}\""); return false; }
@@ -2023,7 +2037,7 @@ namespace CSX64
                 if (end != token.Length) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Compound expressions used as prefixed expressions must be parenthesized \"{token}\""); return false; }
 
                 // prefix index must be instant imm
-                if (!TryParseInstantImm(token.Substring(prefix.Length), out val, out floating)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to parse instant prefixed imm \"{token}\"\n-> {res.ErrorMsg}"); return false; }
+                if (!TryParseInstantImm(token.Substring(prefix.Length), out val, out floating, out sizecode, out explicit_size)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to parse instant prefixed imm \"{token}\"\n-> {res.ErrorMsg}"); return false; }
 
                 return true;
             }
@@ -2264,21 +2278,14 @@ namespace CSX64
                 // must be of [*] format
                 if (token.Length < 3 || token[0] != '[' || token[token.Length - 1] != ']') { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Invalid address format encountered: {token}"); return false; }
 
-                UInt64 m1 = 0, r1 = UInt64.MaxValue, r2 = UInt64.MaxValue, sz = 3; // final register info - maxval denotes no value - m1 must default to 0 - sz defaults to 64-bit in the case that there's only an imm ptr_base
-                bool explicit_sz = false; // denotes that the ptr_base sizecode is explicit
+                UInt64 m1 = 0, r1 = UInt64.MaxValue, r2 = UInt64.MaxValue, sz; // final register info - maxval denotes no value - m1 must default to 0 - sz defaults to 64-bit in the case that there's only an imm ptr_base
+                bool explicit_sz; // denotes that the ptr_base sizecode is explicit
 
                 // extract the address internals
                 token = token.Substring(1, token.Length - 2);
 
-                // handle explicit ptr_base sizes
-                utoken = token.ToUpper();
-                if (utoken.StartsWithToken("BYTE")) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: 8-bit addressing is not allowed. Encountered explicit 8-bit designator"); return false; }
-                else if (utoken.StartsWithToken("WORD")) { sz = 1; explicit_sz = true; token = token.Substring(4).TrimStart(); }
-                else if (utoken.StartsWithToken("DWORD")) { sz = 2; explicit_sz = true; token = token.Substring(5).TrimStart(); }
-                else if (utoken.StartsWithToken("QWORD")) { sz = 3; explicit_sz = true; token = token.Substring(5).TrimStart(); }
-
                 // turn into an expression
-                if (!TryParseImm(token, out ptr_base)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse address expression\n-> {res.ErrorMsg}"); return false; }
+                if (!TryParseImm(token, out ptr_base, out sz, out explicit_sz)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse address expression\n-> {res.ErrorMsg}"); return false; }
 
                 // look through all the register names
                 foreach (var entry in CPURegisterInfo)
@@ -2319,10 +2326,13 @@ namespace CSX64
                     }
                 }
 
+                // -- apply final touches -- //
+
+                // if we still don't have an explicit address size code, use 64-bit
+                if (!explicit_sz) sz = 3;
+
                 // if we can evaluate the hole to zero, there is no hole (null it)
                 if (ptr_base.Evaluate(file.Symbols, out UInt64 _temp, out bool _btemp, ref utoken) && _temp == 0) ptr_base = null;
-
-                // -- apply final touches -- //
 
                 // [1: imm][1:][2: mult_1][2: size][1: r1][1: r2]   ([4: r1][4: r2])   ([size: imm])
 
@@ -2426,7 +2436,7 @@ namespace CSX64
             {
                 if (args.Length != 1) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: ALIGN expected 1 operand"); return false; }
 
-                if (!TryParseInstantImm(args[0], out UInt64 val, out bool floating)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: ALIGN value must be instant"); return false; }
+                if (!TryParseInstantImm(args[0], out UInt64 val, out bool floating, out UInt64 sizecode, out bool explicit_size)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: ALIGN value must be instant"); return false; }
                 if (floating) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Alignment size cannot be floating-point"); return false; }
                 if (val == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Attempt to align to a multiple of zero"); return false; }
 
@@ -2520,7 +2530,8 @@ namespace CSX64
                         if (size > 8) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to write a numeric value in an unsuported format"); return false; }
 
                         // get the value
-                        if (!TryParseImm(args[i], out expr)) return false;
+                        if (!TryParseImm(args[i], out expr, out UInt64 sizecode, out bool explicit_size)) return false;
+                        if (explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A size directive in this context is not allowed"); return false; }
 
                         // make one of them
                         if (!TryAppendExpr(size, expr)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
@@ -2534,7 +2545,7 @@ namespace CSX64
                 if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Reserve expected one arg"); return false; }
 
                 // parse the number to reserve
-                if (!TryParseInstantImm(args[0], out UInt64 count, out bool floating)) return false;
+                if (!TryParseInstantImm(args[0], out UInt64 count, out bool floating, out UInt64 sizecode, out bool explicit_size)) return false;
                 // make sure it's not floating
                 if (floating) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Reserve count cannot be floating-point"); return false; }
 
@@ -2552,7 +2563,8 @@ namespace CSX64
                 if (label_def == null) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: EQU requires a label to attach the expression to"); return false; }
 
                 // get the expression
-                if (!TryParseImm(args[0], out Expr expr)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: EQU expected an expression\n-> {res.ErrorMsg}"); return false; }
+                if (!TryParseImm(args[0], out Expr expr, out UInt64 sizecode, out bool explicit_size)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: EQU expected an expression\n-> {res.ErrorMsg}"); return false; }
+                if (explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A size directive in this context is not allowed"); return false; }
 
                 // inject the symbol
                 file.Symbols.Add(label_def, expr);
@@ -2597,8 +2609,9 @@ namespace CSX64
                 if (has_ext_op) { if (!TryAppendVal(1, ext_op)) return false; }
 
                 if (!TryParseCPURegister(args[0], out UInt64 dest, out UInt64 a_sizecode, out bool dest_high)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} expected a register as the first argument"); return false; }
-                if (!TryParseImm(args[2], out Expr imm)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} expected an imm as the third argument"); return false; }
+                if (!TryParseImm(args[2], out Expr imm, out UInt64 imm_sz, out bool imm_sz_explicit)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} expected an imm as the third argument"); return false; }
 
+                if (imm_sz_explicit && imm_sz != a_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size mismatch"); return false; }
                 if ((Size(a_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
 
                 UInt64 b_sizecode; // only used for ensuring no size conflicts (machine code only uses a_sizecode)
@@ -2626,7 +2639,7 @@ namespace CSX64
 
                 return true;
             }
-            public bool TryProcessBinaryOp(OPCode op, bool has_ext_op = false, UInt64 ext_op = 0, UInt64 sizemask = 15, int _b_sizecode = -1, bool allow_b_mem = true)
+            public bool TryProcessBinaryOp(OPCode op, bool has_ext_op = false, UInt64 ext_op = 0, UInt64 sizemask = 15, int _force_b_imm_az = -1, bool allow_b_mem = true)
             {
                 if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 2 args"); return false; }
 
@@ -2663,9 +2676,17 @@ namespace CSX64
                     // reg, imm
                     else
                     {
-                        if (!TryParseImm(args[1], out Expr imm)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as a register, memory value, or imm\n-> {res.ErrorMsg}"); return false; }
+                        if (!TryParseImm(args[1], out Expr imm, out b_sizecode, out explicit_size)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as a register, memory value, or imm\n-> {res.ErrorMsg}"); return false; }
 
-                        b_sizecode = _b_sizecode == -1 ? a_sizecode : (UInt64)_b_sizecode;
+                        if (_force_b_imm_az == -1)
+                        {
+                            if (explicit_size && a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Argument size missmatch"); return false; }
+                        }
+                        else
+                        {
+                            if (explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: An imm size directive is not allowed in this context"); return false; }
+                            b_sizecode = (UInt64)_force_b_imm_az;
+                        }
 
                         if (!TryAppendVal(1, (dest << 4) | (a_sizecode << 2) | (dest_high ? 2 : 0ul))) return false;
                         if (!TryAppendVal(1, (1 << 4))) return false;
@@ -2687,18 +2708,23 @@ namespace CSX64
                         if (!TryAppendAddress(a, b, ptr_base)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; };
                     }
                     // mem, mem
-                    else if (TryParseAddress(args[1], out UInt64 _a, out UInt64 _b, out Expr _ptr_base, out UInt64 _sc, out bool _exp_sz))
+                    else if (TryParseAddress(args[1], out UInt64 _a, out UInt64 _b, out Expr _ptr_base, out b_sizecode, out explicit_size))
                         { res = new AssembleResult(AssembleError.FormatError, $"line {line}: {op} does not support memory-to-memory"); return false; }
                     // mem, imm
                     else
                     {
-                        if (!explicit_size) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Data size could not be deduced"); return false; }
+                        if (!TryParseImm(args[1], out Expr imm, out b_sizecode, out explicit_size)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as a register, memory value, or imm\n-> {res.ErrorMsg}"); return false; }
 
+                        if (_force_b_imm_az == -1)
+                        {
+                            if (explicit_size && a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Argument size missmatch"); return false; }
+                        }
+                        else
+                        {
+                            if (explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: An imm size directive is not allowed in this context"); return false; }
+                            b_sizecode = (UInt64)_force_b_imm_az;
+                        }
                         if ((Size(a_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified data size"); return false; }
-                        
-                        if (!TryParseImm(args[1], out Expr imm)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as a register, memory value, or imm\n-> {res.ErrorMsg}"); return false; }
-
-                        b_sizecode = _b_sizecode == -1 ? a_sizecode : (UInt64)_b_sizecode;
 
                         if (!TryAppendVal(1, a_sizecode << 2)) return false;
                         if (!TryAppendVal(1, 4 << 4)) return false;
@@ -2743,7 +2769,7 @@ namespace CSX64
 
                 return true;
             }
-            public bool TryProcessIMMRM(OPCode op, bool has_ext_op = false, UInt64 ext_op = 0, UInt64 sizemask = 15, UInt64 imm_sizecode = 3)
+            public bool TryProcessIMMRM(OPCode op, bool has_ext_op = false, UInt64 ext_op = 0, UInt64 sizemask = 15, int default_size = -1)
             {
                 if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 1 arg"); return false; }
 
@@ -2763,8 +2789,11 @@ namespace CSX64
                 // mem
                 else if (TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out a_sizecode, out bool explicit_size))
                 {
-                    if (!explicit_size) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Data size could not be deduced"); return false; }
-
+                    if (!explicit_size)
+                    {
+                        if (default_size == -1) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce operand size"); return false; }
+                        else a_sizecode = (UInt64)default_size;
+                    }
                     if ((Size(a_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
 
                     if (!TryAppendVal(1, (a_sizecode << 2) | 3)) return false;
@@ -2773,10 +2802,17 @@ namespace CSX64
                 // imm
                 else
                 {
-                    if (!TryParseImm(args[0], out Expr imm)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as a register, memory value, or imm\n-> {res.ErrorMsg}"); return false; }
+                    if (!TryParseImm(args[0], out Expr imm, out a_sizecode, out explicit_size)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as a register, memory value, or imm\n-> {res.ErrorMsg}"); return false; }
 
-                    if (!TryAppendVal(1, (imm_sizecode << 2) | 2)) return false;
-                    if (!TryAppendExpr(Size(imm_sizecode), imm)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                    if (!explicit_size)
+                    {
+                        if (default_size == -1) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce operand size"); return false; }
+                        else a_sizecode = (UInt64)default_size;
+                    }
+                    if ((Size(a_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
+
+                    if (!TryAppendVal(1, (a_sizecode << 2) | 2)) return false;
+                    if (!TryAppendExpr(Size(a_sizecode), imm)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
                 }
 
                 return true;
@@ -2958,7 +2994,7 @@ namespace CSX64
                     if (!TryAppendVal(1, 0x80)) return false;
                 }
                 // reg/mem, imm
-                else if (TryParseImm(args[1], out Expr imm))
+                else if (TryParseImm(args[1], out Expr imm, out b_sizecode, out bool explicit_size))
                 {
                     // mask the shift count to 6 bits (we just need to make sure it can't set the CL flag)
                     imm = new Expr() { OP = Expr.OPs.BitAnd, Left = imm, Right = new Expr() { IntResult = 0x3f } };
@@ -3361,7 +3397,7 @@ namespace CSX64
                     arg = arg.Substring(0, pos).TrimEnd();
 
                     // parse the mask expression
-                    if (!TryParseImm(innards, out mask)) return false;
+                    if (!TryParseImm(innards, out mask, out UInt64 sizecode, out bool explicit_size)) return false;
                 }
 
                 return true;
@@ -3665,8 +3701,8 @@ namespace CSX64
             int pos = 0, end = 0; // position in code
 
             // potential parsing args for an instruction
-            UInt64 a = 0;
-            bool floating;
+            UInt64 a = 0, b = 0;
+            bool floating, btemp;
 
             string err = null; // error location for evaluation
 
@@ -3815,38 +3851,38 @@ namespace CSX64
 
                         case "XCHG": if (!args.TryProcessXCHG(OPCode.XCHG)) return args.res; break;
 
-                        case "JMP": if (!args.TryProcessIMMRM(OPCode.JMP, false, 0, 14)) return args.res; break;
+                        case "JMP": if (!args.TryProcessIMMRM(OPCode.JMP, false, 0, 14, 3)) return args.res; break;
 
-                        case "JZ": case "JE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 0, 14)) return args.res; break;
-                        case "JNZ": case "JNE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 1, 14)) return args.res; break;
-                        case "JS": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 2, 14)) return args.res; break;
-                        case "JNS": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 3, 14)) return args.res; break;
-                        case "JP": case "JPE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 4, 14)) return args.res; break;
-                        case "JNP": case "JPO": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 5, 14)) return args.res; break;
-                        case "JO": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 6, 14)) return args.res; break;
-                        case "JNO": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 7, 14)) return args.res; break;
-                        case "JC": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 8, 14)) return args.res; break;
-                        case "JNC": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 9, 14)) return args.res; break;
+                        case "JZ": case "JE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 0, 14, 3)) return args.res; break;
+                        case "JNZ": case "JNE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 1, 14, 3)) return args.res; break;
+                        case "JS": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 2, 14, 3)) return args.res; break;
+                        case "JNS": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 3, 14, 3)) return args.res; break;
+                        case "JP": case "JPE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 4, 14, 3)) return args.res; break;
+                        case "JNP": case "JPO": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 5, 14, 3)) return args.res; break;
+                        case "JO": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 6, 14, 3)) return args.res; break;
+                        case "JNO": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 7, 14, 3)) return args.res; break;
+                        case "JC": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 8, 14, 3)) return args.res; break;
+                        case "JNC": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 9, 14, 3)) return args.res; break;
 
-                        case "JB": case "JNAE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 10, 14)) return args.res; break;
-                        case "JBE": case "JNA": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 11, 14)) return args.res; break;
-                        case "JA": case "JNBE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 12, 14)) return args.res; break;
-                        case "JAE": case "JNB": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 13, 14)) return args.res; break;
+                        case "JB": case "JNAE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 10, 14, 3)) return args.res; break;
+                        case "JBE": case "JNA": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 11, 14, 3)) return args.res; break;
+                        case "JA": case "JNBE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 12, 14, 3)) return args.res; break;
+                        case "JAE": case "JNB": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 13, 14, 3)) return args.res; break;
 
-                        case "JL": case "JNGE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 14, 14)) return args.res; break;
-                        case "JLE": case "JNG": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 15, 14)) return args.res; break;
-                        case "JG": case "JNLE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 16, 14)) return args.res; break;
-                        case "JGE": case "JNL": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 17, 14)) return args.res; break;
+                        case "JL": case "JNGE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 14, 14, 3)) return args.res; break;
+                        case "JLE": case "JNG": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 15, 14, 3)) return args.res; break;
+                        case "JG": case "JNLE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 16, 14, 3)) return args.res; break;
+                        case "JGE": case "JNL": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 17, 14, 3)) return args.res; break;
 
-                        case "JCXZ": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 18, 14)) return args.res; break;
-                        case "JECXZ": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 19, 14)) return args.res; break;
-                        case "JRCXZ": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 20, 14)) return args.res; break;
+                        case "JCXZ": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 18, 14, 3)) return args.res; break;
+                        case "JECXZ": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 19, 14, 3)) return args.res; break;
+                        case "JRCXZ": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 20, 14, 3)) return args.res; break;
 
-                        case "LOOP": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, 0, 14)) return args.res; break;
-                        case "LOOPZ": case "LOOPE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, 1, 14)) return args.res; break;
-                        case "LOOPNZ": case "LOOPNE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, 2, 14)) return args.res; break;
+                        case "LOOP": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, 0, 14, 3)) return args.res; break;
+                        case "LOOPZ": case "LOOPE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, 1, 14, 3)) return args.res; break;
+                        case "LOOPNZ": case "LOOPNE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, 2, 14, 3)) return args.res; break;
 
-                        case "CALL": if (!args.TryProcessIMMRM(OPCode.CALL, false, 0, 14)) return args.res; break;
+                        case "CALL": if (!args.TryProcessIMMRM(OPCode.CALL, false, 0, 14, 3)) return args.res; break;
                         case "RET": if (!args.TryProcessNoArgOp(OPCode.RET)) return args.res; break;
 
                         case "PUSH": if (!args.TryProcessIMMRM(OPCode.PUSH, false, 0, 14)) return args.res; break;
@@ -3891,7 +3927,7 @@ namespace CSX64
 
                         case "CMP":
                             // if there are 2 args and the second one is an instant 0, we can make this a CMPZ instruction
-                            if (args.args.Length == 2 && args.TryParseInstantImm(args.args[1], out a, out floating) && a == 0)
+                            if (args.args.Length == 2 && args.TryParseInstantImm(args.args[1], out a, out floating, out b, out btemp) && a == 0)
                             {
                                 // set new args for the unary version
                                 args.args = new string[] { args.args[0] };
