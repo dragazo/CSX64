@@ -21,14 +21,6 @@ namespace CSX64
     {
         None, EmptyResult, SymbolRedefinition, MissingSymbol, FormatError
     }
-    internal enum PatchError
-    {
-        None, Unevaluated, Error
-    }
-    internal enum AsmSegment
-    {
-        INVALID = 0, TEXT = 1, RODATA = 2, DATA = 4, BSS = 8
-    }
 
     public struct AssembleResult
     {
@@ -308,6 +300,15 @@ namespace CSX64
     }
 
     // -----------------------------
+
+    internal enum PatchError
+    {
+        None, Unevaluated, Error
+    }
+    internal enum AsmSegment
+    {
+        INVALID = 0, TEXT = 1, RODATA = 2, DATA = 4, BSS = 8
+    }
 
     /// <summary>
     /// Represents an expression used to compute a value, with options for using a symbol table for lookup
@@ -706,6 +707,15 @@ namespace CSX64
             // refer to helper function
             return __Evaluate__(symbols, out res, out floating, ref err, new Stack<string>());
         }
+        /// <summary>
+        /// Returns true if the expression is evaluatable
+        /// </summary>
+        /// <param name="symbols">the symbols table for lookup</param>
+        public bool Evaluatable(Dictionary<string, Expr> symbols)
+        {
+            string err = null;
+            return Evaluate(symbols, out UInt64 res, out bool floating, ref err);
+        }
 
         /// <summary>
         /// Creates a replica of this expression tree
@@ -1057,6 +1067,8 @@ namespace CSX64
             Expr.ReadFrom(reader, out hole.Expr);
         }
     }
+
+    // -----------------------------
 
     public static class Assembly
     {
@@ -1480,14 +1492,14 @@ namespace CSX64
 
             public static bool IsValidName(string token, ref string err)
             {
-                // can't be empty or over 255 chars long
-                if (token.Length == 0 || token.Length > 255) { err = $"Symbol \"{token}\" is too long"; return false; }
+                // can't be empty string
+                if (token.Length == 0) { err = $"Symbol name was empty string"; return false; }
 
                 // first char is underscore or letter
-                if (token[0] != '_' && !char.IsLetter(token[0])) { err = $"Symbol \"{token}\" contained an illegal character"; return false; }
+                if (token[0] != '_' && !char.IsLetter(token[0])) { err = $"Symbol contained an illegal character: {token}"; return false; }
                 // all other chars may additionally be numbers or periods
                 for (int i = 1; i < token.Length; ++i)
-                    if (token[i] != '_' && token[i] != '.' && !char.IsLetterOrDigit(token[i])) { err = $"Symbol \"{token}\" contained an illegal character"; return false; }
+                    if (token[i] != '_' && token[i] != '.' && !char.IsLetterOrDigit(token[i])) { err = $"Symbol contained an illegal character: {token}"; return false; }
 
                 return true;
             }
@@ -1502,10 +1514,10 @@ namespace CSX64
                     // local name can't be empty
                     if (!IsValidName(sub, ref err)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: {err}"); return false; }
                     // can't make a local symbol before any non-local ones exist
-                    if (last_nonlocal_label == null) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: Cannot define a local symbol before the first non-local symbol in the segment"); return false; }
+                    if (last_nonlocal_label == null) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: Local symbol encountered before any non-local declarations"); return false; }
 
                     // mutate the label
-                    label = $"{last_nonlocal_label}{label}";
+                    label = last_nonlocal_label + label;
                 }
 
                 return true;
@@ -1533,6 +1545,19 @@ namespace CSX64
                     default: res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to write to the {current_seg} segment"); return false;
                 }
             }
+            public bool TryAppendByte(byte val)
+            {
+                switch (current_seg)
+                {
+                    // text and ro/data segments are writable
+                    case AsmSegment.TEXT: file.Text.Add(val); return true;
+                    case AsmSegment.RODATA: file.Rodata.Add(val); return true;
+                    case AsmSegment.DATA: file.Data.Add(val); return true;
+
+                    // others are not
+                    default: res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to write to the {current_seg} segment"); return false;
+                }
+            }
 
             private bool TryAppendExpr(UInt64 size, Expr expr, List<HoleData> holes, List<byte> segment)
             {
@@ -1548,7 +1573,7 @@ namespace CSX64
                 {
                     case PatchError.None: break;
                     case PatchError.Unevaluated: holes.Add(data); break;
-                    case PatchError.Error: res = new AssembleResult(AssembleError.ArgError, $"line {line}: Error encountered while patching expression\n-> {err}"); return false;
+                    case PatchError.Error: res = new AssembleResult(AssembleError.ArgError, $"line {line}: {err}"); return false;
 
                     default: throw new ArgumentException("Unknown patch error encountered");
                 }
@@ -1574,6 +1599,7 @@ namespace CSX64
 
                 return true;
             }
+
             public bool TryAlign(UInt64 size)
             {
                 // it's really important that size is a power of 2, so do a (hopefully redundant) check
@@ -1599,6 +1625,18 @@ namespace CSX64
                         return true;
 
                     default: res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to align the {current_seg} segment"); return false;
+                }
+            }
+            public bool TryPad(UInt64 size)
+            {
+                switch (current_seg)
+                {
+                    case AsmSegment.TEXT: file.Text.Pad(size); return true;
+                    case AsmSegment.RODATA: file.Rodata.Pad(size); return true;
+                    case AsmSegment.DATA: file.Data.Pad(size); return false;
+                    case AsmSegment.BSS: file.BssLen += (UInt32)size; return true;
+
+                    default: res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to pad the {current_seg} segment"); return false;
                 }
             }
 
@@ -1895,7 +1933,7 @@ namespace CSX64
                 string err = null; // error location for evaluation
 
                 if (!TryParseImm(token, out Expr hole, out sizecode, out explicit_size)) { val = 0; floating = false; return false; }
-                if (!hole.Evaluate(file.Symbols, out val, out floating, ref err)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to parse instant imm \"{token}\"\n-> {err}"); return false; }
+                if (!hole.Evaluate(file.Symbols, out val, out floating, ref err)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to evaluate instant imm: {token}\n-> {err}"); return false; }
 
                 return true;
             }
@@ -2030,7 +2068,7 @@ namespace CSX64
                 else
                 {
                     // take all legal chars
-                    for (end = prefix.Length; end < token.Length && (char.IsLetterOrDigit(token[end]) || token[end] == '_'); ++end) ;
+                    for (end = prefix.Length; end < token.Length && (char.IsLetterOrDigit(token[end]) || token[end] == '_' || token[end] == '.'); ++end) ;
                 }
 
                 // make sure we consumed the entire string
@@ -2055,7 +2093,7 @@ namespace CSX64
                 // otherwise it's not a cpu register
                 else
                 {
-                    res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{token}\" as a cpu register");
+                    res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse as cpu register: {token}");
                     reg = sizecode = 0;
                     high = false;
                     return false;
@@ -2070,7 +2108,7 @@ namespace CSX64
                 }
                 else
                 {
-                    res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{token}\" as an fpu register");
+                    res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse as fpu register: {token}");
                     reg = 0;
                     return false;
                 }
@@ -2087,7 +2125,7 @@ namespace CSX64
                 // otherwise it's not a vpu register
                 else
                 {
-                    res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{token}\" as a vpu register");
+                    res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse as vpu register: {token}");
                     reg = sizecode = 0;
                     return false;
                 }
@@ -2296,9 +2334,6 @@ namespace CSX64
                     // if the register is present we need to do something with it
                     if (present)
                     {
-                        // 8-bit registers are not allowed
-                        if (entry.Value.Item2 == 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: 8-bit addressing is not allowed. Encountered register {entry.Key}"); return false; }
-
                         // if we have an explicit address component size to enforce
                         if (explicit_sz)
                         {
@@ -2322,7 +2357,7 @@ namespace CSX64
                         // if that falied, try r1
                         else if (r1 == UInt64.MaxValue) r1 = entry.Value.Item1;
                         // if nothing worked, both are full
-                        else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: An address expression may only use up to 2 registers"); return false; }
+                        else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: An address expression may use up to 2 registers"); return false; }
                     }
                 }
 
@@ -2330,6 +2365,8 @@ namespace CSX64
 
                 // if we still don't have an explicit address size code, use 64-bit
                 if (!explicit_sz) sz = 3;
+                // 8-bit addressing is not allowed
+                else if (sz == 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: 8-bit addressing is not allowed"); return false; }
 
                 // if we can evaluate the hole to zero, there is no hole (null it)
                 if (ptr_base.Evaluate(file.Symbols, out UInt64 _temp, out bool _btemp, ref utoken) && _temp == 0) ptr_base = null;
@@ -2349,9 +2386,9 @@ namespace CSX64
                 if (expr.IsLeaf)
                 {
                     // if it's already been evaluated or we know about it somehow, we're good
-                    if (expr.IsEvaluated || file.Symbols.ContainsKey(expr.Token) || VerifyLegalExpressionIgnores.Contains(expr.Token) || file.ExternalSymbols.Contains(expr.Token)) return true;
+                    if (expr.IsEvaluated || file.Symbols.ContainsKey(expr.Token) || file.ExternalSymbols.Contains(expr.Token) || VerifyLegalExpressionIgnores.Contains(expr.Token)) return true;
                     // otherwise we don't know what it is
-                    else { res = new AssembleResult(AssembleError.UnknownSymbol, $"Unknown symbol: \"{expr.Token}\""); return false; }
+                    else { res = new AssembleResult(AssembleError.UnknownSymbol, $"Unknown symbol: {expr.Token}"); return false; }
                 }
                 // otherwise children must be legal
                 else return VerifyLegalExpression(expr.Left) && (expr.Right == null || VerifyLegalExpression(expr.Right));
@@ -2363,19 +2400,15 @@ namespace CSX64
             {
                 // make sure all global symbols were actually defined prior to link-time
                 foreach (string global in file.GlobalSymbols)
-                    if (!file.Symbols.ContainsKey(global)) { res = new AssembleResult(AssembleError.UnknownSymbol, $"Global symbol \"{global}\" was never defined"); return false; }
+                    if (!file.Symbols.ContainsKey(global)) { res = new AssembleResult(AssembleError.UnknownSymbol, $"Global symbol was never defined: {global}"); return false; }
 
                 // make sure all symbol expressions were valid
-                foreach (var entry in file.Symbols)
-                    if (!VerifyLegalExpression(entry.Value)) return false;
+                foreach (var entry in file.Symbols) if (!VerifyLegalExpression(entry.Value)) return false;
 
                 // make sure all hole expressions were valid
-                foreach (HoleData hole in file.TextHoles)
-                    if (!VerifyLegalExpression(hole.Expr)) return false;
-                foreach (HoleData hole in file.RodataHoles)
-                    if (!VerifyLegalExpression(hole.Expr)) return false;
-                foreach (HoleData hole in file.DataHoles)
-                    if (!VerifyLegalExpression(hole.Expr)) return false;
+                foreach (HoleData hole in file.TextHoles) if (!VerifyLegalExpression(hole.Expr)) return false;
+                foreach (HoleData hole in file.RodataHoles) if (!VerifyLegalExpression(hole.Expr)) return false;
+                foreach (HoleData hole in file.DataHoles) if (!VerifyLegalExpression(hole.Expr)) return false;
 
                 // the hood is good
                 return true;
@@ -2385,9 +2418,32 @@ namespace CSX64
 
             public bool IsReservedSymbol(string symbol)
             {
+                // make the symbol uppercase (all reserved symbols are case insensitive)
                 symbol = symbol.ToUpper();
 
-                return CPURegisterInfo.ContainsKey(symbol) || FPURegisterInfo.ContainsKey(symbol) || VPURegisterInfo.ContainsKey(symbol);
+                // check against register dictionaries
+                if (CPURegisterInfo.ContainsKey(symbol) || FPURegisterInfo.ContainsKey(symbol) || VPURegisterInfo.ContainsKey(symbol)) return true;
+
+                // check against special tokens
+                switch (symbol)
+                {
+                    // size directives
+                    case "BYTE":
+                    case "WORD":
+                    case "DWORD":
+                    case "QWORD":
+                    case "XMMWORD":
+                    case "YMMWORD":
+                    case "ZMMWORD":
+
+                    // potential future size directives
+                    case "OWORD":
+                    case "TWORD":
+
+                        return true;
+
+                    default: return false;
+                }
             }
             public bool TryProcessLabel()
             {
@@ -2406,18 +2462,18 @@ namespace CSX64
                     if (!IsValidName(label_def, ref err)) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: {err}"); return false; }
 
                     // it can't be a reserved symbol
-                    if (IsReservedSymbol(label_def)) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: Symbol \"{label_def}\" is reserved"); return false; }
+                    if (IsReservedSymbol(label_def)) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: Symbol name is reserved: {label_def}"); return false; }
 
                     // ensure we don't redefine a symbol
-                    if (file.Symbols.ContainsKey(label_def)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Symbol \"{label_def}\" was already defined"); return false; }
+                    if (file.Symbols.ContainsKey(label_def)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Symbol was already defined: {label_def}"); return false; }
                     // ensure we don't define an external
-                    if (file.ExternalSymbols.Contains(label_def)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Cannot define external symbol \"{label_def}\" internally"); return false; }
+                    if (file.ExternalSymbols.Contains(label_def)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Cannot define external symbol internally: {label_def}"); return false; }
 
                     // if it's not an EQU expression, inject a label
                     if (op.ToUpper() != "EQU")
                     {
                         // addresses must be in a valid segment
-                        if (current_seg == AsmSegment.INVALID) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to take an address outside of a segment"); return false; }
+                        if (current_seg == AsmSegment.INVALID) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to address outside of a segment"); return false; }
 
                         file.Symbols.Add(label_def, new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Token = $"#{current_seg}" }, Right = new Expr() { IntResult = line_pos_in_seg } });
                     }
@@ -2434,33 +2490,33 @@ namespace CSX64
             }
             public bool TryProcessAlign()
             {
-                if (args.Length != 1) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: ALIGN expected 1 operand"); return false; }
+                if (args.Length != 1) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected 1 operand"); return false; }
 
-                if (!TryParseInstantImm(args[0], out UInt64 val, out bool floating, out UInt64 sizecode, out bool explicit_size)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: ALIGN value must be instant"); return false; }
-                if (floating) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Alignment size cannot be floating-point"); return false; }
+                if (!TryParseInstantImm(args[0], out UInt64 val, out bool floating, out UInt64 sizecode, out bool explicit_size)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Alignment value must be instant\n-> {res.ErrorMsg}"); return false; }
+                if (floating) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Alignment value cannot be floating-point"); return false; }
                 if (val == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Attempt to align to a multiple of zero"); return false; }
 
-                if (!val.IsPowerOf2()) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Alignment value must be a power of 2"); return false; }
+                if (!val.IsPowerOf2()) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Alignment value must be a power of 2. Got {val}"); return false; }
 
                 return TryAlign(val);
             }
 
             public bool TryProcessGlobal()
             {
-                if (args.Length == 0) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: GLOBAL expected at least one symbol to export"); return false; }
+                if (args.Length == 0) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected at least one symbol to export"); return false; }
 
                 string err = null;
                 foreach (string symbol in args)
                 {
                     // special error message for using global on local labels
-                    if (symbol[0] == '.') { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Cannot export local symbols"); return false; }
+                    if (symbol[0] == '.') { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Cannot export local symbols without their full declaration"); return false; }
                     // test name for legality
                     if (!IsValidName(symbol, ref err)) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: {err}"); return false; }
 
                     // don't add to global list twice
-                    if (file.GlobalSymbols.Contains(symbol)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Attempt to global symbol \"{symbol}\" multiple times"); return false; }
+                    if (file.GlobalSymbols.Contains(symbol)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Attempt to export \"{symbol}\" multiple times"); return false; }
                     // ensure we don't global an external
-                    if (file.ExternalSymbols.Contains(symbol)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Cannot define external symbol \"{symbol}\" as global"); return false; }
+                    if (file.ExternalSymbols.Contains(symbol)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Cannot define external \"{symbol}\" as global"); return false; }
 
                     // add it to the globals list
                     file.GlobalSymbols.Add(symbol);
@@ -2470,7 +2526,7 @@ namespace CSX64
             }
             public bool TryProcessExtern()
             {
-                if (args.Length == 0) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: EXTERN expected at least one symbol to import"); return false; }
+                if (args.Length == 0) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected at least one symbol to import"); return false; }
 
                 string err = null;
                 foreach (string symbol in args)
@@ -2484,9 +2540,9 @@ namespace CSX64
                     if (file.Symbols.ContainsKey(symbol)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Cannot define symbol \"{symbol}\" (defined internally) as external"); return false; }
 
                     // don't add to external list twice
-                    if (file.ExternalSymbols.Contains(symbol)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Attempt to import symbol \"{symbol}\" multiple times"); return false; }
+                    if (file.ExternalSymbols.Contains(symbol)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Attempt to import \"{symbol}\" multiple times"); return false; }
                     // ensure we don't extern a global
-                    if (file.GlobalSymbols.Contains(symbol)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Cannot define global symbol \"{symbol}\" as external"); return false; }
+                    if (file.GlobalSymbols.Contains(symbol)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Cannot define global \"{symbol}\" as external"); return false; }
 
                     // add it to the external list
                     file.ExternalSymbols.Add(symbol);
@@ -2497,12 +2553,12 @@ namespace CSX64
 
             public bool TryProcessDeclare(UInt64 size)
             {
+                if (args.Length == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected at least 1 value to write"); return false; }
+
                 Expr expr;
-                string chars;
+                string chars, err = null;
 
-                string err = null;
-
-                // for each argument
+                // for each argument (not using foreach because order is incredibly important and i'm paranoid)
                 for (int i = 0; i < args.Length; ++i)
                 {
                     // if it's a string
@@ -2512,16 +2568,9 @@ namespace CSX64
                         if (!TryExtractStringChars(args[i], out chars, ref err)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Invalid string literal: {args[i]}\n-> {err}"); return false; }
 
                         // dump into memory (one byte each)
-                        for (int j = 0; j < chars.Length; ++j)
-                            if (!TryAppendVal(1, chars[j])) return false;
-
-                        // if this wasn't a multiple of size
-                        if (chars.Length % (int)size != 0)
-                        {
-                            // pad with 0 to fill in the remaining space
-                            for (int j = (int)size - chars.Length % (int)size; j > 0; --j)
-                                if (!TryAppendVal(1, 0)) return false;
-                        }
+                        for (int j = 0; j < chars.Length; ++j) if (!TryAppendByte((byte)chars[j])) return false;
+                        // make sure we write a multiple of size
+                        if (!TryPad(AlignOffset((UInt64)chars.Length, size))) return false;
                     }
                     // otherwise it's a value
                     else
@@ -2533,8 +2582,8 @@ namespace CSX64
                         if (!TryParseImm(args[i], out expr, out UInt64 sizecode, out bool explicit_size)) return false;
                         if (explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A size directive in this context is not allowed"); return false; }
 
-                        // make one of them
-                        if (!TryAppendExpr(size, expr)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                        // write the value
+                        if (!TryAppendExpr(size, expr)) return false;
                     }
                 }
 
@@ -2546,8 +2595,8 @@ namespace CSX64
 
                 // parse the number to reserve
                 if (!TryParseInstantImm(args[0], out UInt64 count, out bool floating, out UInt64 sizecode, out bool explicit_size)) return false;
-                // make sure it's not floating
                 if (floating) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Reserve count cannot be floating-point"); return false; }
+                if (explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A size directive in this context is not allowed"); return false; }
 
                 // reserve the space
                 if (!TryReserve(count * size)) return false;
@@ -2557,13 +2606,13 @@ namespace CSX64
 
             public bool TryProcessEQU()
             {
-                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: EQU expected 1 arg"); return false; }
+                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 1 operand"); return false; }
 
                 // make sure we have a label on this line
-                if (label_def == null) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: EQU requires a label to attach the expression to"); return false; }
+                if (label_def == null) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected a label declaration to link to the value"); return false; }
 
                 // get the expression
-                if (!TryParseImm(args[0], out Expr expr, out UInt64 sizecode, out bool explicit_size)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: EQU expected an expression\n-> {res.ErrorMsg}"); return false; }
+                if (!TryParseImm(args[0], out Expr expr, out UInt64 sizecode, out bool explicit_size)) return false;
                 if (explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A size directive in this context is not allowed"); return false; }
 
                 // inject the symbol
@@ -2574,7 +2623,7 @@ namespace CSX64
 
             public bool TryProcessSegment()
             {
-                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: SEGMENT directive expected 1 arg"); return false; }
+                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 1 operand"); return false; }
 
                 // get the segment we're going to
                 switch (args[0].ToUpper())
@@ -2584,11 +2633,11 @@ namespace CSX64
                     case ".DATA": current_seg = AsmSegment.DATA; break;
                     case ".BSS": current_seg = AsmSegment.BSS; break;
 
-                    default: res = new AssembleResult(AssembleError.ArgError, $"line {line}: Unknown segment \"{args[0]}\""); return false;
+                    default: res = new AssembleResult(AssembleError.ArgError, $"line {line}: Unknown segment: {args[0]}"); return false;
                 }
 
                 // if this segment has already been done, fail
-                if ((done_segs & current_seg) != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to redeclare the {current_seg} segment"); return false; }
+                if ((done_segs & current_seg) != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to redeclare segment {current_seg}"); return false; }
                 // add to list of completed segments
                 done_segs |= current_seg;
 
@@ -2600,236 +2649,233 @@ namespace CSX64
 
             // -- x86 op formats -- //
             
-            public bool TryProcessTernaryOp(OPCode op, bool has_ext_op = false, UInt64 ext_op = 0, UInt64 sizemask = 15)
+            public bool TryProcessTernaryOp(OPCode op, bool has_ext_op = false, byte ext_op = 0, UInt64 sizemask = 15)
             {
-                if (args.Length != 3) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 3 args"); return false; }
+                if (args.Length != 3) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 3 args"); return false; }
 
                 // write op code
-                if (!TryAppendVal(1, (UInt64)op)) return false;
-                if (has_ext_op) { if (!TryAppendVal(1, ext_op)) return false; }
+                if (!TryAppendByte((byte)op)) return false;
+                if (has_ext_op) { if (!TryAppendByte(ext_op)) return false; }
 
-                if (!TryParseCPURegister(args[0], out UInt64 dest, out UInt64 a_sizecode, out bool dest_high)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} expected a register as the first argument"); return false; }
-                if (!TryParseImm(args[2], out Expr imm, out UInt64 imm_sz, out bool imm_sz_explicit)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} expected an imm as the third argument"); return false; }
+                if (!TryParseCPURegister(args[0], out UInt64 dest, out UInt64 a_sizecode, out bool dest_high)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected cpu register as first operand"); return false; }
+                if (!TryParseImm(args[2], out Expr imm, out UInt64 imm_sz, out bool imm_sz_explicit)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected imm as third operand"); return false; }
 
                 if (imm_sz_explicit && imm_sz != a_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size mismatch"); return false; }
-                if ((Size(a_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
-
-                UInt64 b_sizecode; // only used for ensuring no size conflicts (machine code only uses a_sizecode)
+                if ((Size(a_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size is not supported"); return false; }
 
                 // reg
-                if (TryParseCPURegister(args[1], out UInt64 reg, out b_sizecode, out bool reg_high))
+                if (TryParseCPURegister(args[1], out UInt64 reg, out UInt64 b_sizecode, out bool reg_high))
                 {
-                    if (a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Argument size missmatch"); return false; }
+                    if (a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size missmatch"); return false; }
 
                     if (!TryAppendVal(1, (dest << 4) | (a_sizecode << 2) | (dest_high ? 2 : 0ul) | 0)) return false;
                     if (!TryAppendExpr(Size(a_sizecode), imm)) return false;
                     if (!TryAppendVal(1, (reg_high ? 128 : 0ul) | reg)) return false;
                 }
                 // mem
-                else if (TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out b_sizecode, out bool explicit_size))
+                else if (args[1][args[1].Length - 1] == ']')
                 {
-                    if (explicit_size && a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Argument size missmatch"); return false; }
+                    if (!TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out b_sizecode, out bool explicit_size)) return false;
+
+                    if (explicit_size && a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size missmatch"); return false; }
 
                     if (!TryAppendVal(1, (dest << 4) | (a_sizecode << 2) | (dest_high ? 2 : 0ul) | 1)) return false;
                     if (!TryAppendExpr(Size(a_sizecode), imm)) return false;
                     if (!TryAppendAddress(a, b, ptr_base)) return false;
                 }
                 // imm
-                else { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} requires second arg be a register or memory value"); return false; }
+                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected cpu register or memory value as second operand"); return false; }
 
                 return true;
             }
-            public bool TryProcessBinaryOp(OPCode op, bool has_ext_op = false, UInt64 ext_op = 0, UInt64 sizemask = 15, int _force_b_imm_az = -1, bool allow_b_mem = true)
+            public bool TryProcessBinaryOp(OPCode op, bool has_ext_op = false, byte ext_op = 0, UInt64 sizemask = 15, int _force_b_imm_sizecode = -1, bool allow_b_mem = true)
             {
-                if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 2 args"); return false; }
+                if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 2 operands"); return false; }
 
                 // write op code
-                if (!TryAppendVal(1, (UInt64)op)) return false;
-                if (has_ext_op) { if (!TryAppendVal(1, ext_op)) return false; }
-
-                UInt64 a_sizecode, b_sizecode;
+                if (!TryAppendByte((byte)op)) return false;
+                if (has_ext_op) { if (!TryAppendByte(ext_op)) return false; }
 
                 // reg, *
-                if (TryParseCPURegister(args[0], out UInt64 dest, out a_sizecode, out bool dest_high))
+                if (TryParseCPURegister(args[0], out UInt64 dest, out UInt64 a_sizecode, out bool dest_high))
                 {
-                    if ((Size(a_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
-                    
+                    if ((Size(a_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size not supported"); return false; }
+
                     // reg, reg
-                    if (TryParseCPURegister(args[1], out UInt64 src, out b_sizecode, out bool src_high))
+                    if (TryParseCPURegister(args[1], out UInt64 src, out UInt64 b_sizecode, out bool src_high))
                     {
-                        if (a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Argument size missmatch"); return false; }
+                        if (a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size missmatch"); return false; }
 
                         if (!TryAppendVal(1, (dest << 4) | (a_sizecode << 2) | (dest_high ? 2 : 0ul) | (src_high ? 1 : 0ul))) return false;
                         if (!TryAppendVal(1, src)) return false;
                     }
                     // reg, mem
-                    else if (TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out b_sizecode, out bool explicit_size))
+                    else if (args[1][args[1].Length - 1] == ']')
                     {
-                        if (explicit_size && a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Argument size missmatch"); return false; }
+                        if (!TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out b_sizecode, out bool explicit_size)) return false;
 
-                        if (!allow_b_mem) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not allow the second argument to be a memory value"); return false; }
+                        if (explicit_size && a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size missmatch"); return false; }
+
+                        if (!allow_b_mem) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Second operand may not be a memory value"); return false; }
 
                         if (!TryAppendVal(1, (dest << 4) | (a_sizecode << 2) | (dest_high ? 2 : 0ul))) return false;
                         if (!TryAppendVal(1, (2 << 4))) return false;
-                        if (!TryAppendAddress(a, b, ptr_base)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                        if (!TryAppendAddress(a, b, ptr_base)) return false;
                     }
                     // reg, imm
                     else
                     {
-                        if (!TryParseImm(args[1], out Expr imm, out b_sizecode, out explicit_size)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as a register, memory value, or imm\n-> {res.ErrorMsg}"); return false; }
+                        if (!TryParseImm(args[1], out Expr imm, out b_sizecode, out bool explicit_size)) return false;
 
-                        if (_force_b_imm_az == -1)
+                        if (_force_b_imm_sizecode == -1)
                         {
-                            if (explicit_size && a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Argument size missmatch"); return false; }
+                            if (explicit_size && a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size missmatch"); return false; }
                         }
-                        else
-                        {
-                            if (explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: An imm size directive is not allowed in this context"); return false; }
-                            b_sizecode = (UInt64)_force_b_imm_az;
-                        }
+                        else b_sizecode = (UInt64)_force_b_imm_sizecode;
 
                         if (!TryAppendVal(1, (dest << 4) | (a_sizecode << 2) | (dest_high ? 2 : 0ul))) return false;
                         if (!TryAppendVal(1, (1 << 4))) return false;
-                        if (!TryAppendExpr(Size(b_sizecode), imm)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                        if (!TryAppendExpr(Size(b_sizecode), imm)) return false;
                     }
                 }
                 // mem, *
-                else if (TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out a_sizecode, out bool explicit_size))
+                else if (args[0][args[0].Length - 1] == ']')
                 {
+                    if (!TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out a_sizecode, out bool a_explicit)) return false;
+
                     // mem, reg
-                    if (TryParseCPURegister(args[1], out UInt64 src, out b_sizecode, out bool src_high))
+                    if (TryParseCPURegister(args[1], out UInt64 src, out UInt64 b_sizecode, out bool src_high))
                     {
-                        if ((Size(b_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified data size"); return false; }
+                        if ((Size(b_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size not supported"); return false; }
 
-                        if (explicit_size && a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Argument size missmatch"); return false; }
+                        if (a_explicit && a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Argument size missmatch"); return false; }
 
-                        if (!TryAppendVal(1, (b_sizecode << 2) | (src_high ? 1 : 0ul))) return false; // uses b_sizecode because address may not define it
+                        if (!TryAppendVal(1, (b_sizecode << 2) | (src_high ? 1 : 0ul))) return false;
                         if (!TryAppendVal(1, (3 << 4) | src)) return false;
-                        if (!TryAppendAddress(a, b, ptr_base)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; };
+                        if (!TryAppendAddress(a, b, ptr_base)) return false;
                     }
                     // mem, mem
-                    else if (TryParseAddress(args[1], out UInt64 _a, out UInt64 _b, out Expr _ptr_base, out b_sizecode, out explicit_size))
-                        { res = new AssembleResult(AssembleError.FormatError, $"line {line}: {op} does not support memory-to-memory"); return false; }
+                    else if (args[1][args[1].Length - 1] == ']') { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Only one operand may be a memory value"); return false; }
                     // mem, imm
                     else
                     {
-                        if (!TryParseImm(args[1], out Expr imm, out b_sizecode, out explicit_size)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[1]}\" as a register, memory value, or imm\n-> {res.ErrorMsg}"); return false; }
+                        if (!TryParseImm(args[1], out Expr imm, out b_sizecode, out bool b_explicit)) return false;
 
-                        if (_force_b_imm_az == -1)
+                        if (_force_b_imm_sizecode == -1)
                         {
-                            if (explicit_size && a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Argument size missmatch"); return false; }
+                            // put the true sizecode in a_sizecode
+                            if (a_explicit && b_explicit) { if (a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size mismatch"); return false; } }
+                            else if (b_explicit) a_sizecode = b_sizecode;
+                            else if (!a_explicit) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce operand size"); return false; }
                         }
-                        else
-                        {
-                            if (explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: An imm size directive is not allowed in this context"); return false; }
-                            b_sizecode = (UInt64)_force_b_imm_az;
-                        }
-                        if ((Size(a_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified data size"); return false; }
+                        else b_sizecode = (UInt64)_force_b_imm_sizecode;
+
+                        if ((Size(a_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size not supported"); return false; }
 
                         if (!TryAppendVal(1, a_sizecode << 2)) return false;
                         if (!TryAppendVal(1, 4 << 4)) return false;
-                        if (!TryAppendAddress(a, b, ptr_base)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
-                        if (!TryAppendExpr(Size(b_sizecode), imm)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                        if (!TryAppendAddress(a, b, ptr_base)) return false;
+                        if (!TryAppendExpr(Size(b_sizecode), imm)) return false;
                     }
                 }
                 // imm, *
-                else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Destination must be register or memory"); return false; }
+                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected cpu register or memory value as first operand"); return false; }
 
                 return true;
             }
-            public bool TryProcessUnaryOp(OPCode op, bool has_ext_op = false, UInt64 ext_op = 0, UInt64 sizemask = 15)
+            public bool TryProcessUnaryOp(OPCode op, bool has_ext_op = false, byte ext_op = 0, UInt64 sizemask = 15)
             {
-                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 1 arg"); return false; }
+                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 1 operand"); return false; }
 
                 // write op code
-                if (!TryAppendVal(1, (UInt64)op)) return false;
-                if (has_ext_op) { if (!TryAppendVal(1, ext_op)) return false; }
-
-                UInt64 a_sizecode;
+                if (!TryAppendByte((byte)op)) return false;
+                if (has_ext_op) { if (!TryAppendByte(ext_op)) return false; }
 
                 // reg
-                if (TryParseCPURegister(args[0], out UInt64 reg, out a_sizecode, out bool reg_high))
+                if (TryParseCPURegister(args[0], out UInt64 reg, out UInt64 a_sizecode, out bool reg_high))
                 {
-                    if ((Size(a_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
-                    
+                    if ((Size(a_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size not supported"); return false; }
+
                     if (!TryAppendVal(1, (reg << 4) | (a_sizecode << 2) | (reg_high ? 2 : 0ul))) return false;
                 }
                 // mem
-                else if (TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out a_sizecode, out bool explicit_size))
+                else if (args[0][args[0].Length - 1] == ']')
                 {
-                    if (!explicit_size) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Data size could not be deduced"); return false; }
+                    if (!TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out a_sizecode, out bool explicit_size)) return false;
 
-                    if ((Size(a_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
+                    if (!explicit_size) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Could not deduce operand size"); return false; }
+
+                    if ((Size(a_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size not supported"); return false; }
 
                     if (!TryAppendVal(1, (a_sizecode << 2) | 1)) return false;
-                    if (!TryAppendAddress(a, b, ptr_base)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                    if (!TryAppendAddress(a, b, ptr_base)) return false;
                 }
                 // imm
-                else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Destination must be register or memory"); return false; }
+                else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expected a cpu register or memory value"); return false; }
 
                 return true;
             }
-            public bool TryProcessIMMRM(OPCode op, bool has_ext_op = false, UInt64 ext_op = 0, UInt64 sizemask = 15, int default_size = -1)
+            public bool TryProcessIMMRM(OPCode op, bool has_ext_op = false, byte ext_op = 0, UInt64 sizemask = 15, int default_sizecode = -1)
             {
-                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 1 arg"); return false; }
+                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 1 operand"); return false; }
 
                 // write op code
-                if (!TryAppendVal(1, (UInt64)op)) return false;
-                if (has_ext_op) { if (!TryAppendVal(1, ext_op)) return false; }
-
-                UInt64 a_sizecode;
+                if (!TryAppendByte((byte)op)) return false;
+                if (has_ext_op) { if (!TryAppendByte(ext_op)) return false; }
 
                 // reg
-                if (TryParseCPURegister(args[0], out UInt64 reg, out a_sizecode, out bool reg_high))
+                if (TryParseCPURegister(args[0], out UInt64 reg, out UInt64 a_sizecode, out bool reg_high))
                 {
-                    if ((Size(a_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
+                    if ((Size(a_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size not supported"); return false; }
 
                     if (!TryAppendVal(1, (reg << 4) | (a_sizecode << 2) | (reg_high ? 1 : 0ul))) return false;
                 }
                 // mem
-                else if (TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out a_sizecode, out bool explicit_size))
+                else if (args[0][args[0].Length - 1] == ']')
                 {
+                    if (!TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out a_sizecode, out bool explicit_size)) return false;
+
                     if (!explicit_size)
                     {
-                        if (default_size == -1) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce operand size"); return false; }
-                        else a_sizecode = (UInt64)default_size;
+                        if (default_sizecode == -1) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce operand size"); return false; }
+                        else a_sizecode = (UInt64)default_sizecode;
                     }
-                    if ((Size(a_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
+                    if ((Size(a_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size not supported"); return false; }
 
                     if (!TryAppendVal(1, (a_sizecode << 2) | 3)) return false;
-                    if (!TryAppendAddress(a, b, ptr_base)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                    if (!TryAppendAddress(a, b, ptr_base)) return false;
                 }
                 // imm
                 else
                 {
-                    if (!TryParseImm(args[0], out Expr imm, out a_sizecode, out explicit_size)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{args[0]}\" as a register, memory value, or imm\n-> {res.ErrorMsg}"); return false; }
+                    if (!TryParseImm(args[0], out Expr imm, out a_sizecode, out bool explicit_size)) return false;
 
                     if (!explicit_size)
                     {
-                        if (default_size == -1) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce operand size"); return false; }
-                        else a_sizecode = (UInt64)default_size;
+                        if (default_sizecode == -1) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce operand size"); return false; }
+                        else a_sizecode = (UInt64)default_sizecode;
                     }
-                    if ((Size(a_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified size code"); return false; }
+                    if ((Size(a_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size not supported"); return false; }
 
                     if (!TryAppendVal(1, (a_sizecode << 2) | 2)) return false;
-                    if (!TryAppendExpr(Size(a_sizecode), imm)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                    if (!TryAppendExpr(Size(a_sizecode), imm)) return false;
                 }
 
                 return true;
             }
-            public bool TryProcessRR_RM(OPCode op, bool has_ext_op = false, UInt64 ext_op = 0, UInt64 sizemask = 15)
+            public bool TryProcessRR_RM(OPCode op, bool has_ext_op = false, byte ext_op = 0, UInt64 sizemask = 15)
             {
-                if (args.Length != 3) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 3 operands"); return false; }
+                if (args.Length != 3) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 3 operands"); return false; }
 
                 // write op code
-                if (!TryAppendVal(1, (UInt64)op)) return false;
-                if (has_ext_op) { if (!TryAppendVal(1, ext_op)) return false; }
+                if (!TryAppendByte((byte)op)) return false;
+                if (has_ext_op) { if (!TryAppendByte(ext_op)) return false; }
 
                 // reg, *, *
                 if (TryParseCPURegister(args[0], out UInt64 dest, out UInt64 sizecode, out bool dest_high))
                 {
                     // apply size mask
-                    if ((Size(sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified operand size"); return false; }
+                    if ((Size(sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size not supported"); return false; }
 
                     // reg, reg, *
                     if (TryParseCPURegister(args[1], out UInt64 src_1, out UInt64 src_1_sizecode, out bool src_1_high))
@@ -2837,140 +2883,139 @@ namespace CSX64
                         // reg, reg, reg
                         if (TryParseCPURegister(args[2], out UInt64 src_2, out UInt64 src_2_sizecode, out bool src_2_high))
                         {
-                            // ensure sizes match
-                            if (sizecode != src_1_sizecode || sizecode != src_2_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Size mismatch"); return false; }
+                            if (sizecode != src_1_sizecode || sizecode != src_2_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size mismatch"); return false; }
 
                             if (!TryAppendVal(1, (dest << 4) | (sizecode << 2) | (dest_high ? 2 : 0ul) | 0)) return false;
                             if (!TryAppendVal(1, (src_1_high ? 128 : 0ul) | src_1)) return false;
                             if (!TryAppendVal(1, (src_2_high ? 128 : 0ul) | src_2)) return false;
                         }
                         // reg, reg, mem
-                        else if (TryParseAddress(args[2], out UInt64 a, out UInt64 b, out Expr ptr_base, out src_2_sizecode, out bool src_2_explicit_size))
+                        else if (args[2][args[2].Length - 1] == ']')
                         {
-                            // ensure sizes match
-                            if (sizecode != src_1_sizecode || src_2_explicit_size && sizecode != src_2_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Size mismatch"); return false; }
+                            if (!TryParseAddress(args[2], out UInt64 a, out UInt64 b, out Expr ptr_base, out src_2_sizecode, out bool src_2_explicit_size)) return false;
+
+                            if (sizecode != src_1_sizecode || src_2_explicit_size && sizecode != src_2_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size mismatch"); return false; }
 
                             if (!TryAppendVal(1, (dest << 4) | (sizecode << 2) | (dest_high ? 2 : 0ul) | 1)) return false;
                             if (!TryAppendVal(1, (src_1_high ? 128 : 0ul) | src_1)) return false;
                             if (!TryAppendAddress(a, b, ptr_base)) return false;
                         }
-                        else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Second operand must be a register or memory value"); return false; }
+                        else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Third operand must be a cpu register or memory value"); return false; }
                     }
-                    else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Second operand must be a register"); return false; }
+                    else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Second operand must be a cpu register"); return false; }
                 }
-                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: First operand must be a register"); return false; }
+                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: First operand must be a cpu register"); return false; }
 
                 return true;
             }
 
-            public bool TryProcessNoArgOp(OPCode op, bool has_ext_op = false, UInt64 ext_op = 0)
+            public bool TryProcessNoArgOp(OPCode op, bool has_ext_op = false, byte ext_op = 0)
             {
-                if (args.Length != 0) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 0 args"); return false; }
+                if (args.Length != 0) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected no operands"); return false; }
 
                 // write op code
-                if (!TryAppendVal(1, (UInt64)op)) return false;
-                if (has_ext_op) { if (!TryAppendVal(1, ext_op)) return false; }
+                if (!TryAppendByte((byte)op)) return false;
+                if (has_ext_op) { if (!TryAppendByte(ext_op)) return false; }
 
                 return true;
             }
 
             public bool TryProcessXCHG(OPCode op)
             {
-                if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 2 args"); return false; }
+                if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 2 operands"); return false; }
 
                 // write op code
-                if (!TryAppendVal(1, (UInt64)op)) return false;
-
-                UInt64 a_sizecode, b_sizecode;
+                if (!TryAppendByte((byte)op)) return false;
 
                 // reg, *
-                if (TryParseCPURegister(args[0], out UInt64 reg, out a_sizecode, out bool reg_high))
+                if (TryParseCPURegister(args[0], out UInt64 reg, out UInt64 a_sizecode, out bool reg_high))
                 {
                     // reg, reg
-                    if (TryParseCPURegister(args[1], out UInt64 src, out b_sizecode, out bool src_high))
+                    if (TryParseCPURegister(args[1], out UInt64 src, out UInt64 b_sizecode, out bool src_high))
                     {
-                        if (a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Argument size missmatch"); return false; }
+                        if (a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size missmatch"); return false; }
 
                         if (!TryAppendVal(1, (reg << 4) | (a_sizecode << 2) | (reg_high ? 2 : 0ul) | 0)) return false;
                         if (!TryAppendVal(1, (src_high ? 128 : 0ul) | src)) return false;
                     }
                     // reg, mem
-                    else if (TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out b_sizecode, out bool explicit_size))
+                    else if (args[1][args[1].Length - 1] == ']')
                     {
-                        if (explicit_size && a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Argument size missmatch"); return false; }
+                        if (!TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out b_sizecode, out bool explicit_size)) return false;
+
+                        if (explicit_size && a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size missmatch"); return false; }
 
                         if (!TryAppendVal(1, (reg << 4) | (a_sizecode << 2) | (reg_high ? 2 : 0ul) | 1)) return false;
                         if (!TryAppendAddress(a, b, ptr_base)) return false;
                     }
                     // reg, imm
-                    else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Cannot use {op} with an imm"); return false; }
+                    else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expected a cpu register or memory value as second operand"); return false; }
                 }
                 // mem, *
-                else if (TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out a_sizecode, out bool explicit_size))
+                else if (args[0][args[0].Length - 1] == ']')
                 {
+                    if (!TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out a_sizecode, out bool explicit_size)) return false;
+
                     // mem, reg
-                    if (TryParseCPURegister(args[1], out reg, out b_sizecode, out reg_high))
+                    if (TryParseCPURegister(args[1], out reg, out UInt64 b_sizecode, out reg_high))
                     {
-                        if (explicit_size && a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Argument size missmatch"); return false; }
+                        if (explicit_size && a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size missmatch"); return false; }
 
                         if (!TryAppendVal(1, (reg << 4) | (b_sizecode << 2) | (reg_high ? 2 : 0ul) | 1)) return false;
                         if (!TryAppendAddress(a, b, ptr_base)) return false;
                     }
                     // mem, mem
-                    else if (TryParseAddress(args[1], out UInt64 _a, out UInt64 _b, out Expr _ptr_base, out UInt64 _sc, out bool _exp_sz))
-                    { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Cannot use {op} with two memory values"); return false; }
+                    else if (args[1][args[1].Length - 1] == ']') { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Only one operand may be a memory value"); return false; }
                     // mem, imm
-                    else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Cannot use {op} with an imm"); return false; }
+                    else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expected a cpu register or memory value as second operand"); return false; }
                 }
                 // imm, *
-                else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Cannot use {op} with an imm"); return false; }
+                else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expected a cpu register or memory value as first operand"); return false; }
 
                 return true;
             }
             public bool TryProcessLEA(OPCode op)
             {
-                if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 2 args"); return false; }
+                if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 2 operands"); return false; }
 
-                if (!TryParseCPURegister(args[0], out UInt64 dest, out UInt64 a_sizecode, out bool dest_high)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} expecetd register as first arg\n-> {res.ErrorMsg}"); return false; }
-                if (a_sizecode == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not allow 8-bit addressing"); return false; }
+                if (!TryParseCPURegister(args[0], out UInt64 dest, out UInt64 a_sizecode, out bool dest_high)) return false;
+                if (a_sizecode == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: 8-bit addressing is not supported"); return false; }
 
-                if (!TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out UInt64 b_sizecode, out bool explicit_size)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: {op} expected address as second arg\n-> {res.ErrorMsg}"); return false; }
+                if (!TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out UInt64 b_sizecode, out bool explicit_size)) return false;
                 
-                if (!TryAppendVal(1, (UInt64)op)) return false;
+                if (!TryAppendByte((byte)op)) return false;
                 if (!TryAppendVal(1, (dest << 4) | (a_sizecode << 2))) return false;
-                if (!TryAppendAddress(a, b, ptr_base)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to append value\n-> {res.ErrorMsg}"); return false; }
+                if (!TryAppendAddress(a, b, ptr_base)) return false;
 
                 return true;
             }
             public bool TryProcessPOP(OPCode op)
             {
-                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 1 arg"); return false; }
+                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 1 operand"); return false; }
 
                 // write op code
-                if (!TryAppendVal(1, (UInt64)op)) return false;
-
-                UInt64 a_sizecode;
+                if (!TryAppendByte((byte)op)) return false;
 
                 // reg
-                if (TryParseCPURegister(args[0], out UInt64 reg, out a_sizecode, out bool a_high))
+                if (TryParseCPURegister(args[0], out UInt64 reg, out UInt64 a_sizecode, out bool a_high))
                 {
-                    // apply the size mask
-                    if ((Size(a_sizecode) & 14) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified operand size"); return false; }
+                    if ((Size(a_sizecode) & 14) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size is not supported"); return false; }
 
                     if (!TryAppendVal(1, (reg << 4) | (a_sizecode << 2))) return false;
                 }
                 // mem
-                else if (TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out a_sizecode, out bool explicit_size))
+                else if (args[0][args[0].Length - 1] == ']')
                 {
-                    if (!explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce data size"); return false; }
+                    if (!TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out a_sizecode, out bool explicit_size)) return false;
 
-                    // apply the size mask
-                    if ((Size(a_sizecode) & 14) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified operand size"); return false; }
+                    if (!explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce operand size"); return false; }
+
+                    if ((Size(a_sizecode) & 14) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size is not supported"); return false; }
 
                     if (!TryAppendVal(1, (a_sizecode << 2) | 1)) return false;
                     if (!TryAppendAddress(a, b, ptr_base)) return false;
                 }
-                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} expected a register or memory argument"); return false; }
+                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected a cpu register or memory value"); return false; }
 
                 return true;
             }
@@ -2991,27 +3036,28 @@ namespace CSX64
                 {
                     if (src != 2 || b_sizecode != 0 || b_high) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Shifts using a register as count source must use CL"); return false; }
 
-                    if (!TryAppendVal(1, 0x80)) return false;
+                    if (!TryAppendByte(0x80)) return false;
                 }
                 // reg/mem, imm
-                else if (TryParseImm(args[1], out Expr imm, out b_sizecode, out bool explicit_size))
+                else
                 {
+                    if (!TryParseImm(args[1], out Expr imm, out b_sizecode, out bool explicit_size)) return false;
+
                     // mask the shift count to 6 bits (we just need to make sure it can't set the CL flag)
                     imm = new Expr() { OP = Expr.OPs.BitAnd, Left = imm, Right = new Expr() { IntResult = 0x3f } };
 
                     if (!TryAppendExpr(1, imm)) return false;
                 }
-                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Second argument to a shift must be CL or an imm"); return false; }
 
                 return true;
             }
             public bool TryProcessShift(OPCode op)
             {
-                if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 2 args"); return false; }
+                if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 2 operands"); return false; }
 
                 // write op code
-                if (!TryAppendVal(1, (UInt64)op)) return false;
-                
+                if (!TryAppendByte((byte)op)) return false;
+
                 // reg, *
                 if (TryParseCPURegister(args[0], out UInt64 dest, out UInt64 a_sizecode, out bool a_high))
                 {
@@ -3019,18 +3065,20 @@ namespace CSX64
                     if (!__TryProcessShift_mid()) return false;
                 }
                 // mem, *
-                else if (TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out a_sizecode, out bool explicit_size))
+                else if (args[0][args[0].Length - 1] == ']')
                 {
+                    if (!TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out a_sizecode, out bool explicit_size)) return false;
+
                     if (!explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce operand size"); return false; }
 
                     // make sure we're using a normal word size
-                    if (a_sizecode > 3) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified operand size"); return false; }
+                    if (a_sizecode > 3) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size is not supported"); return false; }
 
                     if (!TryAppendVal(1, (a_sizecode << 2) | 1)) return false;
                     if (!__TryProcessShift_mid()) return false;
                     if (!TryAppendAddress(1, b, ptr_base)) return false;
                 }
-                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} expected a register or memory value as first operand"); return false; }
+                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected a cpu register or memory value as first operand"); return false; }
                 
                 return true;
             }
@@ -3045,7 +3093,7 @@ namespace CSX64
                     {
                         if (!TryAppendVal(1, (dest << 4) | (sign ? 1 : 0ul))) return false;
                     }
-                    else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: The specified size combination is not supported by this instruction"); return false; }
+                    else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size combination is not supported"); return false; }
                 }
                 // 32/64, *
                 else if (dest_sizecode == 2 || dest_sizecode == 3)
@@ -3060,9 +3108,9 @@ namespace CSX64
                     {
                         if (!TryAppendVal(1, (dest << 4) | (dest_sizecode == 2 ? sign ? 5 : 3ul : sign ? 9 : 7ul))) return false;
                     }
-                    else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: The specified size combination is not supported by this instruction"); return false; }
+                    else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size combination is not supported"); return false; }
                 }
-                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: The specified destination size is not suported"); return false; }
+                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size combination is not supported"); return false; }
 
                 return true;
             }
@@ -3070,11 +3118,10 @@ namespace CSX64
             {
                 if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 2 operands"); return false; }
 
-                if (!TryParseCPURegister(args[0], out UInt64 dest, out UInt64 dest_sizecode, out bool __dest_high))
-                { res = new AssembleResult(AssembleError.UsageError, $"line {line}: First operand must be a CPU register"); return false; }
+                if (!TryParseCPURegister(args[0], out UInt64 dest, out UInt64 dest_sizecode, out bool __dest_high)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: First operand must be a cpu register"); return false; }
 
                 // write op code
-                if (!TryAppendVal(1, (UInt64)op)) return false;
+                if (!TryAppendByte((byte)op)) return false;
 
                 // reg, reg
                 if (TryParseCPURegister(args[1], out UInt64 src, out UInt64 src_sizecode, out bool src_high))
@@ -3086,18 +3133,20 @@ namespace CSX64
                     if (!TryAppendVal(1, (src_high ? 64 : 0ul) | src)) return false;
                 }
                 // reg, mem
-                else if (TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out src_sizecode, out bool explicit_size))
+                else if (args[1][args[1].Length - 1] == ']')
                 {
-                    if (!explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce second operand's size"); return false; }
-                    
+                    if (!TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out src_sizecode, out bool explicit_size)) return false;
+
+                    if (!explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce operand size"); return false; }
+
                     // write the settings byte
                     if (!__TryProcessMOVxX_settings_byte(sign, dest, dest_sizecode, src_sizecode)) return false;
 
                     // mark source as a memory value and append the address
-                    if (!TryAppendVal(1, 128)) return false;
+                    if (!TryAppendByte(0x80)) return false;
                     if (!TryAppendAddress(a, b, ptr_base)) return false;
                 }
-                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Second operand must be a CPU register or memory value"); return false; }
+                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected a cpu register or memory value as second operand"); return false; }
 
                 return true;
             }
@@ -3107,7 +3156,7 @@ namespace CSX64
             public bool TryProcessFPUBinaryOp(OPCode op, bool integral, bool pop)
             {
                 // write op code
-                if (!TryAppendVal(1, (UInt64)op)) return false;
+                if (!TryAppendByte((byte)op)) return false;
 
                 // make sure the programmer doesn't pull any funny business due to our arg-count-based approach
                 if (integral && args.Length != 1) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Integral {op} requires 1 arg"); return false; }
@@ -3117,30 +3166,29 @@ namespace CSX64
                 if (args.Length == 0)
                 {
                     // no args is st(1) <- f(st(1), st(0)), pop
-                    if (!pop) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: No args requires a pop operation"); return false; }
+                    if (!pop) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: This form requires operands"); return false; }
 
-                    if (!TryAppendVal(1, 0x12)) return false;
+                    if (!TryAppendByte(0x12)) return false;
                 }
                 else if (args.Length == 1)
                 {
-                    if (!TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out UInt64 sizecode, out bool explicit_size))
-                    { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected a memory value"); return false; }
+                    if (!TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out UInt64 sizecode, out bool explicit_size)) return false;
 
-                    if (!explicit_size) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Could not deduce data size"); return false; }
+                    if (!explicit_size) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Could not deduce operand size"); return false; }
 
                     // integral
                     if (integral)
                     {
-                        if (sizecode == 1) { if (!TryAppendVal(1, 5)) return false; }
-                        else if (sizecode == 2) { if (!TryAppendVal(1, 6)) return false; }
-                        else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Integral {op} only supports 16 and 32-bit operands"); return false; }
+                        if (sizecode == 1) { if (!TryAppendByte(5)) return false; }
+                        else if (sizecode == 2) { if (!TryAppendByte(6)) return false; }
+                        else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size is not supported"); return false; }
                     }
                     // floatint-point
                     else
                     {
-                        if (sizecode == 2) { if (!TryAppendVal(1, 3)) return false; }
-                        else if (sizecode == 3) { if (!TryAppendVal(1, 4)) return false; }
-                        else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} only supports 32 and 64-bit operands"); return false; }
+                        if (sizecode == 2) { if (!TryAppendByte(3)) return false; }
+                        else if (sizecode == 3) { if (!TryAppendByte(4)) return false; }
+                        else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size is not supported"); return false; }
                     }
 
                     // write the address
@@ -3148,40 +3196,36 @@ namespace CSX64
                 }
                 else if (args.Length == 2)
                 {
-                    if (!TryParseFPURegister(args[0], out UInt64 a) || !TryParseFPURegister(args[1], out UInt64 b))
-                    { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} with 2 args requires both args be fpu registers"); return false; }
+                    if (!TryParseFPURegister(args[0], out UInt64 a) || !TryParseFPURegister(args[1], out UInt64 b)) return false;
 
                     // if b is st(0) (do this one first since it handles the pop form)
                     if (b == 0)
                     {
-                        // while popping the dest is legal, it's probably not what the programmer intended
-                        if (pop && a == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Attempt to pop the destination"); return false; }
-
                         if (!TryAppendVal(1, (a << 4) | (pop ? 2 : 1ul))) return false;
                     }
                     // if a is st(0)
                     else if (a == 0)
                     {
-                        if (pop) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Popping {op} requires arg 2 be st(0)"); return false; }
+                        if (pop) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected ST(0) as second operand"); return false; }
 
                         if (!TryAppendVal(1, b << 4)) return false;
                     }
                     // x87 requires one of them be st(0)
-                    else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} with 2 args requires one of the registers be st(0)"); return false; }
+                    else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: One operand must be ST(0)"); return false; }
                 }
-                else { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected between 0 and 2 args"); return false; }
+                else { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Too many operands"); return false; }
 
                 return true;
             }
-            public bool TryProcessFPURegisterOp(OPCode op, bool has_ext_op = false, UInt64 ext_op = 0)
+            public bool TryProcessFPURegisterOp(OPCode op, bool has_ext_op = false, byte ext_op = 0)
             {
-                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 1 operands"); return false; }
+                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 1 operand"); return false; }
 
-                if (!TryParseFPURegister(args[0], out UInt64 reg)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} requires a register operand"); return false; }
+                if (!TryParseFPURegister(args[0], out UInt64 reg)) return false;
 
                 // write op code
-                if (!TryAppendVal(1, (UInt64)op)) return false;
-                if (has_ext_op) { if (!TryAppendVal(1, ext_op)) return false; }
+                if (!TryAppendByte((byte)op)) return false;
+                if (has_ext_op) { if (!TryAppendByte(ext_op)) return false; }
 
                 // write the register
                 if (!TryAppendVal(1, reg)) return false;
@@ -3191,10 +3235,10 @@ namespace CSX64
 
             public bool TryProcessFLD(OPCode op, bool integral)
             {
-                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 1 arg"); return false; }
+                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 1 operand"); return false; }
 
                 // write op code
-                if (!TryAppendVal(1, (UInt64)op)) return false;
+                if (!TryAppendByte((byte)op)) return false;
 
                 // pushing st(i)
                 if (TryParseFPURegister(args[0], out UInt64 reg))
@@ -3202,21 +3246,23 @@ namespace CSX64
                     if (!TryAppendVal(1, reg << 4)) return false;
                 }
                 // pushing memory value
-                else if (TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out UInt64 sizecode, out bool explicit_size))
+                else if (args[0][args[0].Length - 1] == ']')
                 {
+                    if (!TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out UInt64 sizecode, out bool explicit_size)) return false;
+
                     if (!explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce operand size"); return false; }
 
                     // handle integral cases
                     if (integral)
                     {
-                        if (sizecode != 1 && sizecode != 2 && sizecode != 3) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Instruction does not support the specified operand size"); return false; }
+                        if (sizecode != 1 && sizecode != 2 && sizecode != 3) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size is not supported"); return false; }
 
                         if (!TryAppendVal(1, sizecode + 2)) return false;
                     }
                     // otherwise floating-point
                     else
                     {
-                        if (sizecode != 2 && sizecode != 3) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Instruction only supports 32 or 64-bit floating-point operands"); return false; }
+                        if (sizecode != 2 && sizecode != 3) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size is not supported"); return false; }
 
                         if (!TryAppendVal(1, sizecode - 1)) return false;
                     }
@@ -3224,28 +3270,30 @@ namespace CSX64
                     // and write the address
                     if (!TryAppendAddress(a, b, ptr_base)) return false;
                 }
-                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected an FPU register or a memory value"); return false; }
+                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected an fpu register or a memory value"); return false; }
 
                 return true;
             }
             public bool TryProcessFST(OPCode op, bool integral, bool pop)
             {
-                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 1 arg"); return false; }
+                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 1 operand"); return false; }
 
                 // write the op code
-                if (!TryAppendVal(1, (UInt64)op)) return false;
+                if (!TryAppendByte((byte)op)) return false;
 
                 // if it's an fpu register
                 if (TryParseFPURegister(args[0], out UInt64 reg))
                 {
                     // can't be an integral op
-                    if (integral) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Attempt to use integral {op} on an fpu register"); return false; }
+                    if (integral) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected a memory value"); return false; }
 
                     if (!TryAppendVal(1, (reg << 4) | (pop ? 1 : 0ul))) return false;
                 }
                 // if it's a memory destination
-                else if (TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out UInt64 sizecode, out bool explicit_size))
+                else if (args[0][args[0].Length - 1] == ']')
                 {
+                    if (!TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out UInt64 sizecode, out bool explicit_size)) return false;
+
                     if (!explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce operand size"); return false; }
 
                     // if this is integral (i.e. truncation store)
@@ -3256,18 +3304,18 @@ namespace CSX64
                         else if (sizecode == 3)
                         {
                             // there isn't a non-popping 64-bit int store
-                            if (!pop) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: 64-bit integral {op} must be a popping operation"); return false; }
+                            if (!pop) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size is not supported"); return false; }
 
                             if (!TryAppendVal(1, 10)) return false;
                         }
-                        else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Integral {op} does not support the specified operand size"); return false; }
+                        else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size is not supported"); return false; }
                     }
                     // otherwise is floating-point
                     else
                     {
                         if (sizecode == 2) { if (!TryAppendVal(1, pop ? 3 : 2ul)) return false; }
                         else if (sizecode == 3) { if (!TryAppendVal(1, pop ? 5 : 4ul)) return false; }
-                        else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Attempt to store to unsupported floating-point size"); return false; }
+                        else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size is not supported"); return false; }
                     }
 
                     // and write the address
@@ -3280,36 +3328,40 @@ namespace CSX64
             public bool TryProcessFCOM(OPCode op, bool integral, bool pop, bool pop2)
             {
                 // write the op code
-                if (!TryAppendVal(1, (UInt64)op)) return false;
+                if (!TryAppendByte((byte)op)) return false;
 
                 // handle arg count cases
                 if (args.Length == 0)
                 {
-                    if (integral) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Integral {op} expected 1 operand"); return false; }
+                    if (integral) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 1 operand"); return false; }
 
                     // no args is same as using st(1) (plus additional case of double pop)
                     if (!TryAppendVal(1, (1 << 4) | (pop2 ? 2 : pop ? 1 : 0ul))) return false;
                 }
                 else if (args.Length == 1)
                 {
-                    if (pop2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Double-popping {op} expected 0 operands"); return false; }
+                    // double pop doesn't accept operands
+                    if (pop2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected no operands"); return false; }
 
                     // register
                     if (TryParseFPURegister(args[0], out UInt64 reg))
                     {
-                        if (integral) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Integral {op} cannot be used on an fpu register"); return false; }
+                        // integral forms only store to memory
+                        if (integral) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected a memory value"); return false; }
 
                         if (!TryAppendVal(1, (reg << 4) | (pop ? 1 : 0ul))) return false;
                     }
                     // memory
-                    else if (TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out UInt64 sizecode, out bool explicit_size))
+                    else if (args[0][args[0].Length - 1] == ']')
                     {
+                        if (!TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out UInt64 sizecode, out bool explicit_size)) return false;
+
                         if (!explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce operand size"); return false; }
 
                         // handle size cases
                         if (sizecode == 1)
                         {
-                            if (!integral) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support 16-bit floating-point"); return false; }
+                            if (!integral) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size is not supported"); return false; }
 
                             if (!TryAppendVal(1, pop ? 8 : 7ul)) return false;
                         }
@@ -3319,18 +3371,18 @@ namespace CSX64
                         }
                         else if (sizecode == 3)
                         {
-                            if (integral) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Integral {op} does not support 64-bit operands"); return false; }
+                            if (integral) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size is not supported"); return false; }
 
                             if (!TryAppendVal(1, pop ? 6 : 5ul)) return false;
                         }
-                        else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: {op} does not support the specified operand size"); return false; }
+                        else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size is not supported"); return false; }
 
                         // and write the address
                         if (!TryAppendAddress(a, b, ptr_base)) return false;
                     }
                     else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected an fpu register or a memory value"); return false; }
                 }
-                else { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 0 or 1 operands"); return false; }
+                else { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Too many operands"); return false; }
 
                 return true;
             }
@@ -3338,26 +3390,22 @@ namespace CSX64
             {
                 if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 2 operands"); return false; }
 
-                if (!TryParseFPURegister(args[0], out UInt64 reg) || reg != 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: First operand must be st(0)"); return false; }
-                if (!TryParseFPURegister(args[1], out reg)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Second operand must be an fpu register"); return false; }
+                if (!TryParseFPURegister(args[0], out UInt64 reg) || reg != 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: First operand must be ST(0)"); return false; }
+                if (!TryParseFPURegister(args[1], out reg)) return false;
 
-                // write the op code
-                if (!TryAppendVal(1, (UInt64)op)) return false;
-
+                if (!TryAppendByte((byte)op)) return false;
                 if (!TryAppendVal(1, (pop ? 128 : 0ul) | (unordered ? 64 : 0ul) | reg)) return false;
 
                 return true;
             }
             public bool TryProcessFMOVcc(OPCode op, UInt64 condition)
             {
-                if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: {op} expected 2 operands"); return false; }
+                if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 2 operands"); return false; }
 
-                if (!TryParseFPURegister(args[0], out UInt64 reg) || reg != 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: operand 1 must be st(0)"); return false; }
-                if (!TryParseFPURegister(args[1], out reg)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: operand 2 must be an fpu register"); return false; }
+                if (!TryParseFPURegister(args[0], out UInt64 reg) || reg != 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: First operand must be ST(0)"); return false; }
+                if (!TryParseFPURegister(args[1], out reg)) return false;
 
-                // write op code
-                if (!TryAppendVal(1, (UInt64)op)) return false;
-
+                if (!TryAppendByte((byte)op)) return false;
                 if (!TryAppendVal(1, (reg << 4) | condition)) return false;
 
                 return true;
@@ -3432,7 +3480,7 @@ namespace CSX64
                 if (args.Length != 2) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected 2 operands"); return false; }
 
                 // write the op code
-                if (!TryAppendVal(1, (UInt64)op)) return false;
+                if (!TryAppendByte((byte)op)) return false;
 
                 // extract the mask
                 if (!TryExtractVPUMask(ref args[0], out Expr mask, out bool zmask)) return false;
@@ -3459,8 +3507,10 @@ namespace CSX64
                         if (!TryAppendVal(1, src)) return false;
                     }
                     // vreg, mem
-                    else if (TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out src_sizecode, out bool src_explicit))
+                    else if (args[1][args[1].Length - 1] == ']')
                     {
+                        if (!TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out src_sizecode, out bool src_explicit)) return false;
+
                         if (src_explicit && src_sizecode != (scalar ? elem_sizecode : dest_sizecode)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size mismatch"); return false; }
 
                         if (!TryAppendVal(1, (dest << 3) | (aligned ? 4 : 0ul) | (dest_sizecode - 4))) return false;
@@ -3469,11 +3519,13 @@ namespace CSX64
                         if (!TryAppendAddress(a, b, ptr_base)) return false;
                     }
                     // vreg, imm
-                    else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected vpu register or memory value as second operand"); return false; }
+                    else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected a vpu register or memory value as second operand"); return false; }
                 }
                 // mem, *
-                else if (TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out dest_sizecode, out bool dest_explicit))
+                else if (args[0][args[0].Length - 1] == ']')
                 {
+                    if (!TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out dest_sizecode, out bool dest_explicit)) return false;
+
                     // mem, vreg
                     if (TryParseVPURegister(args[1], out UInt64 src, out UInt64 src_sizecode))
                     {
@@ -3493,7 +3545,7 @@ namespace CSX64
                     // mem, mem/imm
                     else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected a vpu register as second operand"); return false; }
                 }
-                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: First operand must be a vpu register or a memory value"); return false; }
+                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected a vpu register or a memory value as first operand"); return false; }
 
                 return true;
             }
@@ -3502,7 +3554,7 @@ namespace CSX64
                 if (args.Length != 2 && args.Length != 3) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected 2 or 3 operands"); return false; }
 
                 // write the op code
-                if (!TryAppendVal(1, (UInt64)op)) return false;
+                if (!TryAppendByte((byte)op)) return false;
 
                 // extract the mask
                 if (!TryExtractVPUMask(ref args[0], out Expr mask, out bool zmask)) return false;
@@ -3530,8 +3582,10 @@ namespace CSX64
                             if (!TryAppendVal(1, src)) return false;
                         }
                         // vreg, mem
-                        else if (TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out src_sizecode, out bool src_explicit))
+                        else if (args[1][args[1].Length - 1] == ']')
                         {
+                            if (!TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out src_sizecode, out bool src_explicit)) return false;
+
                             if (src_explicit && src_sizecode != (scalar ? elem_sizecode : dest_sizecode)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size mismatch"); return false; }
 
                             if (!TryAppendVal(1, (dest << 3) | (aligned ? 4 : 0ul) | (dest_sizecode - 4))) return false;
@@ -3561,8 +3615,10 @@ namespace CSX64
                                 if (!TryAppendVal(1, src2)) return false;
                             }
                             // vreg, vreg, mem
-                            else if (TryParseAddress(args[2], out UInt64 a, out UInt64 b, out Expr ptr_base, out src2_sizecode, out bool src2_explicit))
+                            else if (args[2][args[2].Length - 1] == ']')
                             {
+                                if (!TryParseAddress(args[2], out UInt64 a, out UInt64 b, out Expr ptr_base, out src2_sizecode, out bool src2_explicit)) return false;
+
                                 if (dest_sizecode != src1_sizecode || src2_explicit && src2_sizecode != (scalar ? elem_sizecode : dest_sizecode)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size mismatch"); return false; }
 
                                 if (!TryAppendVal(1, (dest << 3) | (aligned ? 4 : 0ul) | (dest_sizecode - 4))) return false;
@@ -3579,7 +3635,7 @@ namespace CSX64
                     }
                 }
                 // mem/imm, *
-                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: First operand must be a vpu register"); return false; }
+                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected a vpu register as first operand"); return false; }
 
                 return true;
             }
@@ -3643,7 +3699,7 @@ namespace CSX64
                         case 8: if (!res.Write(data.Address, 8, val)) { err = $"line {data.Line}: Error writing value"; return PatchError.Error; } break;
                         case 4: if (!res.Write(data.Address, 4, FloatAsUInt64((float)AsDouble(val)))) { err = $"line {data.Line}: Error writing value"; return PatchError.Error; } break;
 
-                        default: err = $"line {data.Line}: Attempt to use unsupported floating-point size"; return PatchError.Error;
+                        default: err = $"line {data.Line}: Attempt to use unsupported floating-point format"; return PatchError.Error;
                     }
                 }
                 // otherwise it's integral
