@@ -1,3 +1,7 @@
+; source http://www.cplusplus.com/reference/cstdlib/
+; this one needs a TON of work
+; proper malloc algorithm has been put off until sys_brk is implemented
+
 global malloc
 global free
 

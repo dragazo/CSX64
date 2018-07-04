@@ -1,4 +1,5 @@
-global FILE.sz
+; source http://www.cplusplus.com/reference/cstdio/
+; needs a TON of file handling code
 
 global remove
 global rename
@@ -9,13 +10,11 @@ global rename
 ;     int fd; (-1 for none)
 ;     int bpos; (pos for reading, len for writing)
 ;     char buffer[1016];
-FILE: equ 0
-    .fd: equ 0
-    .bpos: equ 4
-    .buffer: equ 8
-    
-    .bcap: equ 1016
-    .sz: equ 1024
+FILE.fd: equ 0
+FILE.bpos: equ 4
+FILE.buffer: equ 8
+FILE.bcap: equ 1016
+FILE.sz: equ 1024
 
 ; --------------------------------------
     
