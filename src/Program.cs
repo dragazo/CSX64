@@ -49,22 +49,26 @@ namespace CSX64
         private const int ExecReturnCode = -1;
 
         private const string HelpMessage =
-            "\n" +
-            "usage: csx [<options>] [--] <pathspec>...\n" +
-            "\n" +
-            "    -h, --help             shows help info\n" +
-            "    -g, --graphical        executes a graphical program\n" +
-            "    -a, --assemble         assembe files into object files\n" +
-            "    -l, --link             link object files into an executable\n" +
-            "        --entry <entry>    main entry point for linker\n" +
-            "    -o, --out <pathspec>   specifies explicit output path\n" +
-            "        --fs               sets the file system flag\n" +
-            "        --end              remaining args are pathspec\n" +
-            "\n" +
-            "if no -g/-a/-l provided, executes a console program\n" +
-            "\n" +
-            "report bugs to https://github.com/dragazo/CSX64/issues\n" +
-            "";
+@"
+usage: csx [<options>] [--] <pathspec>...
+    -h, --help             shows help info
+    -g, --graphical        executes a graphical program
+    -a, --assemble         assembe files into object files
+    -l, --link             link object files into an executable
+        --entry <entry>    main entry point for linker
+    -o, --out <pathspec>   specifies explicit output path
+        --fs               sets the file system flag
+        --end              remaining args are pathspec
+
+if no -g/-a/-l provided, executes a console program
+
+report bugs to https://github.com/dragazo/CSX64/issues
+";
+
+        /// <summary>
+        /// Path to the stdlib folder (used by the linker)
+        /// </summary>
+        private const string stdlib = "stdlib";
 
         /// <summary>
         /// Prints a message to the user (console or message box)
@@ -81,9 +85,9 @@ namespace CSX64
         [STAThread]
         private static int Main(string[] args)
         {
-            if (!BitConverter.IsLittleEndian) { Print("ERROR: This platform is not little-endian"); return 1; }
+            if (!BitConverter.IsLittleEndian) { Print("ERROR: This platform is not little-endian"); return -1; }
 
-            // set up initilization thingys
+            // set up initilization thingys for graphical stuff
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
@@ -422,6 +426,41 @@ namespace CSX64
             finally { f?.Dispose(); }
         }
 
+        /// <summary>
+        /// Loads an object file and adds it to the list
+        /// </summary>
+        /// <param name="objs">the list of object files</param>
+        /// <param name="path">the file to to load</param>
+        private static int LoadObjectFile(this List<ObjectFile> objs, string path)
+        {
+            int ret = LoadObjectFile(path, out ObjectFile obj);
+            if (ret != 0) return ret;
+
+            objs.Add(obj);
+
+            return 0;
+        }
+        /// <summary>
+        /// Loads the .o object files from a directory and adds them to the list
+        /// </summary>
+        /// <param name="objs">the list of object files</param>
+        /// <param name="path">the directory to load</param>
+        private static int LoadObjectFileDir(this List<ObjectFile> objs, string path)
+        {
+            if (!Directory.Exists(path)) { Print($"no directory found: {path}"); return (int)AsmLnkErrorExt.DirectoryNotFound; }
+
+            string[] files = Directory.GetFiles(path, "*.o");
+            foreach (string file in files)
+            {
+                int ret = LoadObjectFile(file, out ObjectFile obj);
+                if (ret != 0) return ret;
+
+                objs.Add(obj);
+            }
+
+            return 0;
+        }
+
         // -- assembly / linking -- //
 
         /// <summary>
@@ -445,7 +484,7 @@ namespace CSX64
                 return SaveObjectFile(to, obj);
             }
             // otherwise show error message
-            else { Print($"Assemble Error:\n{res.ErrorMsg}"); return (int)res.Error; }
+            else { Print($"Assemble Error in {from}:\n{res.ErrorMsg}"); return (int)res.Error; }
         }
         /// <summary>
         /// Assembles the (from) file into an object file and saves it as the same name but with a .o extension
@@ -464,16 +503,21 @@ namespace CSX64
         /// <param name="entry_point">the main entry point</param>
         private static int Link(List<string> paths, string to, string entry_point)
         {
-            // get all the object files
-            ObjectFile[] objs = new ObjectFile[paths.Count];
-            for (int i = 0; i < paths.Count; ++i)
+            List<ObjectFile> objs = new List<ObjectFile>(paths.Count);
+
+            // load the stdlib files
+            int ret = objs.LoadObjectFileDir($"{AppDomain.CurrentDomain.BaseDirectory}/{stdlib}");
+            if (ret != 0) return ret;
+
+            // load the user-defined pathspecs
+            foreach (string path in paths)
             {
-                int ret = LoadObjectFile(paths[i], out objs[i]);
-                if (ret != 0) return ret; 
+                ret = objs.LoadObjectFile(path);
+                if (ret != 0) return ret;
             }
 
             // link the object files
-            LinkResult res = Assembly.Link(out byte[] exe, objs, entry_point);
+            LinkResult res = Assembly.Link(out byte[] exe, objs.ToArray(), entry_point);
 
             // if there was no error
             if (res.Error == LinkError.None)

@@ -54,4 +54,5 @@ free:
 
 segment .data
 
+align 8
 heap_top: dq __heap__ ; top of memory heap
