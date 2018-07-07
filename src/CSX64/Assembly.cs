@@ -77,6 +77,23 @@ namespace CSX64
         internal Dictionary<string, Expr> Symbols = new Dictionary<string, Expr>();
 
         /// <summary>
+        /// The largest alignment in the text segment
+        /// </summary>
+        internal UInt32 TextAlign = 1;
+        /// <summary>
+        /// The largest alignment in the rodata segment
+        /// </summary>
+        internal UInt32 RodataAlign = 1;
+        /// <summary>
+        /// The largest alignment in the data segment
+        /// </summary>
+        internal UInt32 DataAlign = 1;
+        /// <summary>
+        /// The largest alignment in the bss segment
+        /// </summary>
+        internal UInt32 BSSAlign = 1;
+
+        /// <summary>
         /// The holes in the text segment that need to be patched
         /// </summary>
         internal List<HoleData> TextHoles = new List<HoleData>();
@@ -105,23 +122,6 @@ namespace CSX64
         /// The length of the Bss segment
         /// </summary>
         internal UInt32 BssLen = 0;
-
-        /// <summary>
-        /// The largest alignment in the text segment
-        /// </summary>
-        internal UInt32 TextAlign = 1;
-        /// <summary>
-        /// The largest alignment in the rodata segment
-        /// </summary>
-        internal UInt32 RodataAlign = 1;
-        /// <summary>
-        /// The largest alignment in the data segment
-        /// </summary>
-        internal UInt32 DataAlign = 1;
-        /// <summary>
-        /// The largest alignment in the bss segment
-        /// </summary>
-        internal UInt32 BSSAlign = 1;
 
         /// <summary>
         /// Marks that this object file is in a valid, usable state
@@ -161,6 +161,12 @@ namespace CSX64
                 Expr.WriteTo(writer, entry.Value);
             }
 
+            // write alignments
+            writer.Write(obj.TextAlign);
+            writer.Write(obj.RodataAlign);
+            writer.Write(obj.DataAlign);
+            writer.Write(obj.BSSAlign);
+
             // write the text holes (length-prefixed)
             writer.Write(obj.TextHoles.Count);
             foreach (HoleData hole in obj.TextHoles)
@@ -190,12 +196,6 @@ namespace CSX64
 
             // write length of bss
             writer.Write(obj.BssLen);
-
-            // write alignments
-            writer.Write(obj.TextAlign);
-            writer.Write(obj.RodataAlign);
-            writer.Write(obj.DataAlign);
-            writer.Write(obj.BSSAlign);
         }
         /// <summary>
         /// Reads a binary representation of an object file from the stream
@@ -226,6 +226,12 @@ namespace CSX64
 
                 obj.Symbols.Add(key, value);
             }
+
+            // read alignments
+            if (!(obj.TextAlign = reader.ReadUInt32()).IsPowerOf2()) throw new FormatException("Object file was corrupted");
+            if (!(obj.RodataAlign = reader.ReadUInt32()).IsPowerOf2()) throw new FormatException("Object file was corrupted");
+            if (!(obj.DataAlign = reader.ReadUInt32()).IsPowerOf2()) throw new FormatException("Object file was corrupted");
+            if (!(obj.BSSAlign = reader.ReadUInt32()).IsPowerOf2()) throw new FormatException("Object file was corrupted");
 
             // read the text holes (length-prefixed)
             count = reader.ReadInt32();
@@ -271,12 +277,6 @@ namespace CSX64
 
             // read the length of bss segment
             obj.BssLen = reader.ReadUInt32();
-
-            // read alignments
-            if (!(obj.TextAlign = reader.ReadUInt32()).IsPowerOf2()) throw new FormatException("Object file was corrupted");
-            if (!(obj.RodataAlign = reader.ReadUInt32()).IsPowerOf2()) throw new FormatException("Object file was corrupted");
-            if (!(obj.DataAlign = reader.ReadUInt32()).IsPowerOf2()) throw new FormatException("Object file was corrupted");
-            if (!(obj.BSSAlign = reader.ReadUInt32()).IsPowerOf2()) throw new FormatException("Object file was corrupted");
 
             // validate the object
             obj.Clean = true;
@@ -817,6 +817,26 @@ namespace CSX64
             {
                 Left.Resolve(expr, result, floating);
                 Right?.Resolve(expr, result, floating);
+            }
+        }
+        /// <summary>
+        /// Resolves all occurrences of (expr) with the specified value
+        /// </summary>
+        /// <param name="expr">the expression to be replaced</param>
+        /// <param name="value">The value to replace it with</param>
+        public void Resolve(string expr, string value)
+        {
+            // if we're a leaf
+            if (OP == OPs.None)
+            {
+                // if we have this value, replace with result
+                if (Token == expr) Token = value;
+            }
+            // otherwise call on children
+            else
+            {
+                Left.Resolve(expr, value);
+                Right?.Resolve(expr, value);
             }
         }
 
@@ -4254,16 +4274,23 @@ namespace CSX64
 
             // -- eliminate as many unnecessary symbols as we can -- //
 
-            List<string> elim_symbols = new List<string>(); // symbol names to be eliminated
+            List<string> elim_symbols = new List<string>();   // symbol names to be eliminated
+            List<string> rename_symbols = new List<string>(); // symbol names that we can rename to be shorter
 
             // for each symbol
             foreach (var entry in file.Symbols)
             {
-                // if this symbol has already been evaluated and isn't global
-                if (entry.Value.IsEvaluated && !file.GlobalSymbols.Contains(entry.Key))
+                // if this symbol is non-global
+                if (!file.GlobalSymbols.Contains(entry.Key))
                 {
-                    // we can eliminate it (because it's already been linked internally and won't be needed externally)
-                    elim_symbols.Add(entry.Key);
+                    // if this symbol has already been evaluated
+                    if (entry.Value.IsEvaluated)
+                    {
+                        // we can eliminate it (because it's already been linked internally and won't be needed externally)
+                        elim_symbols.Add(entry.Key);
+                    }
+                    // otherwise we can rename it to something shorter (because it's still needed internally, but not needed externally)
+                    else rename_symbols.Add(entry.Key);
                 }
             }
             // remove all the symbols we can eliminate
@@ -4271,8 +4298,27 @@ namespace CSX64
 
             // -- finalize -- //
 
-            // verify integrity of file
+                // verify integrity of file
             if (!args.VerifyIntegrity()) return args.res;
+
+            // rename all the symbols we can shorten (done after verify to ensure there's no verify error messages with the renamed symbols)
+            for (int i = 0; i < rename_symbols.Count; ++i)
+            {
+                string from = rename_symbols[i];
+                string to = $"^{i:x}";
+
+                // rename the symbol in the symbol table
+                file.Symbols.Add(to, file.Symbols[from]);
+                file.Symbols.Remove(from);
+
+                // find and replace in symbol table
+                foreach (var entry in file.Symbols) entry.Value.Resolve(from, to);
+
+                // find and replace in hole expressions
+                foreach (var entry in file.TextHoles) entry.Expr.Resolve(from, to);
+                foreach (var entry in file.RodataHoles) entry.Expr.Resolve(from, to);
+                foreach (var entry in file.DataHoles) entry.Expr.Resolve(from, to);
+            }
 
             // validate result
             file.Clean = true;
