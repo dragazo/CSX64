@@ -2,13 +2,267 @@
 ; this one needs a TON of work
 ; proper malloc algorithm has been put off until sys_brk is implemented
 
+global atoi, atol, atof
+
+global NULL
+
 global malloc, free
 
 global RAND_MAX, rand, srand
 
-; --------------------
+global abs, labs
+
+; -------------------------------------------
+
+extern isspace
+
+extern pow
+
+; -------------------------------------------
 
 segment .text
+
+; const char *skipwspace(const char *str);
+skipwspace:
+    ; reserve r15 for str
+    push r15
+    mov r15, rdi
+    
+    ; skip white space in str
+    .skip:
+        xor edi, edi
+        mov dil, [r15]
+        call isspace
+        
+        cmp eax, 0
+        jz .skip_done
+        
+        inc r15
+        jmp .skip
+    .skip_done:
+    
+    ; restore register states
+    mov rax, r15
+    pop r15
+    
+    ret
+    
+; helper function
+_atoi_init:
+    ; skip white space
+    call skipwspace
+    mov rdi, rax
+    
+    ; read optional +- sign -- dl = sign
+    mov dl, [rdi]
+    cmp dl, '+'
+    je .pos
+    cmp dl, '-'
+    je .neg
+    jmp .neither
+    
+    .pos:
+    mov bl, 0
+    inc rdi
+    jmp .aft
+    .neg:
+    mov bl, 1
+    inc rdi
+    jmp .aft
+    .neither:
+    mov bl, 0
+    
+    .aft:
+    xor rax, rax ; clear result
+    
+    ret
+    
+; int atoi(const char *str);
+atoi:
+    call _atoi_init ; initialize    
+    
+    ; parse the value
+    .top:
+        ; read a char (zero extended)
+        movzx edx, byte ptr [rdi]
+        
+        ; must be a digit -- value in edx
+        cmp dl, '9'
+        ja .done
+        sub dl, '0'
+        jb .done
+        
+        imul eax, 10
+        add eax, edx
+        
+        inc rdi
+        jmp .top 
+    .done:
+    
+    ; account for sign
+    mov edx, eax
+    neg edx
+    cmp bl, 0
+    movnz eax, edx
+    
+    ; return result
+    ret
+    
+; long atol(const char *str);
+atol:
+    call _atoi_init ; initialize    
+    
+    ; parse the value
+    .top:
+        ; read a char (zero extended)
+        movzx rdx, byte ptr [rdi]
+        
+        ; must be a digit -- value in rdx
+        cmp dl, '9'
+        ja .done
+        sub dl, '0'
+        jb .done
+        
+        imul rax, 10
+        add rax, rdx
+        
+        inc rdi
+        jmp .top 
+    .done:
+    
+    ; account for sign
+    mov rdx, rax
+    neg rdx
+    cmp bl, 0
+    movnz rax, rdx
+    
+    ; return result
+    ret
+
+; helper function
+_atof_frac:
+    fldz                ; st2 is fractional component
+    fld qword ptr [f10] ; st1 holds 10.0
+    fld1                ; st0 holds digit scalar (0.1 -> 0.01 -> 0.001 etc.)
+    
+    ; parse the value
+    .top:
+        ; read a char (zero extended)
+        movzx edx, byte ptr [rdi]
+        
+        ; must be a digit -- value in edx
+        cmp dl, '9'
+        ja .done
+        sub dl, '0'
+        jb .done
+        
+        fdiv st0, st1
+        mov [qtemp], edx
+        fild dword ptr [qtemp]
+        fmul st0, st1
+        faddp st3, st0
+        
+        inc rdi
+        jmp .top 
+    .done:
+    
+    ; pop st0 and st1 (mult masks)
+    fstp st0
+    fstp st0
+    
+    ; add fractional component to integral component
+    faddp st1, st0
+    
+    ret
+; helper function
+_atof_exp:
+    ; read the exponent - integral
+    push rdi
+    call atoi
+    pop rdi
+    
+    ; perform 10^exp
+    mov [qtemp], eax
+    fild dword ptr [qtemp]
+    fstp qword ptr [qtemp]
+    movsd xmm0, [f10]
+    movsd xmm1, [qtemp]
+    call pow
+    
+    ; multiply into result
+    movsd [qtemp], xmm0
+    fld qword ptr [qtemp]
+    fmulp st1, st0
+    
+    ret
+    
+; double atof(const char *str);
+atof:
+    call _atoi_init ; initialize    
+    
+    fldz                ; st1 is integral component
+    fld qword ptr [f10] ; st0 holds 10.0
+    
+    ; parse the value
+    .top:
+        ; read a char (zero extended)
+        movzx edx, byte ptr [rdi]
+        
+        ; must be a digit -- value in edx
+        cmp dl, '9'
+        ja .done
+        sub dl, '0'
+        jb .done
+        
+        fmul st1, st0
+        mov [qtemp], edx
+        fild dword ptr [qtemp]
+        faddp st2, st0
+        
+        inc rdi
+        jmp .top 
+    .done:
+    
+    ; pop st0 (mult mask)
+    fstp st0
+    
+    ; account for sign
+    fld st0
+    fchs
+    cmp bl, 0
+    fmove st0, st1
+    fstp st1
+    
+    ; examine the current character (need to reload because of the sub breaker)
+    mov dl, [rdi]
+    ; if it's a '.', do frac helper
+    cmp dl, '.'
+    jne .no_frac
+    
+    inc rdi
+    call _atof_frac
+    
+    .no_frac:
+    ; examine the current character (need to reload because of the potential call)
+    mov dl, [rdi]
+    ; if it's an 'e' or 'E', do exp helper
+    or dl, 32
+    cmp dl, 'e' ; convert to lower and just test that
+    jne .no_exp
+    
+    inc rdi
+    call _atof_exp
+    
+    .noexp:
+    
+    ; return result
+    .ret:
+    fstp qword ptr [qtemp]
+    movsd xmm0, [qtemp]
+    ret
+; -------------------------------------------
+
+NULL: equ 0
 
 ; void *malloc(unsigned long size);
 malloc:
@@ -55,6 +309,14 @@ free:
 
 ; -------------------------------------------
 
+; void abort(void);
+abort:
+    mov eax, sys_exit
+    mov ebx, err_abort
+    syscall
+
+; -------------------------------------------
+
 ; pseudo-random - source: https://referencesource.microsoft.com/#mscorlib/system/random.cs
 
 RAND_MAX: equ MBIG ; alias for stdlib macro
@@ -76,8 +338,7 @@ srand:
         
         ; int subtraction = (Seed == Int32.MinValue) ? Int32.MaxValue : Math.Abs(Seed);
         mov esi, edi
-        neg esi
-        cmp edi, 0
+        neg edi
         movs edi, esi
         cmp edi, 0
         movs edi, 0x7fffffff
@@ -99,15 +360,15 @@ srand:
             idiv dword 55
             mov eax, edx
             ; SeedArray[ii]=mk;
-            mov [SeedArray + eax*4], ecx
+            mov [SeedArray + rax*4], ecx
             ; mk = mj - mk;
             neg ecx
             add ecx, ebx
             ; if (mk<0) mk+=MBIG;
-            lea r8d, [ecx + MBIG]
+            lea r8d, [rcx + MBIG]
             movs ecx, r8d
             ; mj=SeedArray[ii];
-            mov ebx, [SeedArray + eax*4]
+            mov ebx, [SeedArray + rax*4]
             
             ; -- looper
             inc esi
@@ -125,16 +386,16 @@ srand:
             mov r9d, 1
             .loop3_top:
                 ; SeedArray[i] -= SeedArray[1+(i+30)%55];
-                lea eax, [r9d + 30]
+                lea eax, [r9 + 30]
                 cdq
                 idiv dword 55
                 inc edx
-                mov esi, [SeedArray + r9d*4]
-                sub esi, [SeedArray + edx*4]
-                mov [SeedArray + r9d*4], esi
+                mov esi, [SeedArray + r9*4]
+                sub esi, [SeedArray + rdx*4]
+                mov [SeedArray + r9*4], esi
                 ; if (SeedArray[i]<0) SeedArray[i]+=MBIG;
-                lea edx, [esi + MBIG]
-                movs [SeedArray + r9d*4], edx
+                lea edx, [rsi + MBIG]
+                movs [SeedArray + r9*4], edx
                 
                 ; -- looper
                 inc r9d
@@ -174,8 +435,8 @@ rand:
         movge ecx, 1
         
         ; retVal = SeedArray[locINext]-SeedArray[locINextp];
-        mov eax, [SeedArray + ebx*4]
-        sub eax, [SeedArray + ecx*4]
+        mov eax, [SeedArray + rbx*4]
+        sub eax, [SeedArray + rcx*4]
         
         ; if (retVal == MBIG) retVal--;
         mov esi, eax
@@ -189,7 +450,7 @@ rand:
         movl eax, esi
         
         ; SeedArray[locINext]=retVal;
-        mov [SeedArray + ebx*4], eax
+        mov [SeedArray + rbx*4], eax
         
         ; inext = locINext;
         ; inextp = locINextp;
@@ -198,25 +459,38 @@ rand:
         
         ; return retVal;
         ret
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
+
+; -------------------------------------------
+
+; int abs(int n);
+abs:
+    mov eax, edi
+    neg eax
+    movs eax, edi
+    ret
+; long labs(long n);
+; long long llabs(long long n);
+labs:
+    mov rax, rdi
+    neg rax
+    movs rax, rdi
+    ret
+
+segment .rodata
+
+align 8
+f10: dq 10.0
+f10th: dq 0.1
+
 segment .data
 
 align 8
 heap_top: dq __heap__ ; top of memory heap
 
 segment .bss
+
+align 8
+qtemp: resq 1 ; 64-bit temporary
 
 align 4
 inext: resd 1 ; used in pseudo-random functions
