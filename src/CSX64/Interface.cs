@@ -373,6 +373,8 @@ namespace CSX64
 
                 // x87 instructions
 
+                case OPCode.FSTLDCW: return ProcessFSTLDCW();
+
                 case OPCode.FLD_const: return ProcessFLD_const();
                 case OPCode.FLD: return ProcessFLD();
                 case OPCode.FST: return ProcessFST();

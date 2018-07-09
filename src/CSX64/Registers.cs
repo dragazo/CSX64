@@ -433,7 +433,7 @@ namespace CSX64
         public void ST(int num, double value)
         {
             num = (FPU_TOP + num) & 7;
-            FPURegisters[num] = value;
+            FPURegisters[num] = FPU_PC == 0 ? (float)value : value; // store value, accounting for precision control flag
             FPU_tag = (UInt16)((FPU_tag & ~(3 << (num * 2))) | (ComputeFPUTag(value) << (num * 2)));
         }
         /// <summary>

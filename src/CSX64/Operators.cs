@@ -60,7 +60,7 @@ namespace CSX64
             Else UND
             (dh and sh mark AH, BH, CH, or DH for dest or src)
         */
-        private bool FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b,
+        private bool FetchBinaryOpFormat(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b,
             bool get_a = true, int _a_sizecode = -1, int _b_sizecode = -1, bool allow_b_mem = true)
         {
             m = a = b = 0; // zero the things (compiler is annoying me)
@@ -146,7 +146,7 @@ namespace CSX64
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
-        private bool StoreBinaryOpFormatNew(UInt64 s1, UInt64 s2, UInt64 m, UInt64 res)
+        private bool StoreBinaryOpFormat(UInt64 s1, UInt64 s2, UInt64 m, UInt64 res)
         {
             UInt64 sizecode = (s1 >> 2) & 3;
 
@@ -513,9 +513,9 @@ namespace CSX64
 
         private bool ProcessMOV()
         {
-            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b, false)) return false;
+            if (!FetchBinaryOpFormat(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b, false)) return false;
 
-            return StoreBinaryOpFormatNew(s1, s2, m, b);
+            return StoreBinaryOpFormat(s1, s2, m, b);
         }
         /*
         [op][cnd]
@@ -541,7 +541,7 @@ namespace CSX64
         private bool ProcessMOVcc()
         {
             if (!GetMemAdv(1, out UInt64 ext)) return false;
-            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 _dest, out UInt64 src, false)) return false;
+            if (!FetchBinaryOpFormat(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 _dest, out UInt64 src, false)) return false;
 
             // get the flag
             bool flag;
@@ -570,7 +570,7 @@ namespace CSX64
             }
 
             // if flag is true, store result
-            if (flag) return StoreBinaryOpFormatNew(s1, s2, m, src);
+            if (flag) return StoreBinaryOpFormat(s1, s2, m, src);
             // even in false case upper 32 bits must be cleared in the case of a conditional 32-bit register load
             else
             {
@@ -810,7 +810,7 @@ namespace CSX64
 
         private bool ProcessADD()
         {
-            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
+            if (!FetchBinaryOpFormat(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
             UInt64 sizecode = (s1 >> 2) & 3;
 
             UInt64 res = Truncate(a + b, sizecode);
@@ -820,11 +820,11 @@ namespace CSX64
             AF = (res & 0xf) < (a & 0xf); // AF is just like CF but only the low nibble
             OF = Positive(a, sizecode) == Positive(b, sizecode) && Positive(a, sizecode) != Positive(res, sizecode);
 
-            return StoreBinaryOpFormatNew(s1, s2, m, res);
+            return StoreBinaryOpFormat(s1, s2, m, res);
         }
         private bool ProcessSUB(bool apply = true)
         {
-            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
+            if (!FetchBinaryOpFormat(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
             UInt64 sizecode = (s1 >> 2) & 3;
 
             UInt64 res = Truncate(a - b, sizecode);
@@ -834,7 +834,7 @@ namespace CSX64
             AF = (a & 0xf) < (b & 0xf); // AF is just like CF but only the low nibble
             OF = Positive(a, sizecode) != Positive(b, sizecode) && Positive(a, sizecode) != Positive(res, sizecode);
 
-            return !apply || StoreBinaryOpFormatNew(s1, s2, m, res);
+            return !apply || StoreBinaryOpFormat(s1, s2, m, res);
         }
 
         private bool ProcessMUL()
@@ -935,7 +935,7 @@ namespace CSX64
         }
         private bool ProcessBinary_IMUL()
         {
-            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 _a, out UInt64 _b)) return false;
+            if (!FetchBinaryOpFormat(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 _a, out UInt64 _b)) return false;
             UInt64 sizecode = (s1 >> 2) & 3;
 
             // get vals as sign extended
@@ -972,7 +972,7 @@ namespace CSX64
             AF = Rand.NextBool();
             PF = Rand.NextBool();
 
-            return StoreBinaryOpFormatNew(s1, s2, m, (UInt64)res);
+            return StoreBinaryOpFormat(s1, s2, m, (UInt64)res);
         }
         private bool ProcessTernary_IMUL()
         {
@@ -1287,20 +1287,20 @@ namespace CSX64
 
         private bool ProcessAND(bool apply = true)
         {
-            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
+            if (!FetchBinaryOpFormat(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
             UInt64 sizecode = (s1 >> 2) & 3;
-
+            
             UInt64 res = a & b;
 
             UpdateFlagsZSP(res, sizecode);
             OF = CF = false;
             AF = Rand.NextBool();
 
-            return !apply || StoreBinaryOpFormatNew(s1, s2, m, res);
+            return !apply || StoreBinaryOpFormat(s1, s2, m, res);
         }
         private bool ProcessOR()
         {
-            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
+            if (!FetchBinaryOpFormat(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
             UInt64 sizecode = (s1 >> 2) & 3;
 
             UInt64 res = a | b;
@@ -1309,11 +1309,11 @@ namespace CSX64
             OF = CF = false;
             AF = Rand.NextBool();
 
-            return StoreBinaryOpFormatNew(s1, s2, m, res);
+            return StoreBinaryOpFormat(s1, s2, m, res);
         }
         private bool ProcessXOR()
         {
-            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
+            if (!FetchBinaryOpFormat(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
             UInt64 sizecode = (s1 >> 2) & 3;
 
             UInt64 res = a ^ b;
@@ -1322,7 +1322,7 @@ namespace CSX64
             OF = CF = false;
             AF = Rand.NextBool();
 
-            return StoreBinaryOpFormatNew(s1, s2, m, res);
+            return StoreBinaryOpFormat(s1, s2, m, res);
         }
 
         private bool ProcessINC()
@@ -1411,7 +1411,7 @@ namespace CSX64
         }
         private bool ProcessBEXTR()
         {
-            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 1)) return false;
+            if (!FetchBinaryOpFormat(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 1)) return false;
             UInt64 sizecode = (s1 >> 2) & 3;
 
             ushort pos = (ushort)((b >> 8) % SizeBits(sizecode));
@@ -1425,7 +1425,7 @@ namespace CSX64
             SF = Rand.NextBool();
             PF = Rand.NextBool();
 
-            return StoreBinaryOpFormatNew(s1, s2, m, res);
+            return StoreBinaryOpFormat(s1, s2, m, res);
         }
         private bool ProcessBLSI()
         {
@@ -1498,7 +1498,7 @@ namespace CSX64
         {
             if (!GetMemAdv(1, out UInt64 ext)) return false;
 
-            if (!FetchBinaryOpFormatNew(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 0, false)) return false;
+            if (!FetchBinaryOpFormat(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 0, false)) return false;
             UInt64 sizecode = (s1 >> 2) & 3;
 
             UInt64 mask = 1ul << (UInt16)(b % SizeBits(sizecode)); // performed modulo-n
@@ -1512,9 +1512,9 @@ namespace CSX64
             switch (ext)
             {
                 case 0: return true;
-                case 1: return StoreBinaryOpFormatNew(s1, s2, m, a | mask);
-                case 2: return StoreBinaryOpFormatNew(s1, s2, m, a & ~mask);
-                case 3: return StoreBinaryOpFormatNew(s1, s2, m, a ^ mask);
+                case 1: return StoreBinaryOpFormat(s1, s2, m, a | mask);
+                case 2: return StoreBinaryOpFormat(s1, s2, m, a & ~mask);
+                case 3: return StoreBinaryOpFormat(s1, s2, m, a ^ mask);
 
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
@@ -1704,6 +1704,33 @@ namespace CSX64
             ++FPU_TOP;
             
             return true;
+        }
+
+        /*
+        [6: mode][2: size]   [address]
+            mode = 0: fstcw
+            mode = 1: fldcw
+            else UND
+        */
+        private bool ProcessFSTLDCW()
+        {
+            if (!GetMemAdv(1, out UInt64 s) || !GetAddressAdv(out UInt64 m)) return false;
+            UInt64 sizecode = s & 3;
+
+            // only 16-bit is allowed
+            if (sizecode != 1) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+
+            // write through mode
+            switch (s >> 2)
+            {
+                case 0: return SetMemRaw(m, 2, FPU_control);
+                case 1:
+                    if (!GetMemRaw(m, 2, out m)) return false;
+                    FPU_control = (UInt16)m;
+                    return true;
+
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
+            }
         }
 
         private bool ProcessFLD_const()
