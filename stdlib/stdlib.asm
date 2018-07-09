@@ -195,7 +195,6 @@ _atof_exp:
     fmulp st1, st0
     
     ret
-    
 ; double atof(const char *str);
 atof:
     call _atoi_init ; initialize    
@@ -260,6 +259,7 @@ atof:
     fstp qword ptr [qtemp]
     movsd xmm0, [qtemp]
     ret
+    
 ; -------------------------------------------
 
 NULL: equ 0
