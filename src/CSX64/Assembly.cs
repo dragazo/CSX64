@@ -2795,7 +2795,7 @@ namespace CSX64
                         if (!TryAppendVal(1, a_sizecode << 2)) return false;
                         if (!TryAppendVal(1, 4 << 4)) return false;
                         if (!TryAppendAddress(a, b, ptr_base)) return false;
-                        if (!TryAppendExpr(Size(b_sizecode), imm)) return false;
+                        if (!TryAppendExpr(Size(a_sizecode), imm)) return false;
                     }
                 }
                 // imm, *
@@ -3249,6 +3249,24 @@ namespace CSX64
 
                 // write the register
                 if (!TryAppendVal(1, reg)) return false;
+
+                return true;
+            }
+
+            public bool TryProcessFSTLD_WORD(OPCode op, byte mode, UInt64 _sizecode)
+            {
+                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 1 operand"); return false; }
+
+                // operand has to be mem
+                if (!TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out UInt64 sizecode, out bool explicit_size)) return false;
+
+                // must be the dictated size
+                if (explicit_size && sizecode != _sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size mismatch"); return false; }
+
+                // write data
+                if (!TryAppendByte((byte)op)) return false;
+                if (!TryAppendByte(mode)) return false;
+                if (!TryAppendAddress(a, b, ptr_base)) return false;
 
                 return true;
             }
@@ -4042,6 +4060,9 @@ namespace CSX64
                         case "FNOP": if (!args.TryProcessNoArgOp(OPCode.NOP)) return args.res; break; // no sense in wasting another opcode on no-op
                         case "FWAIT": break; // allow FWAIT and WAIT but don't do anything (exceptions in CSX64 are immediate)
                         case "WAIT": break;
+
+                        case "FSTCW": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 0, 1)) return args.res; break;
+                        case "FLDCW": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 1, 1)) return args.res; break;
 
                         case "FLD1": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 0)) return args.res; break;
                         case "FLDL2T": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 1)) return args.res; break;

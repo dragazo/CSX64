@@ -42,6 +42,7 @@ namespace CSX64
 
         // x87 instructions
 
+        FSTLD_WORD,
         FLD_const, FLD, FST, FXCH, FMOVcc,
 
         FADD, FSUB, FSUBR,
@@ -122,15 +123,6 @@ namespace CSX64
                 }
             }
         }
-    }
-
-    /// <summary>
-    /// Represents an FPU register
-    /// </summary>
-    public struct FPURegister
-    {
-        public double Value;
-        public bool InUse;
     }
 
     /// <summary>
