@@ -253,7 +253,7 @@ atof:
     inc rdi
     call _atof_exp
     
-    .noexp:
+    .no_exp:
     
     ; return result
     .ret:

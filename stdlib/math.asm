@@ -33,12 +33,12 @@ pow:
     fsub st1, st0
     
     ; compute 2^i
-    fld qword ptr [f2]
+    fld1
     fscale
     fstp st1
     
     ; compute 2^0.f
-    fxch st0, st1
+    fxch st1
     f2xm1
     fld1
     faddp st1, st0
@@ -48,15 +48,10 @@ pow:
     
     ; store back in xmm0 for return
     fstp qword ptr [qtemp]
-    movsd [qtemp]
+    movsd xmm0, [qtemp]
     
     ; return result
     ret
-
-segment .rodata
-
-align 8
-f2: dq 2.0
     
 segment .bss
 

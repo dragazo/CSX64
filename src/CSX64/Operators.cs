@@ -1727,6 +1727,7 @@ namespace CSX64
             
             return true;
         }
+        private bool PopFPU() => PopFPU(out double _);
 
         /*
         [8: mode]   [address]
@@ -2140,9 +2141,9 @@ namespace CSX64
             double a = ST(0);
             double b = ST(1);
 
-            ++FPU_TOP; // pop stack and place in the new st(0)
+            PopFPU(); // pop stack and place in the new st(0)
             ST(0, b * Math.Log(a, 2));
-
+            
             FPU_C0 = Rand.NextBool();
             FPU_C1 = Rand.NextBool();
             FPU_C2 = Rand.NextBool();
@@ -2157,7 +2158,7 @@ namespace CSX64
             double a = ST(0);
             double b = ST(1);
 
-            ++FPU_TOP; // pop stack and place in the new st(0)
+            PopFPU(); // pop stack and place in the new st(0)
             ST(0, b * Math.Log(a + 1, 2));
 
             FPU_C0 = Rand.NextBool();
@@ -2416,7 +2417,7 @@ namespace CSX64
             double a = ST(0);
             double b = ST(1);
 
-            ++FPU_TOP; // pop stack and place in new st(0)
+            PopFPU(); // pop stack and place in new st(0)
             ST(0, Math.Atan2(b, a));
 
             FPU_C0 = Rand.NextBool();
