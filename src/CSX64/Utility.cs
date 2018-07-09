@@ -103,7 +103,17 @@ namespace CSX64
         {
             return sig * Math.Pow(2, exp);
         }
-        
+
+        /// <summary>
+        /// Returns true if the floating-point value is denormalized (including +-0)
+        /// </summary>
+        /// <param name="val">the value to test</param>
+        public static bool IsDenorm(this double val)
+        {
+            // denorm has exponent field of zero
+            return (DoubleAsUInt64(val) & 0x7ff0000000000000ul) == 0;
+        }
+
         /// <summary>
         /// Gets a random UInt64 value
         /// </summary>

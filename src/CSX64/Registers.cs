@@ -8,8 +8,8 @@ namespace CSX64
     {
         private CPURegister[] CPURegisters = new CPURegister[16];
 
-        private FPURegister[] FPURegisters = new FPURegister[8];
-        private UInt16 FPU_status;
+        private double[] FPURegisters = new double[8];
+        private UInt16 FPU_control, FPU_status, FPU_tag;
 
         private ZMMRegister[] ZMMRegisters = new ZMMRegister[32];
 
@@ -204,50 +204,287 @@ namespace CSX64
         }
 
         // source : http://www.website.masmforum.com/tutorials/fptute/fpuchap1.htm
-        public bool C0
+
+        /// <summary>
+        /// FPU Invalid Operation Mask
+        /// </summary>
+        public bool FPU_IM
+        {
+            get => (FPU_control & 0x0001) != 0;
+            set => FPU_control = (UInt16)((FPU_control & ~0x0001) | (value ? 0x0001 : 0));
+        }
+        /// <summary>
+        /// FPU Denormalized Operand Mask
+        /// </summary>
+        public bool FPU_DM
+        {
+            get => (FPU_control & 0x0002ul) != 0;
+            set => FPU_control = (UInt16)((FPU_control & ~0x0002ul) | (value ? 0x0002ul : 0));
+        }
+        /// <summary>
+        /// FPU Zero Divide Mask
+        /// </summary>
+        public bool FPU_ZM
+        {
+            get => (FPU_control & 0x0004ul) != 0;
+            set => FPU_control = (UInt16)((FPU_control & ~0x0004ul) | (value ? 0x0004ul : 0));
+        }
+        /// <summary>
+        /// FPU Overflow Mask
+        /// </summary>
+        public bool FPU_OM
+        {
+            get => (FPU_control & 0x0008ul) != 0;
+            set => FPU_control = (UInt16)((FPU_control & ~0x0008ul) | (value ? 0x0008ul : 0));
+        }
+        /// <summary>
+        /// FPU Underflow Mask
+        /// </summary>
+        public bool FPU_UM
+        {
+            get => (FPU_control & 0x0010) != 0;
+            set => FPU_control = (UInt16)((FPU_control & ~0x0010) | (value ? 0x0010 : 0));
+        }
+        /// <summary>
+        /// FPU Precision Mask
+        /// </summary>
+        public bool FPU_PM
+        {
+            get => (FPU_control & 0x0020) != 0;
+            set => FPU_control = (UInt16)((FPU_control & ~0x0020) | (value ? 0x0020 : 0));
+        }
+        /// <summary>
+        /// FPU Interrupt Enable Mask
+        /// </summary>
+        public bool FPU_IEM
+        {
+            get => (FPU_control & 0x0080) != 0;
+            set => FPU_control = (UInt16)((FPU_control & ~0x0080) | (value ? 0x0080 : 0));
+        }
+        /// <summary>
+        /// FPU Precision Control
+        /// </summary>
+        public byte FPU_PC
+        {
+            get => (byte)((FPU_control >> 8) & 3);
+            set => FPU_control = (UInt16)((FPU_control & ~0x300) | ((value & 3) << 8));
+        }
+        /// <summary>
+        /// FPU Rounding Control
+        /// </summary>
+        public byte FPU_RC
+        {
+            get => (byte)((FPU_control >> 10) & 3);
+            set => FPU_control = (UInt16)((FPU_control & ~0xc00) | ((value & 3) << 10));
+        }
+        /// <summary>
+        /// FPU Infinity Control
+        /// </summary>
+        public bool FPU_IC
+        {
+            get => (FPU_control & 0x1000) != 0;
+            set => FPU_control = (UInt16)((FPU_control & ~0x1000) | (value ? 0x1000 : 0));
+        }
+
+        /// <summary>
+        /// FPU Invalid Operation Exception
+        /// </summary>
+        public bool FPU_I
+        {
+            get => (FPU_status & 0x0001) != 0;
+            set => FPU_status = (UInt16)((FPU_status & ~0x0001) | (value ? 0x0001 : 0));
+        }
+        /// <summary>
+        /// FPU Denormalized Exception
+        /// </summary>
+        public bool FPU_D
+        {
+            get => (FPU_status & 0x0002) != 0;
+            set => FPU_status = (UInt16)((FPU_status & ~0x0002) | (value ? 0x0002 : 0));
+        }
+        /// <summary>
+        /// FPU Zero Divide Exception
+        /// </summary>
+        public bool FPU_Z
+        {
+            get => (FPU_status & 0x0004) != 0;
+            set => FPU_status = (UInt16)((FPU_status & ~0x0004) | (value ? 0x0004 : 0));
+        }
+        /// <summary>
+        /// FPU Overflow Exception
+        /// </summary>
+        public bool FPU_O
+        {
+            get => (FPU_status & 0x0008) != 0;
+            set => FPU_status = (UInt16)((FPU_status & ~0x0008) | (value ? 0x0008 : 0));
+        }
+        /// <summary>
+        /// FPU Underflow Exception
+        /// </summary>
+        public bool FPU_U
+        {
+            get => (FPU_status & 0x0010) != 0;
+            set => FPU_status = (UInt16)((FPU_status & ~0x0010) | (value ? 0x0010 : 0));
+        }
+        /// <summary>
+        /// FPU Precision Exception
+        /// </summary>
+        public bool FPU_P
+        {
+            get => (FPU_status & 0x0020) != 0;
+            set => FPU_status = (UInt16)((FPU_status & ~0x0020) | (value ? 0x0020 : 0));
+        }
+        /// <summary>
+        /// FPU Stack Fault Exception
+        /// </summary>
+        public bool FPU_SF
+        {
+            get => (FPU_status & 0x0040) != 0;
+            set => FPU_status = (UInt16)((FPU_status & ~0x0040) | (value ? 0x0040 : 0));
+        }
+        /// <summary>
+        /// FPU Interrupt Request
+        /// </summary>
+        public bool FPU_IR
+        {
+            get => (FPU_status & 0x0080) != 0;
+            set => FPU_status = (UInt16)((FPU_status & ~0x0080) | (value ? 0x0080 : 0));
+        }
+        /// <summary>
+        /// FPU Busy
+        /// </summary>
+        public bool FPU_B
+        {
+            get => (FPU_status & 0x8000) != 0;
+            set => FPU_status = (UInt16)((FPU_status & ~0x8000) | (value ? 0x8000 : 0));
+        }
+        /// <summary>
+        /// FPU Condition 0
+        /// </summary>
+        public bool FPU_C0
         {
             get => (FPU_status & 0x0100) != 0;
             set => FPU_status = (UInt16)((FPU_status & ~0x0100) | (value ? 0x0100 : 0));
         }
-        public bool C1
+        /// <summary>
+        /// FPU Condition 1
+        /// </summary>
+        public bool FPU_C1
         {
             get => (FPU_status & 0x0200) != 0;
             set => FPU_status = (UInt16)((FPU_status & ~0x0200) | (value ? 0x0200 : 0));
         }
-        public bool C2
+        /// <summary>
+        /// FPU Condition 2
+        /// </summary>
+        public bool FPU_C2
         {
             get => (FPU_status & 0x0400) != 0;
             set => FPU_status = (UInt16)((FPU_status & ~0x0400) | (value ? 0x0400 : 0));
         }
-        public bool C3
+        /// <summary>
+        /// FPU Top of Stack
+        /// </summary>
+        public byte FPU_TOP
+        {
+            get => (byte)((FPU_status >> 11) & 7);
+            set => FPU_status = (UInt16)(FPU_status & ~0x3800 | ((value & 7) << 11));
+        }
+        /// <summary>
+        /// FPU Condition 3
+        /// </summary>
+        public bool FPU_C3
         {
             get => (FPU_status & 0x4000) != 0;
             set => FPU_status = (UInt16)((FPU_status & ~0x4000) | (value ? 0x4000 : 0));
         }
 
-        public byte TOP
+        /// <summary>
+        /// The FPU tag value corresponding to a normal value
+        /// </summary>
+        public const byte FPU_Tag_normal = 0;
+        /// <summary>
+        /// The FPU tag value corresponding to zero
+        /// </summary>
+        public const byte FPU_Tag_zero = 1;
+        /// <summary>
+        /// The FPU tag value corresponding to a special value (NaN, +-inf, denorm)
+        /// </summary>
+        public const byte FPU_Tag_special = 2;
+        /// <summary>
+        /// The FPU tag value corresponding to no value
+        /// </summary>
+        public const byte FPU_Tag_empty = 3;
+
+        /// <summary>
+        /// Gets the ST register's value
+        /// </summary>
+        /// <param name="num">the ordinal number of the ST register (0 for ST0)</param>
+        public double ST(int num)
         {
-            get => (byte)((FPU_status & 0x3800) >> 11);
-            set => FPU_status = (UInt16)(FPU_status & ~0x3800 | ((value & 7) << 11));
+            num = (FPU_TOP + num) & 7;
+            return FPURegisters[num];
+        }
+        /// <summary>
+        /// Sets the ST register's value
+        /// </summary>
+        /// <param name="num">the ordinal number of the ST register (0 for ST0)</param>
+        /// <param name="value">the value to set</param>
+        public void ST(int num, double value)
+        {
+            num = (FPU_TOP + num) & 7;
+            FPURegisters[num] = value;
+            FPU_tag = (UInt16)((FPU_tag & ~(3 << (num * 2))) | (ComputeFPUTag(value) << (num * 2)));
+        }
+        /// <summary>
+        /// Gets the ST register's tag
+        /// </summary>
+        /// <param name="num">the ordinal number of the ST register (0 for ST0)</param>
+        public byte ST_Tag(int num)
+        {
+            num = (FPU_TOP + num) & 7;
+            return (byte)((FPU_tag >> (num * 2)) & 3);
+        }
+        /// <summary>
+        /// Sets the ST register's tag to <see cref="FPU_Tag_empty"/>
+        /// </summary>
+        /// <param name="num">the ordinal number of the ST register (0 for ST0)</param>
+        public void ST_Free(int num)
+        {
+            num = (FPU_TOP + num) & 7;
+            FPU_tag = (UInt16)(FPU_tag | (3 << (num * 2)));
         }
 
-        public double ST0 { get => FPURegisters[(TOP + 0) & 7].Value; set => FPURegisters[(TOP + 0) & 7].Value = value; }
-        public double ST1 { get => FPURegisters[(TOP + 1) & 7].Value; set => FPURegisters[(TOP + 1) & 7].Value = value; }
-        public double ST2 { get => FPURegisters[(TOP + 2) & 7].Value; set => FPURegisters[(TOP + 2) & 7].Value = value; }
-        public double ST3 { get => FPURegisters[(TOP + 3) & 7].Value; set => FPURegisters[(TOP + 3) & 7].Value = value; }
-        public double ST4 { get => FPURegisters[(TOP + 4) & 7].Value; set => FPURegisters[(TOP + 4) & 7].Value = value; }
-        public double ST5 { get => FPURegisters[(TOP + 5) & 7].Value; set => FPURegisters[(TOP + 5) & 7].Value = value; }
-        public double ST6 { get => FPURegisters[(TOP + 6) & 7].Value; set => FPURegisters[(TOP + 6) & 7].Value = value; }
-        public double ST7 { get => FPURegisters[(TOP + 7) & 7].Value; set => FPURegisters[(TOP + 7) & 7].Value = value; }
+        /// <summary>
+        /// Gets the ST register's value
+        /// </summary>
+        /// <param name="num">the ordinal number of the ST register (0 for ST0)</param>
+        public double ST(UInt64 num) => ST((int)num);
+        /// <summary>
+        /// Sets the ST register's value
+        /// </summary>
+        /// <param name="num">the ordinal number of the ST register (0 for ST0)</param>
+        /// <param name="value">the value to set</param>
+        public void ST(UInt64 num, double value) => ST((int)num, value);
+        /// <summary>
+        /// Gets the ST register's tag
+        /// </summary>
+        /// <param name="num">the ordinal number of the ST register (0 for ST0)</param>
+        public byte ST_Tag(UInt64 num) => ST_Tag((int)num);
+        /// <summary>
+        /// Sets the ST register's tag to <see cref="FPU_Tag_empty"/>
+        /// </summary>
+        /// <param name="num">the ordinal number of the ST register (0 for ST0)</param>
+        public void ST_Free(UInt64 num) => ST_Free((int)num);
 
-        public bool ST0_InUse { get => FPURegisters[(TOP + 0) & 7].InUse; set => FPURegisters[(TOP + 0) & 7].InUse = value; }
-        public bool ST1_InUse { get => FPURegisters[(TOP + 1) & 7].InUse; set => FPURegisters[(TOP + 1) & 7].InUse = value; }
-        public bool ST2_InUse { get => FPURegisters[(TOP + 2) & 7].InUse; set => FPURegisters[(TOP + 2) & 7].InUse = value; }
-        public bool ST3_InUse { get => FPURegisters[(TOP + 3) & 7].InUse; set => FPURegisters[(TOP + 3) & 7].InUse = value; }
-        public bool ST4_InUse { get => FPURegisters[(TOP + 4) & 7].InUse; set => FPURegisters[(TOP + 4) & 7].InUse = value; }
-        public bool ST5_InUse { get => FPURegisters[(TOP + 5) & 7].InUse; set => FPURegisters[(TOP + 5) & 7].InUse = value; }
-        public bool ST6_InUse { get => FPURegisters[(TOP + 6) & 7].InUse; set => FPURegisters[(TOP + 6) & 7].InUse = value; }
-        public bool ST7_InUse { get => FPURegisters[(TOP + 7) & 7].InUse; set => FPURegisters[(TOP + 7) & 7].InUse = value; }
+        public double ST0 { get => ST(0); set => ST(0, value); }
+        public double ST1 { get => ST(1); set => ST(1, value); }
+        public double ST2 { get => ST(2); set => ST(2, value); }
+        public double ST3 { get => ST(3); set => ST(3, value); }
+        public double ST4 { get => ST(4); set => ST(4, value); }
+        public double ST5 { get => ST(5); set => ST(5, value); }
+        public double ST6 { get => ST(6); set => ST(6, value); }
+        public double ST7 { get => ST(7); set => ST(7, value); }
 
         public ZMMRegister ZMM0 { get => ZMMRegisters[0]; set => ZMMRegisters[0] = value; }
         public ZMMRegister ZMM1 { get => ZMMRegisters[1]; set => ZMMRegisters[1] = value; }

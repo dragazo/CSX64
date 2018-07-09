@@ -119,8 +119,9 @@ namespace CSX64
             for (int i = 0; i < CPURegisters.Length; ++i) CPURegisters[i].x64 = Rand.NextUInt64();
 
             // set up fpu registers
-            for (int i = 0; i < FPURegisters.Length; ++i) FPURegisters[i].InUse = false;
-            TOP = 0; // set TOP to 0 (for consistency when storing FPU status word to memory)
+            FPU_control = 0x3bf;
+            FPU_status = 0;
+            FPU_tag = 0xffff;
 
             // set up vpu registers
             for (int i = 0; i < ZMMRegisters.Length; ++i)
@@ -462,19 +463,19 @@ namespace CSX64
                 new string[] { $"RAX: {RAX:x16}", $"CF: {(CF ? 1 : 0)}", $"RFLAGS: {RFLAGS:x16}" },
                 new string[] { $"RBX: {RBX:x16}", $"PF: {(PF ? 1 : 0)}", $"RIP:    {RIP:x16}" },
                 new string[] { $"RCX: {RCX:x16}", $"AF: {(AF ? 1 : 0)}" },
-                new string[] { $"RDX: {RDX:x16}", $"ZF: {(ZF ? 1 : 0)}", $"ST0: {(ST0_InUse ? ST0.ToString() : "Empty")}" },
-                new string[] { $"RSI: {RSI:x16}", $"SF: {(SF ? 1 : 0)}",$"ST1: {(ST1_InUse ? ST1.ToString() : "Empty")}" },
-                new string[] { $"RDI: {RDI:x16}", $"OF: {(OF ? 1 : 0)}", $"ST2: {(ST2_InUse ? ST2.ToString() : "Empty")}" },
-                new string[] { $"RBP: {RBP:x16}", null, $"ST3: {(ST3_InUse ? ST3.ToString() : "Empty")}" },
-                new string[] { $"RSP: {RSP:x16}", $"b:  {(cc_b ? 1 : 0)}",$"ST4: {(ST4_InUse ? ST4.ToString() : "Empty")}" },
-                new string[] { $"R8:  {R8:x16}", $"be: {(cc_be ? 1 : 0)}", $"ST5: {(ST5_InUse ? ST5.ToString() : "Empty")}" },
-                new string[] { $"R9:  {R9:x16}", $"a:  {(cc_a ? 1 : 0)}",$"ST6: {(ST6_InUse ? ST6.ToString() : "Empty")}" },
-                new string[] { $"R10: {R10:x16}", $"ae: {(cc_ae ? 1 : 0)}",$"ST7: {(ST7_InUse ? ST7.ToString() : "Empty")}" },
+                new string[] { $"RDX: {RDX:x16}", $"ZF: {(ZF ? 1 : 0)}", $"ST0: {(ST_Tag(0) != FPU_Tag_empty ? ST0.ToString() : "Empty")}" },
+                new string[] { $"RSI: {RSI:x16}", $"SF: {(SF ? 1 : 0)}",$"ST1: {(ST_Tag(1) != FPU_Tag_empty ? ST1.ToString() : "Empty")}" },
+                new string[] { $"RDI: {RDI:x16}", $"OF: {(OF ? 1 : 0)}", $"ST2: {(ST_Tag(2) != FPU_Tag_empty ? ST2.ToString() : "Empty")}" },
+                new string[] { $"RBP: {RBP:x16}", null, $"ST3: {(ST_Tag(3) != FPU_Tag_empty ? ST3.ToString() : "Empty")}" },
+                new string[] { $"RSP: {RSP:x16}", $"b:  {(cc_b ? 1 : 0)}",$"ST4: {(ST_Tag(4) != FPU_Tag_empty ? ST4.ToString() : "Empty")}" },
+                new string[] { $"R8:  {R8:x16}", $"be: {(cc_be ? 1 : 0)}", $"ST5: {(ST_Tag(5) != FPU_Tag_empty ? ST5.ToString() : "Empty")}" },
+                new string[] { $"R9:  {R9:x16}", $"a:  {(cc_a ? 1 : 0)}",$"ST6: {(ST_Tag(6) != FPU_Tag_empty ? ST6.ToString() : "Empty")}" },
+                new string[] { $"R10: {R10:x16}", $"ae: {(cc_ae ? 1 : 0)}",$"ST7: {(ST_Tag(7) != FPU_Tag_empty ? ST7.ToString() : "Empty")}" },
                 new string[] { $"R11: {R11:x16}" },
-                new string[] { $"R12: {R12:x16}", $"l:  {(cc_l ? 1 : 0)}",$"C0: {(C0 ? 1 : 0)}" },
-                new string[] { $"R13: {R13:x16}", $"le: {(cc_le ? 1 : 0)}", $"C1: {(C1 ? 1 : 0)}" },
-                new string[] { $"R14: {R14:x16}", $"g:  {(cc_g ? 1 : 0)}",$"C2: {(C2 ? 1 : 0)}" },
-                new string[] { $"R15: {R15:x16}", $"ge: {(cc_ge ? 1 : 0)}", $"C3: {(C3 ? 1 : 0)}" },
+                new string[] { $"R12: {R12:x16}", $"l:  {(cc_l ? 1 : 0)}",$"C0: {(FPU_C0 ? 1 : 0)}" },
+                new string[] { $"R13: {R13:x16}", $"le: {(cc_le ? 1 : 0)}", $"C1: {(FPU_C1 ? 1 : 0)}" },
+                new string[] { $"R14: {R14:x16}", $"g:  {(cc_g ? 1 : 0)}",$"C2: {(FPU_C2 ? 1 : 0)}" },
+                new string[] { $"R15: {R15:x16}", $"ge: {(cc_ge ? 1 : 0)}", $"C3: {(FPU_C3 ? 1 : 0)}" },
                });
         }
         /// <summary>

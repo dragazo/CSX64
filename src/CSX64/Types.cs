@@ -125,15 +125,6 @@ namespace CSX64
     }
 
     /// <summary>
-    /// Represents an FPU register
-    /// </summary>
-    public struct FPURegister
-    {
-        public double Value;
-        public bool InUse;
-    }
-
-    /// <summary>
     /// Represents a 512-bit register used by vpu instructions
     /// </summary>
     [StructLayout(LayoutKind.Explicit)]
