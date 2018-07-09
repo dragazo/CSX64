@@ -42,7 +42,7 @@ namespace CSX64
 
         // x87 instructions
 
-        FSTLDCW,
+        FSTLD_WORD,
         FLD_const, FLD, FST, FXCH, FMOVcc,
 
         FADD, FSUB, FSUBR,

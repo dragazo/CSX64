@@ -2928,33 +2928,6 @@ namespace CSX64
 
                 return true;
             }
-            public bool TryProcessM(OPCode op, bool has_ext_op = false, byte ext_op = 0, UInt64 sizemask = 15, int default_sizecode = -1, UInt64 mode = 0)
-            {
-                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 1 operand"); return false; }
-
-                // operand has to be mem
-                if (!TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out UInt64 sizecode, out bool explicit_size)) return false;
-
-                // ensure we got a size
-                if (!explicit_size)
-                {
-                    if (default_sizecode == -1) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce operand size"); return false; }
-                    else sizecode = (UInt64)default_sizecode;
-                }
-
-                // apply sizemask
-                if ((Size(sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified operand size is not supported"); return false; }
-
-                // write op code
-                if (!TryAppendByte((byte)op)) return false;
-                if (has_ext_op) { if (!TryAppendByte(ext_op)) return false; }
-
-                // write data
-                if (!TryAppendVal(1, (mode << 2) | sizecode)) return false;
-                if (!TryAppendAddress(a, b, ptr_base)) return false;
-
-                return true;
-            }
 
             public bool TryProcessNoArgOp(OPCode op, bool has_ext_op = false, byte ext_op = 0)
             {
@@ -3276,6 +3249,24 @@ namespace CSX64
 
                 // write the register
                 if (!TryAppendVal(1, reg)) return false;
+
+                return true;
+            }
+
+            public bool TryProcessFSTLD_WORD(OPCode op, byte mode, UInt64 _sizecode)
+            {
+                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 1 operand"); return false; }
+
+                // operand has to be mem
+                if (!TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out UInt64 sizecode, out bool explicit_size)) return false;
+
+                // must be the dictated size
+                if (explicit_size && sizecode != _sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size mismatch"); return false; }
+
+                // write data
+                if (!TryAppendByte((byte)op)) return false;
+                if (!TryAppendByte(mode)) return false;
+                if (!TryAppendAddress(a, b, ptr_base)) return false;
 
                 return true;
             }
@@ -4070,8 +4061,8 @@ namespace CSX64
                         case "FWAIT": break; // allow FWAIT and WAIT but don't do anything (exceptions in CSX64 are immediate)
                         case "WAIT": break;
 
-                        case "FSTCW": if (!args.TryProcessM(OPCode.FSTLDCW, false, 0, 2, 1, 0)) return args.res; break;
-                        case "FLDCW": if (!args.TryProcessM(OPCode.FSTLDCW, false, 0, 2, 1, 1)) return args.res; break;
+                        case "FSTCW": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 0, 1)) return args.res; break;
+                        case "FLDCW": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 1, 1)) return args.res; break;
 
                         case "FLD1": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 0)) return args.res; break;
                         case "FLDL2T": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 1)) return args.res; break;

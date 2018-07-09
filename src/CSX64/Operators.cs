@@ -1619,11 +1619,33 @@ namespace CSX64
 
         // -- floating point stuff -- //
 
+        /// <summary>
+        /// Computes the FPU tag for the specified value
+        /// </summary>
+        /// <param name="val">the value to test</param>
         private static byte ComputeFPUTag(double val)
         {
             if (double.IsNaN(val) || double.IsInfinity(val) || val.IsDenorm()) return FPU_Tag_special;
             else if (val == 0) return FPU_Tag_zero;
             else return FPU_Tag_normal;
+        }
+
+        /// <summary>
+        /// Performs a round trip on the value based on the current state of the <see cref="FPU_RC"/> flag
+        /// </summary>
+        /// <param name="val">the value to round</param>
+        private double PerformRoundTrip(double val)
+        {
+            switch (FPU_RC)
+            {
+                case 0: return Math.Round(val, MidpointRounding.ToEven);
+                case 1: return Math.Floor(val);
+                case 2: return Math.Ceiling(val);
+                case 3: return Math.Truncate(val);
+
+                // because compiler is stupid
+                default: throw new ArgumentException("this is physically impossible");
+            }
         }
 
         /*
@@ -1707,21 +1729,17 @@ namespace CSX64
         }
 
         /*
-        [6: mode][2: size]   [address]
-            mode = 0: fstcw
-            mode = 1: fldcw
+        [8: mode]   [address]
+            mode = 0: FSTCW
+            mode = 1: FLDCW
             else UND
         */
-        private bool ProcessFSTLDCW()
+        private bool ProcessFSTLD_WORD()
         {
             if (!GetMemAdv(1, out UInt64 s) || !GetAddressAdv(out UInt64 m)) return false;
-            UInt64 sizecode = s & 3;
-
-            // only 16-bit is allowed
-            if (sizecode != 1) { Terminate(ErrorCode.UndefinedBehavior); return false; }
 
             // write through mode
-            switch (s >> 2)
+            switch (s)
             {
                 case 0: return SetMemRaw(m, 2, FPU_control);
                 case 1:
@@ -1837,9 +1855,9 @@ namespace CSX64
                     {
                         case 2: case 3: if (!SetMemRaw(m, 4, FloatAsUInt64((float)ST(0)))) return false; break;
                         case 4: case 5: if (!SetMemRaw(m, 8, DoubleAsUInt64(ST(0)))) return false; break;
-                        case 6: case 7: if (!SetMemRaw(m, 2, (UInt64)(Int64)ST(0))) return false; break;
-                        case 8: case 9: if (!SetMemRaw(m, 4, (UInt64)(Int64)ST(0))) return false; break;
-                        case 10: if (!SetMemRaw(m, 8, (UInt64)(Int64)ST(0))) return false; break;
+                        case 6: case 7: if (!SetMemRaw(m, 2, (UInt64)(Int64)PerformRoundTrip(ST(0)))) return false; break;
+                        case 8: case 9: if (!SetMemRaw(m, 4, (UInt64)(Int64)PerformRoundTrip(ST(0)))) return false; break;
+                        case 10: if (!SetMemRaw(m, 8, (UInt64)(Int64)PerformRoundTrip(ST(0)))) return false; break;
 
                         default: Terminate(ErrorCode.UndefinedBehavior); return false;
                     }
@@ -2091,7 +2109,7 @@ namespace CSX64
             if (ST_Tag(0) == FPU_Tag_empty) { Terminate(ErrorCode.FPUAccessViolation); return false; }
 
             double val = ST(0);
-            double res = (Int64)val;
+            double res = PerformRoundTrip(val);
 
             ST(0, res);
 
