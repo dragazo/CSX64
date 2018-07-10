@@ -24,23 +24,11 @@ You should now have an executable at `bin/Release/csx.exe`. This is a console ap
 
 ![run](img/cloning/run_exe.png)
 
-Now you need to assemble CSX64's standard library and place the resulting object files in a folder named `stdlib` in the same directory as the executable. To do this, open up your (linux-like) terminal *(e.g. git bash if on windows)* **in the same directory as your new executable** and run one of the following sets of commands:
+Now you need to assemble CSX64's [asm](asm) directory and place the resulting object files in the same directory as the executable. To make this easier, a bash script named [update.sh](update.sh) is included in CSX64's root directory. Open up your bash terminal *(e.g. git bash)* and enter the following command:
 
-```bash
-mkdir stdlib
-find ../../stdlib -name "*.asm" | xargs -n 1 basename -s ".asm" | xargs -i ./csx.exe ../../stdlib/{}.asm -ao stdlib/{}.o
 ```
-
-**OR**
-
-```bash
-mkdir stdlib
-cp ../../stdlib/*.asm stdlib/.
-./csx.exe stdlib/*.asm -a
-rm stdlib/*.asm
+./update.sh bin/Release
 ```
-
-If neither of those worked (e.g. not using a linux-like terminal), you'll have to assemble them manually, for which the relevant command is `./csx.exe <input> -ao <output>` for each file. Alternatively, you could skip this step entirely and just leave the stdlib folder empty (though this would also mean not having access to those functions implicitly).
 
 **Boom, you're done.** CSX64 doesn't need to be installed: all you need is the executable and the stdlib folder you just created.
 

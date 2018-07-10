@@ -46,7 +46,7 @@ namespace CSX64
         /// <summary>
         /// The return value to use in the case of error during execution
         /// </summary>
-        private const int ExecReturnCode = -1;
+        private const int ExecErrorReturnCode = -1;
 
         private const string HelpMessage =
 @"
@@ -66,9 +66,9 @@ report bugs to https://github.com/dragazo/CSX64/issues
 ";
 
         /// <summary>
-        /// Path to the stdlib folder (used by the linker)
+        /// The path to the executable's directory
         /// </summary>
-        private const string stdlib = "stdlib";
+        private static string ExeDir => AppDomain.CurrentDomain.BaseDirectory;
 
         /// <summary>
         /// Prints a message to the user (console or message box)
@@ -505,8 +505,12 @@ report bugs to https://github.com/dragazo/CSX64/issues
         {
             List<ObjectFile> objs = new List<ObjectFile>(paths.Count);
 
+            // load the _start file
+            int ret = LoadObjectFile($"{ExeDir}/_start.o", out ObjectFile _start);
+            if (ret != 0) return ret;
+
             // load the stdlib files
-            int ret = objs.LoadObjectFileDir($"{AppDomain.CurrentDomain.BaseDirectory}/{stdlib}");
+            ret = objs.LoadObjectFileDir($"{ExeDir}/stdlib");
             if (ret != 0) return ret;
 
             // load the user-defined pathspecs
@@ -517,7 +521,7 @@ report bugs to https://github.com/dragazo/CSX64/issues
             }
 
             // link the object files
-            LinkResult res = Assembly.Link(out byte[] exe, objs.ToArray(), entry_point);
+            LinkResult res = Assembly.Link(out byte[] exe, objs.ToArray(), _start, entry_point);
 
             // if there was no error
             if (res.Error == LinkError.None)
@@ -589,7 +593,7 @@ report bugs to https://github.com/dragazo/CSX64/issues
                     // print error message
                     Print($"\n\nError Encountered: {computer.Error}");
                     // return execution error code
-                    return ExecReturnCode;
+                    return ExecErrorReturnCode;
                 }
                 // otherwise use return value
                 else return computer.ReturnValue;
@@ -622,7 +626,7 @@ report bugs to https://github.com/dragazo/CSX64/issues
                         // print error message
                         Print($"\n\nError Encountered: {computer.Error}");
                         // return execution error code
-                        return ExecReturnCode;
+                        return ExecErrorReturnCode;
                     }
                     // otherwise use return value
                     else return computer.ReturnValue;

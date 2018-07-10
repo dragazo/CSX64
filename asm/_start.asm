@@ -1,0 +1,26 @@
+; this file serves as the "real" entry point for any program and is required by the linker.
+; its purpose is to perform some setup and then call the "main" entry point.
+; after "main" returns, it performs some cleanup routines before terminating.
+
+; this file is the first to be merged into the executable by the linker.
+; in CSX64, the text segment comes first.
+; that means this file's text segment will start at address 0.
+; execution of any program will begin at address 0.
+; thus, the "real" entry point is whatever's at the top of this file's text segment.
+
+; this file is purely for the linker - it is strongly advised that users DO NOT MODIFY THIS.
+; this file cannot define globals, but may define externals.
+; an external named "_main" is required.
+; "_main" will be renamed by the linker to whatever the "main" entry point is.
+
+extern _main
+
+segment .text
+
+    ; call user-defined "main" entry point
+    call _main
+    
+    ; call sys_exit with the return value
+    mov ebx, eax
+    mov eax, sys_exit
+    syscall

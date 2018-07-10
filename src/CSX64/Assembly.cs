@@ -1402,13 +1402,71 @@ namespace CSX64
         /// Gets the smallest size code that will support the unsigned value
         /// </summary>
         /// <param name="val">the value to test</param>
-        internal static UInt64 SmallestUnsignedSizeCode(UInt64 val)
+        private static UInt64 SmallestUnsignedSizeCode(UInt64 val)
         {
             // filter through till we get a size that will contain it
             if (val <= 0xfful) return 0;
             else if (val <= 0xfffful) return 1;
             else if (val <= 0xfffffffful) return 2;
             else return 3;
+        }
+
+        /// <summary>
+        /// Renames "from" to "to" in the object file. The symbol to rename may be internal or external.
+        /// The object file is assumed to be complete and verified. The symbol must not have already been evaluated.
+        /// Throws <see cref="ArgumentException"/> if "to" already exists or if "from" has already been evaluated (because it may have already been linked to other expressions).
+        /// </summary>
+        /// <param name="file">the file to act on</param>
+        /// <param name="from">the original name</param>
+        /// <param name="to">the resulting name</param>
+        /// <exception cref="ArgumentException"></exception>
+        private static void RenameSymbol(this ObjectFile file, string from, string to)
+        {
+            // make sure "to" doesn't already exist
+            if (file.Symbols.ContainsKey(to) || file.ExternalSymbols.Contains(to))
+                throw new ArgumentException($"Attempt to rename symbol \"{from}\" to \"{to}\" (already exists)");
+
+            // if it's a symbol defined in this file
+            if (file.Symbols.TryGetValue(from, out Expr expr))
+            {
+                // make sure it hasn't already been evaluated (because it may have already been linked to other expressions)
+                if (expr.IsEvaluated) throw new ArgumentException($"Attempt to rename symbol \"{from}\" to \"{to}\" (already evaluated)");
+
+                // rename the symbol
+                file.Symbols.Add(to, expr);
+                file.Symbols.Remove(from);
+
+                // find and replace in global table (may not be global - that's ok)
+                for (int i = 0; i < file.GlobalSymbols.Count; ++i)
+                    if (file.GlobalSymbols[i] == from)
+                    {
+                        file.GlobalSymbols[i] = to;
+                        break;
+                    }
+            }
+            // if it's a symbol defined externally
+            else if (file.ExternalSymbols.Contains(from))
+            {
+                // find and replace in global table
+                for (int i = 0; i < file.ExternalSymbols.Count; ++i)
+                    if (file.ExternalSymbols[i] == from)
+                    {
+                        file.ExternalSymbols[i] = to;
+                        break;
+                    }
+            }
+            // otherwise we don't know what it is
+            else throw new ArgumentException($"Attempt to rename symbol \"{from}\" to \"{to}\" (does not exist)");
+
+            // -- now the easy part -- //
+
+            // find and replace in symbol table expressions
+            foreach (var entry in file.Symbols) entry.Value.Resolve(from, to);
+
+            // find and replace in hole expressions
+            foreach (var entry in file.TextHoles) entry.Expr.Resolve(from, to);
+            foreach (var entry in file.RodataHoles) entry.Expr.Resolve(from, to);
+            foreach (var entry in file.DataHoles) entry.Expr.Resolve(from, to);
         }
 
         /// <summary>
@@ -4323,23 +4381,7 @@ namespace CSX64
             if (!args.VerifyIntegrity()) return args.res;
 
             // rename all the symbols we can shorten (done after verify to ensure there's no verify error messages with the renamed symbols)
-            for (int i = 0; i < rename_symbols.Count; ++i)
-            {
-                string from = rename_symbols[i];
-                string to = $"^{i:x}";
-
-                // rename the symbol in the symbol table
-                file.Symbols.Add(to, file.Symbols[from]);
-                file.Symbols.Remove(from);
-
-                // find and replace in symbol table
-                foreach (var entry in file.Symbols) entry.Value.Resolve(from, to);
-
-                // find and replace in hole expressions
-                foreach (var entry in file.TextHoles) entry.Expr.Resolve(from, to);
-                foreach (var entry in file.RodataHoles) entry.Expr.Resolve(from, to);
-                foreach (var entry in file.DataHoles) entry.Expr.Resolve(from, to);
-            }
+            for (int i = 0; i < rename_symbols.Count; ++i) file.RenameSymbol(rename_symbols[i], $"^{i:x}");
 
             // validate result
             file.Clean = true;
@@ -4353,29 +4395,43 @@ namespace CSX64
         /// </summary>
         /// <param name="exe">the resulting executable</param>
         /// <param name="objs">the object files to link. should all be clean</param>
+        /// <param name="entry_point">the raw starting file - SHOULD NOT BE INCLUDED IN THE OBJS ARRAY</param>
         /// <exception cref="ArgumentException"></exception>
-        public static LinkResult Link(out byte[] exe, ObjectFile[] objs, string entry_point = "main")
+        public static LinkResult Link(out byte[] exe, ObjectFile[] objs, ObjectFile _start, string entry_point = "main")
         {
             exe = null; // initially null result
 
-            // for each object file to be linked
-            foreach (ObjectFile obj in objs)
-            {
-                // make sure it's starting out clean
-                if (!obj.Clean) throw new ArgumentException("Attempt to use dirty object file");
-            }
+            // parsing locations for evaluation
+            UInt64 _res;
+            bool _floating;
+            string _err = null;
+
+            // -- ensure args are good -- //
+
+            // ensure entry point is legal
+            if (!AssembleArgs.IsValidName(entry_point, ref _err)) return new LinkResult(LinkError.FormatError, $"Entry point \"{entry_point}\" is not a legal symbol name");
+
+            // make sure all object files are starting out clean
+            foreach (ObjectFile obj in objs) if (!obj.Clean) throw new ArgumentException("Attempt to use dirty object file");
+            // including the _start file
+            if (!_start.Clean) throw new ArgumentException("Attempt to use dirty object file");
+
+            // -- validate _start file -- //
+
+            // _start file can't have global symbols
+            if (_start.GlobalSymbols.Count != 0) return new LinkResult(LinkError.FormatError, "_start file cannot define global symbols");
+
+            // _start file must declare an external named "_main"
+            if (!_start.ExternalSymbols.Contains("_main")) return new LinkResult(LinkError.FormatError, "_start file must declare and external named \"_main\"");
+
+            // rename "_main" symbol in _start file to whatever the entry point is (makes _start dirty)
+            try { _start.Clean = false; _start.RenameSymbol("_main", entry_point); }
+            catch (Exception ex) { return new LinkResult(LinkError.FormatError, ex.ToString()); }
 
             // -- define things -- //
 
-            // create data segments (we don't know how large the resulting file will be, so it needs to be expandable) (write header to text segment)
-            List<byte> text = new List<byte>()
-            {
-                (byte)OPCode.CALL, 0x0e, 0, 0, 0, 0, 0, 0, 0, 0,      // call main         ; call main function
-                (byte)OPCode.MOV, 0x1c, 0x00,                         // mov  rbx, rax     ; mov ret value to rbx for sys_exit
-                (byte)OPCode.XOR, 0x0c, 0x00,                         // xor  rax, rax     ; clear rax
-                (byte)OPCode.MOV, 0x00, 0x10, (byte)SyscallCode.Exit, // mov  al, sys_exit ; load sys_exit (bypasses endianness by only using low byte)
-                (byte)OPCode.SYSCALL                                  // syscall           ; perform sys_exit to set error code and stop execution
-            };
+            // create segments (we don't know how large the resulting file will be, so it needs to be expandable)
+            List<byte> text = new List<byte>();
             List<byte> rodata = new List<byte>();
             List<byte> data = new List<byte>();
             UInt64 bsslen = 0;
@@ -4393,11 +4449,6 @@ namespace CSX64
             var include_queue = new Queue<ObjectFile>();
             // a table for relating included object files to their beginning positions in the resulting binary (text, rodata, data, bss) tuples
             var included = new Dictionary<ObjectFile, Tuple<UInt64, UInt64, UInt64, UInt64>>();
-
-            // parsing locations for evaluation
-            UInt64 _res;
-            bool _floating;
-            string _err = string.Empty;
 
             // -- populate things -- //
 
@@ -4421,19 +4472,13 @@ namespace CSX64
             // make sure no one defined over reserved symbol names
             foreach (ObjectFile obj in objs)
             {
+                // only the verify ignores are a problem (because we'll be defining those)
                 foreach (string reserved in VerifyLegalExpressionIgnores)
                     if (obj.Symbols.ContainsKey(reserved)) return new LinkResult(LinkError.SymbolRedefinition, $"Object file defined symbol with name \"{reserved}\" (reserved)");
             }
 
-            // ensure the entry point was defined
-            if (!global_to_obj.TryGetValue(entry_point, out ObjectFile main_obj)) return new LinkResult(LinkError.MissingSymbol, $"No entry point \"{entry_point}\"");
-
-            // make sure we start the merge process with the main object file
-            include_queue.Enqueue(main_obj);
-
-            // add a hole for the call location of the header (must first fix text alignment)
-            text.Align(main_obj.TextAlign);
-            main_obj.TextHoles.Add(new HoleData() { Address = 2 - (UInt32)text.Count, Size = 8, Expr = new Expr() { Token = entry_point }, Line = -1 });
+            // start the merge process with the _start file
+            include_queue.Enqueue(_start);
 
             // -- merge things -- //
 
