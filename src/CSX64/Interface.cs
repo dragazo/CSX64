@@ -437,6 +437,14 @@ namespace CSX64
                 case OPCode.VPU_SUBS: return TryProcessVEC_SUBS();
                 case OPCode.VPU_SUBUS: return TryProcessVEC_SUBUS();
 
+                case OPCode.VPU_FMIN: return TryProcessVEC_FMIN();
+                case OPCode.VPU_FMAX: return TryProcessVEC_FMAX();
+
+                case OPCode.VPU_UMIN: return TryProcessVEC_UMIN();
+                case OPCode.VPU_SMIN: return TryProcessVEC_SMIN();
+                case OPCode.VPU_UMAX: return TryProcessVEC_UMAX();
+                case OPCode.VPU_SMAX: return TryProcessVEC_SMAX();
+
                 // misc instructions
 
                 case OPCode.DEBUG: // all debugging features

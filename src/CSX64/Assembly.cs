@@ -4296,6 +4296,38 @@ namespace CSX64
                         case "PSUBUSW": if (!args.TryProcessVPUBinary(OPCode.VPU_SUBUS, 1, true, true, false)) return args.res; break;
                         case "PSUBUSB": if (!args.TryProcessVPUBinary(OPCode.VPU_SUBUS, 0, true, true, false)) return args.res; break;
 
+                        case "MINSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FMIN, 3, false, false, true)) return args.res; break;
+                        case "MINSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FMIN, 2, false, false, true)) return args.res; break;
+
+                        case "MINPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FMIN, 3, true, true, false)) return args.res; break;
+                        case "MINPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FMIN, 2, true, true, false)) return args.res; break;
+
+                        case "MAXSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FMAX, 3, false, false, true)) return args.res; break;
+                        case "MAXSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FMAX, 2, false, false, true)) return args.res; break;
+
+                        case "MAXPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FMAX, 3, true, true, false)) return args.res; break;
+                        case "MAXPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FMAX, 2, true, true, false)) return args.res; break;
+
+                        case "PMINUQ": if (!args.TryProcessVPUBinary(OPCode.VPU_UMIN, 3, true, true, false)) return args.res; break;
+                        case "PMINUD": if (!args.TryProcessVPUBinary(OPCode.VPU_UMIN, 2, true, true, false)) return args.res; break;
+                        case "PMINUW": if (!args.TryProcessVPUBinary(OPCode.VPU_UMIN, 1, true, true, false)) return args.res; break;
+                        case "PMINUB": if (!args.TryProcessVPUBinary(OPCode.VPU_UMIN, 0, true, true, false)) return args.res; break;
+
+                        case "PMINSQ": if (!args.TryProcessVPUBinary(OPCode.VPU_SMIN, 3, true, true, false)) return args.res; break;
+                        case "PMINSD": if (!args.TryProcessVPUBinary(OPCode.VPU_SMIN, 2, true, true, false)) return args.res; break;
+                        case "PMINSW": if (!args.TryProcessVPUBinary(OPCode.VPU_SMIN, 1, true, true, false)) return args.res; break;
+                        case "PMINSB": if (!args.TryProcessVPUBinary(OPCode.VPU_SMIN, 0, true, true, false)) return args.res; break;
+
+                        case "PMAXUQ": if (!args.TryProcessVPUBinary(OPCode.VPU_UMAX, 3, true, true, false)) return args.res; break;
+                        case "PMAXUD": if (!args.TryProcessVPUBinary(OPCode.VPU_UMAX, 2, true, true, false)) return args.res; break;
+                        case "PMAXUW": if (!args.TryProcessVPUBinary(OPCode.VPU_UMAX, 1, true, true, false)) return args.res; break;
+                        case "PMAXUB": if (!args.TryProcessVPUBinary(OPCode.VPU_UMAX, 0, true, true, false)) return args.res; break;
+
+                        case "PMAXSQ": if (!args.TryProcessVPUBinary(OPCode.VPU_SMAX, 3, true, true, false)) return args.res; break;
+                        case "PMAXSD": if (!args.TryProcessVPUBinary(OPCode.VPU_SMAX, 2, true, true, false)) return args.res; break;
+                        case "PMAXSW": if (!args.TryProcessVPUBinary(OPCode.VPU_SMAX, 1, true, true, false)) return args.res; break;
+                        case "PMAXSB": if (!args.TryProcessVPUBinary(OPCode.VPU_SMAX, 0, true, true, false)) return args.res; break;
+
                         // misc instructions
 
                         case "DEBUG_CPU": if (!args.TryProcessNoArgOp(OPCode.DEBUG, true, 0)) return args.res; break;

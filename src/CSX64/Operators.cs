@@ -2745,5 +2745,97 @@ namespace CSX64
         private bool TryProcessVEC_SUB() => ProcessVPUBinary(15, __TryPerformVEC_SUB);
         private bool TryProcessVEC_SUBS() => ProcessVPUBinary(15, __TryPerformVEC_SUBS);
         private bool TryProcessVEC_SUBUS() => ProcessVPUBinary(15, __TryPerformVEC_SUBUS);
+
+        private bool __TryProcessVEC_FMIN(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        {
+            // algorithm is non-symetic ... weird
+            // if it's wrong, blame this: http://www.felixcloutier.com/x86/MINPD.html
+
+            // 64-bit
+            if (elem_sizecode == 3)
+            {
+                double _a = AsDouble(a), _b = AsDouble(b);
+
+                if (_a == 0 && _b == 0) res = b;
+                else if (double.IsNaN(_a)) res = b;
+                else if (double.IsNaN(_b)) res = b;
+                else if (_a < _b) res = a;
+                else res = b;
+            }
+            // 32-bit
+            else
+            {
+                float _a = AsFloat((UInt32)a), _b = AsFloat((UInt32)b);
+
+                if (_a == 0 && _b == 0) res = b;
+                else if (float.IsNaN(_a)) res = b;
+                else if (float.IsNaN(_b)) res = b;
+                else if (_a < _b) res = a;
+                else res = b;
+            }
+
+            return true;
+        }
+        private bool __TryProcessVEC_FMAX(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        {
+            // algorithm is non-symetic ... weird
+            // if it's wrong, blame this: http://www.felixcloutier.com/x86/MAXPD.html
+
+            // 64-bit
+            if (elem_sizecode == 3)
+            {
+                double _a = AsDouble(a), _b = AsDouble(b);
+
+                if (_a == 0 && _b == 0) res = b;
+                else if (double.IsNaN(_a)) res = b;
+                else if (double.IsNaN(_b)) res = b;
+                else if (_a > _b) res = a;
+                else res = b;
+            }
+            // 32-bit
+            else
+            {
+                float _a = AsFloat((UInt32)a), _b = AsFloat((UInt32)b);
+
+                if (_a == 0 && _b == 0) res = b;
+                else if (float.IsNaN(_a)) res = b;
+                else if (float.IsNaN(_b)) res = b;
+                else if (_a > _b) res = a;
+                else res = b;
+            }
+
+            return true;
+        }
+
+        private bool TryProcessVEC_FMIN() => ProcessVPUBinary(12, __TryProcessVEC_FMIN);
+        private bool TryProcessVEC_FMAX() => ProcessVPUBinary(12, __TryProcessVEC_FMAX);
+
+        private bool __TryProcessVEC_UMIN(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        {
+            res = a < b ? a : b; // a and b are guaranteed to be properly truncated, so this is invariant of size
+            return true;
+        }
+        private bool __TryProcessVEC_SMIN(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        {
+            // just extend to 64-bit and do a signed compare
+            res = (Int64)SignExtend(a, elem_sizecode) < (Int64)SignExtend(b, elem_sizecode) ? a : b;
+            return true;
+        }
+        private bool __TryProcessVEC_UMAX(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        {
+            res = a > b ? a : b; // a and b are guaranteed to be properly truncated, so this is invariant of size
+            return true;
+        }
+        private bool __TryProcessVEC_SMAX(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        {
+            // just extend to 64-bit and do a signed compare
+            res = (Int64)SignExtend(a, elem_sizecode) > (Int64)SignExtend(b, elem_sizecode) ? a : b;
+            return true;
+        }
+
+        private bool TryProcessVEC_UMIN() => ProcessVPUBinary(15, __TryProcessVEC_UMIN);
+        private bool TryProcessVEC_SMIN() => ProcessVPUBinary(15, __TryProcessVEC_SMIN);
+        private bool TryProcessVEC_UMAX() => ProcessVPUBinary(15, __TryProcessVEC_UMAX);
+        private bool TryProcessVEC_SMAX() => ProcessVPUBinary(15, __TryProcessVEC_SMAX);
     }
 }
