@@ -1620,14 +1620,20 @@ namespace CSX64
         /*
         [8: ext]   [binary]
             ext = 0: ADC
-            else     ADCX
+            ext = 1: ADCX
+            else UND
         */
         private bool ProcessADC_x()
         {
+            // get extended code - ensure it's valid
             if (!GetMemAdv(1, out UInt64 ext)) return false;
+            if (ext > 1) { Terminate(ErrorCode.UndefinedBehavior); return false; }
 
             if (!FetchBinaryOpFormat(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
             UInt64 sizecode = (s1 >> 2) & 3;
+
+            // ADCX only allows 32/64 bit
+            if (ext == 1 && sizecode != 2 && sizecode != 3) { Terminate(ErrorCode.UndefinedBehavior); return false; }
 
             UInt64 res = a + b;
             if (CF) ++res; // also add carry flag
