@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+# this script takes zero or more paths and assembles the asm directory at each location.
+
 exe=csx.exe # name of executable
 
 # ---------------------------
