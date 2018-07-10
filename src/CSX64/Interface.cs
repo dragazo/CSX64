@@ -371,6 +371,9 @@ namespace CSX64
                 case OPCode.Cxy: return ProcessCxy();
                 case OPCode.MOVxX: return ProcessMOVxX();
 
+                case OPCode.ADC_x: return ProcessADC_x();
+                case OPCode.AAA: return ProcessAAA();
+
                 // x87 instructions
 
                 case OPCode.FSTLD_WORD: return ProcessFSTLD_WORD();

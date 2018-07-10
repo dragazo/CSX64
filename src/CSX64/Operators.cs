@@ -1617,6 +1617,55 @@ namespace CSX64
             return true;
         }
 
+        /*
+        [8: ext]   [binary]
+            ext = 0: ADC
+            else     ADCX
+        */
+        private bool ProcessADC_x()
+        {
+            if (!GetMemAdv(1, out UInt64 ext)) return false;
+
+            if (!FetchBinaryOpFormat(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
+            UInt64 sizecode = (s1 >> 2) & 3;
+
+            UInt64 res = a + b;
+            if (CF) ++res; // also add carry flag
+            res = Truncate(res, sizecode);
+
+            CF = res < a; // CF updated in both cases
+            if (ext == 0) // others updated in ADC case
+            {
+                UpdateFlagsZSP(res, sizecode);
+                AF = (res & 0xf) < (a & 0xf); // AF is just like CF but only the low nibble
+                OF = Positive(a, sizecode) == Positive(b, sizecode) && Positive(a, sizecode) != Positive(res, sizecode);
+            }
+
+            return StoreBinaryOpFormat(s1, s2, m, res);
+        }
+        private bool ProcessAAA()
+        {
+            if ((AL & 0xf) > 9 || AF)
+            {
+                AX += 0x106;
+                AF = true;
+                CF = true;
+            }
+            else
+            {
+                AF = false;
+                CF = false;
+            }
+            AL &= 0xf;
+
+            OF = Rand.NextBool();
+            SF = Rand.NextBool();
+            ZF = Rand.NextBool();
+            PF = Rand.NextBool();
+
+            return true;
+        }
+
         // -- floating point stuff -- //
 
         /// <summary>

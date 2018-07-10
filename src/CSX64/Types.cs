@@ -39,6 +39,7 @@ namespace CSX64
 
         BSWAP, BEXTR, BLSI, BLSMSK, BLSR, ANDN, BTx,
         Cxy, MOVxX,
+        ADC_x, AAA,
 
         // x87 instructions
 

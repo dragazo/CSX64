@@ -2766,7 +2766,7 @@ namespace CSX64
 
                 return true;
             }
-            public bool TryProcessBinaryOp(OPCode op, bool has_ext_op = false, byte ext_op = 0, UInt64 sizemask = 15, int _force_b_imm_sizecode = -1, bool allow_b_mem = true)
+            public bool TryProcessBinaryOp(OPCode op, bool has_ext_op = false, byte ext_op = 0, UInt64 sizemask = 15, int _force_b_imm_sizecode = -1)
             {
                 if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 2 operands"); return false; }
 
@@ -2793,8 +2793,6 @@ namespace CSX64
                         if (!TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out b_sizecode, out bool explicit_size)) return false;
 
                         if (explicit_size && a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size missmatch"); return false; }
-
-                        if (!allow_b_mem) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Second operand may not be a memory value"); return false; }
 
                         if (!TryAppendVal(1, (dest << 4) | (a_sizecode << 2) | (dest_high ? 2 : 0ul))) return false;
                         if (!TryAppendVal(1, (2 << 4))) return false;
@@ -2985,6 +2983,25 @@ namespace CSX64
                 else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: First operand must be a cpu register"); return false; }
 
                 return true;
+            }
+
+            public bool TryProcessBinaryOp_NoBMem(OPCode op, bool has_ext_op = false, byte ext_op = 0, UInt64 sizemask = 15, int _force_b_imm_sizecode = -1)
+            {
+                // b can't be memory
+                if (args.Length > 1 && args[1][args[1].Length - 1] == ']') { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Second operand may not be a memory value"); return false; }
+
+                // otherwise refer to binary formatter
+                return TryProcessBinaryOp(op, has_ext_op, ext_op, sizemask, _force_b_imm_sizecode);
+            }
+            public bool TryProcessBinaryOp_R_RM(OPCode op, bool has_ext_op = false, byte ext_op = 0, UInt64 sizemask = 15, int _force_b_imm_sizecode = -1)
+            {
+                // a must be register
+                if (args.Length > 0 && !TryParseCPURegister(args[0], out UInt64 reg, out UInt64 sz, out bool high)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: First operand must be a cpu register"); return false; }
+                // b must be register or memory
+                if (args.Length > 1 && !TryParseCPURegister(args[1], out reg, out sz, out high) && args[1][args[1].Length - 1] != ']') { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Second operand must be a cpu register or memory value"); return false; }
+
+                // otherwise refer to binary formatter
+                return TryProcessBinaryOp(op, has_ext_op, ext_op, sizemask, _force_b_imm_sizecode);
             }
 
             public bool TryProcessNoArgOp(OPCode op, bool has_ext_op = false, byte ext_op = 0)
@@ -4097,10 +4114,10 @@ namespace CSX64
                         case "BLSR": if (!args.TryProcessUnaryOp(OPCode.BLSR)) return args.res; break;
                         case "ANDN": if (!args.TryProcessRR_RM(OPCode.ANDN, false, 0, 12)) return args.res; break;
 
-                        case "BT": if (!args.TryProcessBinaryOp(OPCode.BTx, true, 0, 15, 0, false)) return args.res; break;
-                        case "BTS": if (!args.TryProcessBinaryOp(OPCode.BTx, true, 1, 15, 0, false)) return args.res; break;
-                        case "BTR": if (!args.TryProcessBinaryOp(OPCode.BTx, true, 2, 15, 0, false)) return args.res; break;
-                        case "BTC": if (!args.TryProcessBinaryOp(OPCode.BTx, true, 3, 15, 0, false)) return args.res; break;
+                        case "BT": if (!args.TryProcessBinaryOp_NoBMem(OPCode.BTx, true, 0, 15, 0)) return args.res; break;
+                        case "BTS": if (!args.TryProcessBinaryOp_NoBMem(OPCode.BTx, true, 1, 15, 0)) return args.res; break;
+                        case "BTR": if (!args.TryProcessBinaryOp_NoBMem(OPCode.BTx, true, 2, 15, 0)) return args.res; break;
+                        case "BTC": if (!args.TryProcessBinaryOp_NoBMem(OPCode.BTx, true, 3, 15, 0)) return args.res; break;
                             
                         case "CWD": if (!args.TryProcessNoArgOp(OPCode.Cxy, true, 0)) return args.res; break;
                         case "CDQ": if (!args.TryProcessNoArgOp(OPCode.Cxy, true, 1)) return args.res; break;
@@ -4112,6 +4129,11 @@ namespace CSX64
 
                         case "MOVZX": if (!args.TryProcessMOVxX(OPCode.MOVxX, false)) return args.res; break;
                         case "MOVSX": if (!args.TryProcessMOVxX(OPCode.MOVxX, true)) return args.res; break;
+
+                        case "ADC": if (!args.TryProcessBinaryOp(OPCode.ADC_x, true, 0)) return args.res; break;
+                        case "ADCX": if (!args.TryProcessBinaryOp_R_RM(OPCode.ADC_x, true, 1, 12)) return args.res; break;
+
+                        case "AAA": if (!args.TryProcessNoArgOp(OPCode.AAA)) return args.res; break;
 
                         // x87 instructions
 
