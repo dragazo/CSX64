@@ -82,6 +82,8 @@ namespace CSX64
         Mkdir, Rmdir,
 
         Exit,
+
+        Brk,
     }
 
     /// <summary>

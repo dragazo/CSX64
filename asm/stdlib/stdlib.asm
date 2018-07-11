@@ -264,48 +264,173 @@ atof:
 
 NULL: equ 0
 
-; void *malloc(unsigned long size);
+; void *align(void *ptr, ulong align);
+_align:
+    ; get position in block (rdx)
+    mov rax, rdi
+    xor rdx, rdx
+    div rsi
+    
+    ; if at 0, already aligned
+    cmp rdx, 0
+    jz .ret
+    
+    ; otherwise align it
+    sub rsi, rdx
+    add rdi, rsi
+    
+    .ret:
+    mov rax, rdi
+    ret
+
+; -------------------------------------------
+
+_malloc_step: equ 1 * 1024 * 1024 ; the amount of memory for malloc to request at a time
+
+; <- stack | ([qword size][... data ...])...
+
+; void *malloc(qword size);
 malloc:
-	; allocating 0 returns null
-	cmp rdi, 0
-	jnz .begin
-	xor rax, rax
-	ret
-	
-	.begin:
-	mov rcx, __heap__ ; load starting position (end of program segment)
-	jmp .search_aft
-	.search_top:
-		cmp byte ptr [rcx], 0 ; cmp bucket settings
-		jnz .search_inc       ; if nonzero, bucket is in use
-		
-		cmp [rcx+1], rdi ; cmp bucket size to size requested
-		jae .found       ; if large enough, we found one
-	.search_inc:
-		add rcx, [rcx+1] ; add bucket size
-		add rcx, 9       ; add bucket padding
-	.search_aft:
-		cmp rcx, [heap_top] ; while rcx < [heap_top]
-		jb .search_top
-	
-	; none found, create a new bucket
-	mov [rcx+1], rdi     ; set its size
-	lea rdx, [rcx+9+rdi] ; increment top past the new bucket
-	mov [heap_top], rdx
-	
-	.found: ; found a spot
-		mov byte ptr [rcx], 1 ; mark as used
-		lea rax, [rcx+9]      ; store start of bucket data for ret
-	.end: ret
+    ; allocating 0 returns null
+    cmp rdi, 0
+    jnz .beg
+    xor rax, rax
+    ret
+    
+    .beg:
+    ; align request size to 8-byte blocks
+    mov esi, 8
+    call _align
+    mov rdi, rax
+    
+    ; get the beg/end positions
+    mov rsi, [malloc_beg]
+    mov r8, [malloc_end]
+    ; if beg was nonzero, we're good
+    cmp rsi, 0
+    jnz .ok
+    
+    ; otherwise initialize beg/end and reload 
+    mov r11, rdi
+    mov eax, sys_brk
+    xor ebx, ebx
+    syscall
+    mov rdi, rax
+    mov esi, 8
+    call _align
+    mov [malloc_beg], rax
+    mov [malloc_end], rax
+    mov rsi, rax
+    mov r8, rax
+    mov rdi, r11
+    
+    .ok:
+    ; look through the list for an available block of sufficient size
+    ; for(void *pos = beg; pos < end; pos += 8 + *(qword*)pos)
+    ; -- pos = rsi
+    ; -- end = r8
+    jmp .aft
+    .top:
+        ; get the block size
+        mov rdx, [rsi]
+        mov rcx, rdx
+        
+        ; if it's positive (occupied) - skip
+        neg rcx
+        js .cont
+        ; otherwise it's negative (unoccupied) - put positive in rdx
+        mov rdx, rcx
+        
+        ; if it's not big enough, it won't work
+        cmp rdx, rdi
+        jb .cont
+        
+        ; -- yay we got one -- ;
+        
+        ; split the block if it's large enough and we're not taking much
+        ; if (block_size >= 64 && request < block_size / 2)
+        cmp rdx, 64
+        jb .nosplit
+        mov rcx, rdx
+        shr rcx, 1
+        cmp rdi, rcx
+        jae .nosplit
+        
+        ; splitting block - get pointer to start of split
+        lea rbx, [rsi + 8 + rdi]
+        
+        ; mark split's size (unoccupied)
+        sub rdx, rdi
+        sub rdx, 8
+        neg rdx
+        mov [rbx], rdx
+        
+        ; mark our size (occupied)
+        mov [rsi], rdi
+        
+        .nosplit:
+        lea rax, [rsi + 8]
+        ret
+        
+    .cont:
+        lea rsi, [rsi + 8 + rdx]
+    .aft:
+        cmp rsi, r8
+        jb .top
+    
+    ; -- if we got here, we went out of range of the malloc field -- ;
+    
+    ; get program break
+    mov eax, sys_brk
+    xor ebx, ebx
+    syscall
+    
+    ; if we have room, create a new block on the end and take that
+    lea r10, [r8 + 8 + rdi]
+    cmp r10, rax
+    ja .nospace
+    
+    .enough_space:
+    ; we have enough space - create the new block on the end (occupied)
+    mov [malloc_end], r10
+    mov [r8], rdi
+    lea rax, [r8 + 8]
+    ret
+    
+    .nospace:
+    ; otherwise we have no space - get amount of space to allocate (multiple of step)
+    mov r11, rdi
+    mov rsi, _malloc_step
+    call _align
+    mov rdi, r11
+    
+    ; add that much memory
+    mov r9, rax
+    mov eax, sys_brk
+    xor ebx, ebx
+    syscall
+    mov rbx, rax
+    add rbx, r9
+    mov eax, sys_brk
+    syscall
+    
+    ; if we got a nonzero return, return null (bad stuff)
+    cmp rax, 0
+    jnz .bad_stuff
+    
+    ; otherwise, go back to the case where we had enough space
+    jmp .enough_space
+    
+    .bad_stuff:
+    xor rax, rax
+    ret
 
 ; void free(void *ptr);
 free:
-	cmp rdi, 0 ; cmp 0
-	jz .end
-	
-	mov byte ptr [rdi-9], 0 ; mark as unused
-	
-	.end: ret
+    mov eax, sys_exit ; not implemented yet
+    mov ebx, 999
+    syscall
+    ret
 
 ; -------------------------------------------
 
@@ -321,7 +446,7 @@ abort:
 
 RAND_MAX: equ MBIG ; alias for stdlib macro
 
-MBIG: equ 0x7fffffff
+MBIG: equ 0x7fffffff ; constants used by rand algorithm
 MSEED: equ 161803398
 MZ: equ 0
 
@@ -469,7 +594,6 @@ abs:
     movs eax, edi
     ret
 ; long labs(long n);
-; long long llabs(long long n);
 labs:
     mov rax, rdi
     neg rax
@@ -482,17 +606,16 @@ align 8
 f10: dq 10.0
 f10th: dq 0.1
 
-segment .data
+segment .bss
 
 align 8
-heap_top: dq __heap__ ; top of memory heap
-
-segment .bss
+malloc_beg: resq 1 ; starting address for malloc
+malloc_end: resq 1 ; stopping address for malloc
 
 align 8
 qtemp: resq 1 ; 64-bit temporary
 
 align 4
-inext: resd 1 ; used in pseudo-random functions
+inext: resd 1 ; these are used in the pseudo-random functions
 inextp: resd 1
-SeedArray: resd 56 
+SeedArray: resd 56

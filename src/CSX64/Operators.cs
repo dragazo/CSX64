@@ -2803,61 +2803,17 @@ namespace CSX64
 
         private bool __TryProcessVEC_FMIN(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
         {
-            // algorithm is non-symetic ... weird
-            // if it's wrong, blame this: http://www.felixcloutier.com/x86/MINPD.html
-
-            // 64-bit
-            if (elem_sizecode == 3)
-            {
-                double _a = AsDouble(a), _b = AsDouble(b);
-
-                if (_a == 0 && _b == 0) res = b;
-                else if (double.IsNaN(_a)) res = b;
-                else if (double.IsNaN(_b)) res = b;
-                else if (_a < _b) res = a;
-                else res = b;
-            }
-            // 32-bit
-            else
-            {
-                float _a = AsFloat((UInt32)a), _b = AsFloat((UInt32)b);
-
-                if (_a == 0 && _b == 0) res = b;
-                else if (float.IsNaN(_a)) res = b;
-                else if (float.IsNaN(_b)) res = b;
-                else if (_a < _b) res = a;
-                else res = b;
-            }
+            // this exploits c# returning false on comparison to NaN. see http://www.felixcloutier.com/x86/MINPD.html for the actual algorithm
+            if (elem_sizecode == 3) res = AsDouble(a) < AsDouble(b) ? a : b;
+            else res = AsFloat((UInt32)a) < AsFloat((UInt32)b) ? a : b;
 
             return true;
         }
         private bool __TryProcessVEC_FMAX(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
         {
-            // algorithm is non-symetic ... weird
-            // if it's wrong, blame this: http://www.felixcloutier.com/x86/MAXPD.html
-
-            // 64-bit
-            if (elem_sizecode == 3)
-            {
-                double _a = AsDouble(a), _b = AsDouble(b);
-
-                if (_a == 0 && _b == 0) res = b;
-                else if (double.IsNaN(_a)) res = b;
-                else if (double.IsNaN(_b)) res = b;
-                else if (_a > _b) res = a;
-                else res = b;
-            }
-            // 32-bit
-            else
-            {
-                float _a = AsFloat((UInt32)a), _b = AsFloat((UInt32)b);
-
-                if (_a == 0 && _b == 0) res = b;
-                else if (float.IsNaN(_a)) res = b;
-                else if (float.IsNaN(_b)) res = b;
-                else if (_a > _b) res = a;
-                else res = b;
-            }
+            // this exploits c# returning false on comparison to NaN. see http://www.felixcloutier.com/x86/MAXPD.html for the actual algorithm
+            if (elem_sizecode == 3) res = AsDouble(a) > AsDouble(b) ? a : b;
+            else res = AsFloat((UInt32)a) > AsFloat((UInt32)b) ? a : b;
 
             return true;
         }

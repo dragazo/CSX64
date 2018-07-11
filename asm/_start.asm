@@ -9,18 +9,18 @@
 ; thus, the "real" entry point is whatever's at the top of this file's text segment.
 
 ; this file is purely for the linker - it is strongly advised that users DO NOT MODIFY THIS.
-; this file cannot define globals, but may define externals.
-; an external named "_main" is required.
-; "_main" will be renamed by the linker to whatever the "main" entry point is.
+; an external named "_start" is required.
+; "_start" will be renamed by the linker to whatever the "main" entry point is.
 
-extern _main
+extern _start
 
 segment .text
-
+    
     ; call user-defined "main" entry point
-    call _main
+    call _start
     
     ; call sys_exit with the return value
     mov ebx, eax
     mov eax, sys_exit
     syscall
+

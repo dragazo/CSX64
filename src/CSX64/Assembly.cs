@@ -4448,10 +4448,10 @@ namespace CSX64
         /// Object files may be rendered dirty after this process (regardless of success). Any files that are still clean may be reused.
         /// </summary>
         /// <param name="exe">the resulting executable</param>
-        /// <param name="objs">the object files to link. should all be clean</param>
-        /// <param name="entry_point">the raw starting file - SHOULD NOT BE INCLUDED IN THE OBJS ARRAY</param>
+        /// <param name="objs">the object files to link. should all be clean. the first item in this array is the _start file</param>
+        /// <param name="entry_point">the raw starting file</param>
         /// <exception cref="ArgumentException"></exception>
-        public static LinkResult Link(out byte[] exe, ObjectFile[] objs, ObjectFile _start, string entry_point = "main")
+        public static LinkResult Link(out byte[] exe, ObjectFile[] objs, string entry_point = "main")
         {
             exe = null; // initially null result
 
@@ -4465,21 +4465,19 @@ namespace CSX64
             // ensure entry point is legal
             if (!AssembleArgs.IsValidName(entry_point, ref _err)) return new LinkResult(LinkError.FormatError, $"Entry point \"{entry_point}\" is not a legal symbol name");
 
+            // ensure we got at least 1 object file
+            if (objs == null || objs.Length == 0) return new LinkResult(LinkError.EmptyResult, $"Got no object files");
+
             // make sure all object files are starting out clean
             foreach (ObjectFile obj in objs) if (!obj.Clean) throw new ArgumentException("Attempt to use dirty object file");
-            // including the _start file
-            if (!_start.Clean) throw new ArgumentException("Attempt to use dirty object file");
 
             // -- validate _start file -- //
 
-            // _start file can't have global symbols
-            if (_start.GlobalSymbols.Count != 0) return new LinkResult(LinkError.FormatError, "_start file cannot define global symbols");
+            // _start file must declare an external named "_start"
+            if (!objs[0].ExternalSymbols.Contains("_start")) return new LinkResult(LinkError.FormatError, "_start file must declare an external named \"_start\"");
 
-            // _start file must declare an external named "_main"
-            if (!_start.ExternalSymbols.Contains("_main")) return new LinkResult(LinkError.FormatError, "_start file must declare and external named \"_main\"");
-
-            // rename "_main" symbol in _start file to whatever the entry point is (makes _start dirty)
-            try { _start.Clean = false; _start.RenameSymbol("_main", entry_point); }
+            // rename "_start" symbol in _start file to whatever the entry point is (makes _start dirty)
+            try { objs[0].Clean = false; objs[0].RenameSymbol("_start", entry_point); }
             catch (Exception ex) { return new LinkResult(LinkError.FormatError, ex.ToString()); }
 
             // -- define things -- //
@@ -4532,7 +4530,7 @@ namespace CSX64
             }
 
             // start the merge process with the _start file
-            include_queue.Enqueue(_start);
+            include_queue.Enqueue(objs[0]);
 
             // -- merge things -- //
 

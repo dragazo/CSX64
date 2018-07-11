@@ -506,7 +506,7 @@ report bugs to https://github.com/dragazo/CSX64/issues
             List<ObjectFile> objs = new List<ObjectFile>(paths.Count);
 
             // load the _start file
-            int ret = LoadObjectFile($"{ExeDir}/_start.o", out ObjectFile _start);
+            int ret = objs.LoadObjectFile($"{ExeDir}/_start.o");
             if (ret != 0) return ret;
 
             // load the stdlib files
@@ -521,7 +521,7 @@ report bugs to https://github.com/dragazo/CSX64/issues
             }
 
             // link the object files
-            LinkResult res = Assembly.Link(out byte[] exe, objs.ToArray(), _start, entry_point);
+            LinkResult res = Assembly.Link(out byte[] exe, objs.ToArray(), entry_point);
 
             // if there was no error
             if (res.Error == LinkError.None)

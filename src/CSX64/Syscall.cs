@@ -7,12 +7,6 @@ namespace CSX64
 {
     public partial class Computer
     {
-        /// <summary>
-        /// Attempts to read a series of bytes from the file and store them in memory
-        /// </summary>
-        /// <param name="fd">the file descriptor to use</param>
-        /// <param name="pos">the position in memory to store the read data</param>
-        /// <param name="count">the number of bytes to read</param>
         private bool Sys_Read()
         {
             // get fd index
@@ -48,12 +42,6 @@ namespace CSX64
             }
             catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
         }
-        /// <summary>
-        /// Attempts to write a series of bytes from memory to the file
-        /// </summary>
-        /// <param name="fd">the file descriptor to use</param>
-        /// <param name="pos">the position in memory of the data to write</param>
-        /// <param name="count">the number of bytes to read</param>
         private bool Sys_Write()
         {
             // get fd index
@@ -69,12 +57,6 @@ namespace CSX64
             catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
         }
 
-        /// <summary>
-        /// Opens a file in the specified mode. Returns the file descriptor created if successful, otherwise 0.
-        /// Streams opened with this method are "managed" and will be closed upon termination.
-        /// </summary>
-        /// <param name="path">the path of the file to open</param>
-        /// <param name="mode">the mode to open the file in (see System.IO.FileAccess)"/></param>
         private bool Sys_Open()
         {
             // make sure we're allowed to do this
@@ -101,11 +83,6 @@ namespace CSX64
 
             return true;
         }
-        /// <summary>
-        /// Closes a file. Returns true if successful, otherwise failes with IOFailure and returns false.
-        /// Cannot be used to close an unmanaged stream set by <see cref="SetUnmanagedStream(int, Stream)"/>
-        /// </summary>
-        /// <param name="fd">The file descriptor to close</param>
         private bool Sys_Close()
         {
             // get fd index
@@ -120,11 +97,6 @@ namespace CSX64
 
             return true;
         }
-
-        /// <summary>
-        /// Flushes the stream associated with the file
-        /// </summary>
-        /// <param name="fd">the file descriptor to flush</param>
         private bool Sys_Flush()
         {
             // get fd index
@@ -141,12 +113,6 @@ namespace CSX64
             return true;
         }
 
-        /// <summary>
-        /// Seeks the specified position in the file
-        /// </summary>
-        /// <param name="fd">the file descriptor to perform seek on</param>
-        /// <param name="pos">the position to seek to</param>
-        /// <param name="mode">the offset mode</param>
         private bool Sys_Seek()
         {
             // get fd index
@@ -162,11 +128,6 @@ namespace CSX64
 
             return true;
         }
-        /// <summary>
-        /// Attempts to get the current position in the file
-        /// </summary>
-        /// <param name="fd">the file to get current position of</param>
-        /// <param name="pos">position of stream upon success</param>
         private bool Sys_Tell()
         {
             // get fd index
@@ -186,11 +147,6 @@ namespace CSX64
             return true;
         }
 
-        /// <summary>
-        /// Moves a file. Returns true iff successful
-        /// </summary>
-        /// <param name="from">the file to move</param>
-        /// <param name="to">the destination path</param>
         private bool Sys_Move()
         {
             // make sure we're allowed to do this
@@ -203,11 +159,6 @@ namespace CSX64
             try { File.Move(from, to); return true; }
             catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
         }
-        /// <summary>
-        /// Attempts to remove the specified file
-        /// </summary>
-        /// <param name="path">the file to remove</param>
-        /// <returns></returns>
         private bool Sys_Remove()
         {
             // make sure we're allowed to do this
@@ -220,11 +171,7 @@ namespace CSX64
             try { File.Delete(path); return true; }
             catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
         }
-
-        /// <summary>
-        /// Attempts to make a new directory
-        /// </summary>
-        /// <param name="path">path to new directory</param>
+        
         private bool Sys_Mkdir()
         {
             // make sure we're allowed to do this
@@ -237,10 +184,6 @@ namespace CSX64
             try { Directory.CreateDirectory(path); return true; }
             catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
         }
-        /// <summary>
-        /// Attempts to remove a directory
-        /// </summary>
-        /// <param name="path">path to directory to remove</param>
         private bool Sys_Rmdir()
         {
             // make sure we're allowed to do this
@@ -252,6 +195,24 @@ namespace CSX64
             // attempt the move operation
             try { Directory.Delete(path, RecursiveRmdir); return true; }
             catch (Exception) { Terminate(ErrorCode.IOFailure); return false; }
+        }
+
+        private bool Sys_Brk()
+        {
+            // special request of 0 returns current break
+            if (RBX == 0) RAX = MemorySize;
+            // if the request is too high or goes below init size, don't do it
+            else if (RBX > MaxMemory || RBX < InitMemorySize) RAX = UInt32.MaxValue; // RAX = -1
+            // otherwise perform the reallocation
+            else
+            {
+                byte[] newmem = new byte[RBX];
+                Memory.CopyTo(newmem, 0);
+                Memory = newmem;
+                RAX = 0;
+            }
+
+            return true;
         }
     }
 }

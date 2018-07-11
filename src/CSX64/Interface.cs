@@ -31,9 +31,18 @@ namespace CSX64
         protected Random Rand = new Random();
 
         /// <summary>
-        /// Gets the total amount of memory the processor currently has access to
+        /// The maximum amount of memory the client can request
+        /// </summary>
+        public UInt64 MaxMemory = int.MaxValue;
+        /// <summary>
+        /// Gets the amount of memory (in bytes) the computer currently has access to
         /// </summary>
         public UInt64 MemorySize => (UInt64)Memory.Length;
+        /// <summary>
+        /// Gets the amount of memory (in bytes) the computer initially had access to
+        /// </summary>
+        public UInt64 InitMemorySize { get; private set; }
+
         /// <summary>
         /// Gets the maximum number of file descriptors
         /// </summary>
@@ -96,13 +105,15 @@ namespace CSX64
             if (!exe.Read(0, 8, out UInt64 text_seglen) || !exe.Read(8, 8, out UInt64 rodata_seglen)
                 || !exe.Read(16, 8, out UInt64 data_seglen) || !exe.Read(24, 8, out UInt64 bss_seglen)) return false;
 
-            // get size of memory and make sure it's doable (C# arrays use 32-bit signed integers as indexers)
+            // get size of memory and make sure it's within limits
             UInt64 size = (UInt64)exe.Length - 32 + bss_seglen + stacksize;
-            if (size > Int32.MaxValue) return false;
+            // make sure it's within limits
+            if (size > MaxMemory) return false;
 
             // get new memory array (does not include header)
             Memory = new byte[size];
-            
+            InitMemorySize = size;
+
             // copy over the text/rodata/data segments (not including header)
             for (int i = 32; i < exe.Length; ++i) Memory[i - 32] = exe[i];
             // zero the bss segment (should already be done by C# but this makes it more clear and explicit)
@@ -136,6 +147,7 @@ namespace CSX64
 
             // get the stack pointer
             UInt64 stack = (UInt64)Memory.Length;
+            RBP = stack; // RBP points to before we start pushing args
 
             // if we have cmd line args, load them
             if (args != null && args.Length > 0)
@@ -163,8 +175,8 @@ namespace CSX64
             RDI = args != null ? (UInt64)args.Length : 0;
             RSI = stack;
 
-            // initialize base/stack pointer registers
-            RBP = RSP = stack;
+            // initialize RSP
+            RSP = stack;
 
             // also push args to stack (RTL)
             Push(RSI);
@@ -272,6 +284,8 @@ namespace CSX64
                 case (UInt64)SyscallCode.Rmdir: return Sys_Rmdir();
 
                 case (UInt64)SyscallCode.Exit: Exit((int)CPURegisters[1].x64); return true;
+
+                case (UInt64)SyscallCode.Brk: return Sys_Brk();
 
                 // ----------------------------------
 
