@@ -10,17 +10,17 @@
 
 ; this file is purely for the linker - it is strongly advised that users DO NOT MODIFY THIS.
 ; an external named "_start" is required.
-; "_start" will be renamed by the linker to whatever the "main" entry point is.
+; "_start" (only in this file) will be renamed by the linker to whatever the "main" entry point is.
 
 extern _start
+
+extern exit
 
 segment .text
     
     ; call user-defined "main" entry point
     call _start
     
-    ; call sys_exit with the return value
-    mov ebx, eax
-    mov eax, sys_exit
-    syscall
-
+    ; call exit() with the return value
+    mov edi, eax
+    call exit

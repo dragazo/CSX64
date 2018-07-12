@@ -2,6 +2,8 @@
 ; this one needs a TON of work
 ; proper malloc algorithm has been put off until sys_brk is implemented
 
+global atexit, exit
+
 global atoi, atol, atof
 
 global NULL
@@ -21,6 +23,85 @@ extern pow
 ; -------------------------------------------
 
 segment .text
+
+; int atexit(void (*func)());
+; adds func to the stack of functions to call in exit() before termination.
+; returns zero on success.
+atexit:
+    mov r8, [atexit_dat]
+    mov r9d, [atexit_len]
+    mov r10d, [atexit_cap]
+    
+    ; if we're about to exceed capacity
+    cmp r9d, r10d
+    jb .add
+    
+    ; allocate more space
+    inc r10d
+    shl r10d, 1 ; compute new cap = (cap + 1) * 2
+    push r10d
+    push rdi
+    
+    shl r10d, 3 ; compute raw memory size = cap * 8
+    mov rdi, r8
+    mov esi, r10d
+    call realloc ; new array in rax
+    
+    pop rdi
+    pop r10d
+    
+    ; if realloc failed, return nonzero
+    cmp rax, 0
+    jnz .good
+    
+    inc rax ; return nonzero (failure)
+    ret
+    
+    .good:
+    ; update array and capacity
+    mov [atexit_dat], rax
+    mov [atexit_cap], r10d
+    
+    ; now that we have more space, try that again
+    jmp atexit
+    
+    .add:
+    ; add it to the stack
+    mov [r8 + 8*r9], rdi
+    inc r9d
+    mov [atexit_len], r9d
+    
+    xor rax, rax ; return 0 (success)
+    ret
+; void exit(int status);
+; terminates execution with the specified status (return value).
+; before termination, invokes all the functions set by calls to atexit() in reverse order.
+; it is undefined behavior for these functions to make calls to exit() or atexit().
+; it is recommended not to directly call sys_exit, as some of the atexit() cleanup may be important.
+exit:
+    ; save status
+    push edi
+    
+    ; call all the functions
+    .loop:
+        mov ecx, [atexit_len]
+        jecxz .done
+        
+        dec ecx
+        mov [atexit_len], ecx
+        mov rdx, [atexit_dat]
+        
+        call [rdx + 8*rcx]
+        jmp .loop
+    
+    .done:
+    ; terminate with specified status
+    mov eax, sys_exit
+    pop edi
+    syscall
+    
+    ; program terminated
+; -------------------------------------------
 
 ; const char *skipwspace(const char *str);
 skipwspace:
@@ -483,16 +564,25 @@ calloc:
 ; the resulting array is identical up to the lesser of the two sizes.
 ; if posible, the resize is performed in-place.
 ; returns a pointer to the new array.
+; reallocating a null pointer is equivalent to calling malloc()
 ; reallocating to a size of zero is equivalent to calling free() (and returns null).
 realloc:
+    ; if pointer is null, call malloc()
+    cmp rdi, 0
+    jnz .non_null
+    mov rdi, rsi
+    call malloc
+    ret
+    .non_null:
+    
     ; if size is zero, call free()
     cmp rsi, 0
     jnz .resize
     call free
     xor rax, rax
     ret
-    
     .resize:
+    
     ; compute the size of this block
     mov rcx, [rdi - 16]
     and cl, ~1
@@ -510,17 +600,23 @@ realloc:
     push rdi
     mov rdi, rsi
     call malloc
-    mov rdi, rax ; new array in rdi
-    pop rsi      ; old array in rsi
+    mov rsi, rax ; new array in rsi
+    pop rdi      ; old array in rdi
     pop rcx      ; smaller size in rcx
     
     ; copy the contents up to the smaller size
     .loop:
         sub rcx, 8
-        mov rax, [rsi + rcx]
-        mov [rdi + rcx], rax
-        jrcxz .ret
+        mov rax, [rdi + rcx]
+        mov [rsi + rcx], rax
+        jrcxz .done
         jmp .loop
+    
+    .done:
+    ; free the old array
+    push rsi
+    call free
+    pop rdi ; new array in rdi
     
     .ret:
     mov rax, rdi
@@ -730,6 +826,11 @@ f10: dq 10.0
 f10th: dq 0.1
 
 segment .bss
+
+align 8
+atexit_dat: resq 1 ; pointer to dynamic array
+atexit_len: resd 1 ; number of items in the atexit_dat array
+atexit_cap: resd 1 ; capacity of atexit_dat array
 
 align 8
 malloc_beg: resq 1 ; starting address for malloc
