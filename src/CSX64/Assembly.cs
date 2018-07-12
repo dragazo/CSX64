@@ -2803,9 +2803,11 @@ namespace CSX64
                     {
                         if (!TryParseImm(args[1], out Expr imm, out b_sizecode, out bool explicit_size)) return false;
 
+                        // fix up size codes
                         if (_force_b_imm_sizecode == -1)
                         {
-                            if (explicit_size && a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size missmatch"); return false; }
+                            if (explicit_size) { if (a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size missmatch"); return false; } }
+                            else b_sizecode = a_sizecode;
                         }
                         else b_sizecode = (UInt64)_force_b_imm_sizecode;
 
@@ -2837,12 +2839,13 @@ namespace CSX64
                     {
                         if (!TryParseImm(args[1], out Expr imm, out b_sizecode, out bool b_explicit)) return false;
 
+                        // fix up the size codes
                         if (_force_b_imm_sizecode == -1)
                         {
-                            // put the true sizecode in a_sizecode
                             if (a_explicit && b_explicit) { if (a_sizecode != b_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size mismatch"); return false; } }
                             else if (b_explicit) a_sizecode = b_sizecode;
-                            else if (!a_explicit) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce operand size"); return false; }
+                            else if (a_explicit) b_sizecode = a_sizecode;
+                            else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce operand size"); return false; }
                         }
                         else b_sizecode = (UInt64)_force_b_imm_sizecode;
 
@@ -2851,7 +2854,7 @@ namespace CSX64
                         if (!TryAppendVal(1, a_sizecode << 2)) return false;
                         if (!TryAppendVal(1, 4 << 4)) return false;
                         if (!TryAppendAddress(a, b, ptr_base)) return false;
-                        if (!TryAppendExpr(Size(a_sizecode), imm)) return false;
+                        if (!TryAppendExpr(Size(b_sizecode), imm)) return false;
                     }
                 }
                 // imm, *

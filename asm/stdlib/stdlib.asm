@@ -6,7 +6,7 @@ global atoi, atol, atof
 
 global NULL
 
-global malloc, free
+global malloc, calloc, realloc, free
 
 global RAND_MAX, rand, srand
 
@@ -287,9 +287,19 @@ _align:
 
 _malloc_step: equ 1 * 1024 * 1024 ; the amount of memory for malloc to request at a time
 
-; <- stack | ([qword size][... data ...])...
+; <- stack | ([void *next][void *prev][... data ...])...
+; pointers will be 8-byte aligned.
+; bit 0 of next will hold 1 if this block is occupied.
 
 ; void *malloc(qword size);
+; allocates contiguous memory in dynamically-allocated space via sys_brk.
+; you should not directly call sys_brk at any time (except in the case where it just returns the current break).
+; the memory returned is aligned on 8-byte boundaries.
+; the pointer returned by this function must later be dealocated by calling free().
+; allocating 0 bytes returns null.
+; upon failure (e.g. sys_brk refused), returns null.
+; upon success, returns a pointer to the allocated memory.
+; dereferencing this pointer out of bounds is undefined behavior.
 malloc:
     ; allocating 0 returns null
     cmp rdi, 0
@@ -326,80 +336,99 @@ malloc:
     
     .ok:
     ; look through the list for an available block of sufficient size
-    ; for(void *pos = beg; pos < end; pos += 8 + *(qword*)pos)
+    ; for(void *prev = 0, *pos = beg; pos < end; prev = pos, pos = pos->next)
+    ; -- prev = r12
     ; -- pos = rsi
     ; -- end = r8
+    xor r12, r12
     jmp .aft
     .top:
-        ; get the block size
+        ; get the next pointer
         mov rdx, [rsi]
+        btr rdx, 0
+        
+        ; if it's occupied, skip
+        jc .cont
+        
+        ; compute size - if it's not big enough, it won't work
         mov rcx, rdx
-        
-        ; if it's positive (occupied) - skip
-        neg rcx
-        js .cont
-        ; otherwise it's negative (unoccupied) - put positive in rdx
-        mov rdx, rcx
-        
-        ; if it's not big enough, it won't work
-        cmp rdx, rdi
+        sub rcx, rsi
+        sub rcx, 16
+        cmp rcx, rdi
         jb .cont
         
         ; -- yay we got one -- ;
         
-        ; split the block if it's large enough and we're not taking much
-        ; if (block_size >= 64 && request < block_size / 2)
-        cmp rdx, 64
+        ; split the block if it's large enough (that the split block's size > 0)
+        ; if (block_size >= request + 24)
+        mov rax, rdi
+        add rax, 24
+        cmp rcx, rax
         jb .nosplit
-        mov rcx, rdx
-        shr rcx, 1
-        cmp rdi, rcx
-        jae .nosplit
         
         ; splitting block - get pointer to start of split
-        lea rbx, [rsi + 8 + rdi]
+        lea rbx, [rsi + 16 + rdi]
         
-        ; mark split's size (unoccupied)
-        sub rdx, rdi
-        sub rdx, 8
-        neg rdx
+        ; update split's next/prev (unoccupied)
         mov [rbx], rdx
+        mov [rbx + 8], rsi
         
-        ; mark our size (occupied)
-        mov [rsi], rdi
+        ; if next is in bounds, update next->prev
+        cmp rdx, r8
+        movb [rdx + 8], rbx
+        
+        ; update register that holds our next
+        mov rdx, rbx
         
         .nosplit:
-        lea rax, [rsi + 8]
+        or dl, 1 ; mark this block as occupied
+        mov [rsi], rdx
+        lea rax, [rsi + 16] ; return pointer to data array
         ret
         
     .cont:
-        lea rsi, [rsi + 8 + rdx]
+        mov r12, rsi
+        mov rsi, rdx
     .aft:
         cmp rsi, r8
         jb .top
     
     ; -- if we got here, we went out of range of the malloc field -- ;
     
+    ; put position to add block in r8 (overwrite prev if not in use, otherwise malloc_end)
+    cmp r12, [malloc_beg]
+    jb .begin_add
+    mov rax, [r12]
+    bt rax, 0
+    jc .begin_add
+    mov r8, r12
+    mov r12, [r8 + 8]
+    
+    .begin_add:
     ; get program break
     mov eax, sys_brk
     xor ebx, ebx
     syscall
     
     ; if we have room, create a new block on the end and take that
-    lea r10, [r8 + 8 + rdi]
+    lea r10, [r8 + 16 + rdi]
     cmp r10, rax
     ja .nospace
     
     .enough_space:
     ; we have enough space - create the new block on the end (occupied)
     mov [malloc_end], r10
-    mov [r8], rdi
-    lea rax, [r8 + 8]
+    or r10b, 1
+    mov [r8], r10
+    mov [r8 + 8], r12
+    lea rax, [r8 + 16]
     ret
     
     .nospace:
     ; otherwise we have no space - get amount of space to allocate (multiple of step)
     mov r11, rdi
+    mov rdi, r10
+    sub rdi, rax
     mov rsi, _malloc_step
     call _align
     mov rdi, r11
@@ -424,14 +453,108 @@ malloc:
     .bad_stuff:
     xor rax, rax
     ret
-
-; void free(void *ptr);
-free:
-    mov eax, sys_exit ; not implemented yet
-    mov ebx, 999
-    syscall
+; void *calloc(qword size);
+; as malloc except that it also zeroes the contents.
+calloc:
+    ; align the size (for later)
+    mov esi, 8
+    call _align
+    push rax
+    
+    ; allocate the memory
+    mov rdi, rax
+    call malloc ; array in rax
+    pop rcx     ; size in rcx
+    
+    ; if it returned null, early exit
+    cmp rax, 0
+    jz .ret
+    
+    ; zero the contents
+    .loop:
+        sub rcx, 8
+        mov qword ptr [rax + rcx], 0
+        jrcxz .ret
+        jmp .loop
+    
+    .ret: ret
+; void *realloc(void *ptr, qword size);
+; creates a new aray with the specified size and copies over the contents.
+; the resulting array is identical up to the lesser of the two sizes.
+; if posible, the resize is performed in-place.
+; returns a pointer to the new array.
+; reallocating to a size of zero is equivalent to calling free() (and returns null).
+realloc:
+    ; if size is zero, call free()
+    cmp rsi, 0
+    jnz .resize
+    call free
+    xor rax, rax
     ret
-
+    
+    .resize:
+    ; compute the size of this block
+    mov rcx, [rdi - 16]
+    and cl, ~1
+    sub rcx, rdi
+    
+    ; if we already have enough space, we're good
+    cmp rcx, rsi
+    jae .ret
+    
+    ; compute the smaller size into rcx
+    mova rcx, rsi
+    
+    ; otherwise we need a new array
+    push rcx
+    push rdi
+    mov rdi, rsi
+    call malloc
+    mov rdi, rax ; new array in rdi
+    pop rsi      ; old array in rsi
+    pop rcx      ; smaller size in rcx
+    
+    ; copy the contents up to the smaller size
+    .loop:
+        sub rcx, 8
+        mov rax, [rsi + rcx]
+        mov [rdi + rcx], rax
+        jrcxz .ret
+        jmp .loop
+    
+    .ret:
+    mov rax, rdi
+    ret
+; void free(void *ptr);
+; deallocated resources that were allocated by malloc.
+; the specified pointer must be exactly what was returned by malloc.
+; freeing the same pointer twice is undefined behavior
+free:
+    ; get the raw pointer
+    sub rdi, 16
+    
+    ; get next in rdx
+    mov rdx, [rdi]
+    and dl, ~1
+    ; if next is in range and not in use, get next->next in rdx
+    cmp rdx, [malloc_end]
+    jae .nomerge_right
+    mov rcx, [rdx]
+    bt rcx, 0
+    movnc rdx, rcx
+    .nomerge_right:
+    
+    ; get prev in rcx
+    mov rcx, [rdi + 8]
+    ; if prev is in range
+    cmp rcx, [malloc_beg]
+    jb .ret
+    ; add our raw memory to prev->next (simpler than having to test bit 0)
+    sub rdx, rdi
+    add [rcx], rdx
+    
+    .ret: ret
+    
 ; -------------------------------------------
 
 ; void abort(void);
@@ -614,6 +737,8 @@ malloc_end: resq 1 ; stopping address for malloc
 
 align 8
 qtemp: resq 1 ; 64-bit temporary
+calloc_temp: resq 1
+realloc_temp: resq 1
 
 align 4
 inext: resd 1 ; these are used in the pseudo-random functions
