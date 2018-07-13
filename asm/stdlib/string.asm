@@ -548,11 +548,8 @@ strlen:
     ; return len
     .ret: ret
 
-
-
-
-
-
+; --------------------------
+    
 segment .rodata
 
 errno_NOTIMPLEMENTED: db "ERRNO NOT IMPLEMENTED YET", 0

@@ -2,11 +2,19 @@
 ; needs a lot of work - mostly simple but tedious
 ; needs asin/acos + ...
 
+; -----------------------------
+
 global sin, cos, tan
 global atan, atan2
 
 global pow, exp, sqrt
 global log2, log, log1p, log10
+
+global round, floor, ceil, trunc
+global fmod, remainder
+
+global fmin, fminf
+global fmax, fmaxf
 
 ; -----------------------------
 
@@ -154,6 +162,130 @@ log10:
     fstp qword ptr [qtemp]
     movsd xmm0, [qtemp]
     ret
+
+; -----------------------------
+
+; double round(double x);
+round:
+    ; get x into the fpu
+    movsd [qtemp], xmm0
+    fld qword ptr [qtemp]
+    
+    ; set rounding mode
+    fstcw [qtemp]
+    and word ptr [qtemp], ~0xc00
+    fldcw [qtemp]
+    
+    ; return result
+    frndint
+    fstp qword ptr [qtemp]
+    movsd xmm0, [qtemp]
+    ret
+; double floor(double x);
+floor:
+    ; get x into the fpu
+    movsd [qtemp], xmm0
+    fld qword ptr [qtemp]
+    
+    ; set rounding mode
+    fstcw [qtemp]
+    and word ptr [qtemp], ~0xc00
+    or word ptr [qtemp], 0x100
+    fldcw [qtemp]
+    
+    ; return result
+    frndint
+    fstp qword ptr [qtemp]
+    movsd xmm0, [qtemp]
+    ret
+; double ceil(double x);
+ceil:
+    ; get x into the fpu
+    movsd [qtemp], xmm0
+    fld qword ptr [qtemp]
+    
+    ; set rounding mode
+    fstcw [qtemp]
+    and word ptr [qtemp], ~0xc00
+    or word ptr [qtemp], 0x200
+    fldcw [qtemp]
+    
+    ; return result
+    frndint
+    fstp qword ptr [qtemp]
+    movsd xmm0, [qtemp]
+    ret
+; double trunc(double x);
+trunc:
+    ; get x into the fpu
+    movsd [qtemp], xmm0
+    fld qword ptr [qtemp]
+    
+    ; set rounding mode
+    fstcw [qtemp]
+    or word ptr [qtemp], 0xc00
+    fldcw [qtemp]
+    
+    ; return result
+    frndint
+    fstp qword ptr [qtemp]
+    movsd xmm0, [qtemp]
+    ret
+
+; -----------------------------
+
+; double fmod(double numer, double denom);
+fmod:
+    movsd [qtemp], xmm1
+    fld qword ptr [qtemp] ; st1 holds denom
+    movsd [qtemp], xmm0
+    fld qword ptr [qtemp] ; st0 holds numer
+    
+    ; compute remainder
+    fprem
+    fstp st1
+    
+    ; return result
+    fstp qword ptr [qtemp]
+    movsd xmm0, [qtemp]
+    ret
+; double remainder(double numer, double denom);
+remainder:
+    movsd [qtemp], xmm1
+    fld qword ptr [qtemp] ; st1 holds denom
+    movsd [qtemp], xmm0
+    fld qword ptr [qtemp] ; st0 holds numer
+    
+    ; compute remainder
+    fprem1
+    fstp st1
+    
+    ; return result
+    fstp qword ptr [qtemp]
+    movsd xmm0, [qtemp]
+    ret
+
+; -----------------------------
+
+; double fmin(double x, double y);
+fmin:
+    minsd xmm0, xmm1
+    ret
+; double fminf(double x, double y);
+fminf:
+    minss xmm0, xmm1
+    ret
+
+; double fmax(double x, double y);
+fmax:
+    maxsd xmm0, xmm1
+    ret
+; double fmaxf(double x, double y);
+fmaxf:
+    maxss xmm0, xmm1
+    ret
+
+; -----------------------------
 
 segment .rodata
 

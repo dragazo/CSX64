@@ -4046,9 +4046,9 @@ namespace CSX64
                         case "JG": case "JNLE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 16, 14, 3)) return args.res; break;
                         case "JGE": case "JNL": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 17, 14, 3)) return args.res; break;
 
-                        case "JCXZ": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 18, 14, 3)) return args.res; break;
-                        case "JECXZ": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 19, 14, 3)) return args.res; break;
-                        case "JRCXZ": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 20, 14, 3)) return args.res; break;
+                        case "JCXZ": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 18, 2, 1)) return args.res; break;
+                        case "JECXZ": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 18, 4, 2)) return args.res; break;
+                        case "JRCXZ": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 18, 8, 3)) return args.res; break;
 
                         case "LOOP": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, 0, 14, 3)) return args.res; break;
                         case "LOOPZ": case "LOOPE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, 1, 14, 3)) return args.res; break;

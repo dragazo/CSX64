@@ -2,6 +2,8 @@
 
 global assert
 
+extern abort
+
 segment .text
 
 ; void assert(int);
@@ -9,9 +11,19 @@ assert:
     cmp edi, 0
     jz .ret
     
-    mov eax, sys_exit
-    mov ebx, 666 ; evil error code 666 is assertion failure
+    ; write error message
+    mov eax, sys_write
+    mov ebx, 2
+    mov ecx, err_msg
+    mov edx, err_msg_len
     syscall
     
-    .ret: ret
+    ; abort execution
+    call abort
     
+    .ret: ret
+
+segment .rodata
+
+err_msg: db "ASSERTION FAILURE", 10
+err_msg_len: equ $-err_msg

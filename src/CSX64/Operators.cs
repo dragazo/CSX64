@@ -677,9 +677,7 @@ namespace CSX64
             cnd = 15: LE
             cnd = 16: G
             cnd = 17: GE
-            cnd = 18: CXZ
-            cnd = 19: ECXZ
-            cnd = 20: RCXZ
+            cnd = 18: CXZ/ECXZ/RCXZ
         */
         private bool ProcessJcc()
         {
@@ -712,9 +710,7 @@ namespace CSX64
                 case 15: flag = cc_le; break;
                 case 16: flag = cc_g; break;
                 case 17: flag = cc_ge; break;
-                case 18: flag = CX == 0; break;
-                case 19: flag = ECX == 0; break;
-                case 20: flag = RCX == 0; break;
+                case 18: flag = CPURegisters[2][sizecode] == 0; break;
 
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
@@ -2144,7 +2140,7 @@ namespace CSX64
             double a = ST(0);
             double b = ST(1);
 
-            // compute remainder with truncated quotient (IEEE)
+            // compute remainder with rounded quotient (IEEE)
             double res = Math.IEEERemainder(a, b);
 
             // store value

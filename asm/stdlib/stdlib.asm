@@ -2,7 +2,7 @@
 ; this one needs a TON of work
 ; proper malloc algorithm has been put off until sys_brk is implemented
 
-global atexit, exit
+global atexit, exit, abort
 
 global atoi, atol, atof
 
@@ -85,7 +85,7 @@ exit:
     ; call all the functions
     .loop:
         mov ecx, [atexit_len]
-        jecxz .done
+        jrcxz .done
         
         dec ecx
         mov [atexit_len], ecx
@@ -99,7 +99,13 @@ exit:
     mov eax, sys_exit
     pop edi
     syscall
+    ; program terminated
     
+; void abort(void);
+; immediately terminates execution and yields an abort error code to the system.
+; it is recommended to use exit() instead where possible, as abort performs no cleanup.
+abort:
+    hlt
     ; program terminated
 ; -------------------------------------------
 
@@ -650,14 +656,6 @@ free:
     add [rcx], rdx
     
     .ret: ret
-    
-; -------------------------------------------
-
-; void abort(void);
-abort:
-    mov eax, sys_exit
-    mov ebx, err_abort
-    syscall
 
 ; -------------------------------------------
 
