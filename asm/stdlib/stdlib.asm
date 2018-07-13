@@ -693,7 +693,7 @@ free:
     ; get next in rdx
     mov rdx, [rdi]
     and dl, ~1
-    ; if next is in range and not in use, get next->next in rdx
+    ; if next is in range and not in use, get next->next in rdx (we'll merge right)
     cmp rdx, [malloc_end]
     jae .nomerge_right
     mov rcx, [rdx]
@@ -703,16 +703,17 @@ free:
     
     ; get prev in rcx
     mov rcx, [rdi + 8]
-    ; if prev is in range
+    ; if prev is in range and not in use, merge with it
     cmp rcx, 0
     jz .nomerge_left
-    ; add our raw memory to prev->next (simpler than having to test bit 0)
-    sub rdx, rdi
-    add [rcx], rdx
+    mov rbx, [rcx]
+    bt rbx, 0
+    jc .nomerge_left
+    mov [rcx], rdx ; this merges left and right simultaneously
     ret
     
     .nomerge_left:
-    ; if we're not merging left, we need to update our next
+    ; if we're not merging left, we still need to merge right (even if just to mark as not in use)
     mov [rdi], rdx
     ret
 

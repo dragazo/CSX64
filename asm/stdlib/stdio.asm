@@ -1,20 +1,14 @@
 ; source http://www.cplusplus.com/reference/cstdio/
 ; needs a TON of file handling code
 
+; --------------------------------------
+
 global remove
 global rename
 
 ; --------------------------------------
 
-; struct FILE
-;     int fd; (-1 for none)
-;     int bpos; (pos for reading, len for writing)
-;     char buffer[1016];
-FILE.fd: equ 0
-FILE.bpos: equ 4
-FILE.buffer: equ 8
-FILE.bcap: equ 1016
-FILE.sz: equ 1024
+extern malloc, free
 
 ; --------------------------------------
     
@@ -42,28 +36,30 @@ rename:
     ; return 0 (failure causes CSX64 to terminate)
     xor eax, eax
     ret
-    
 
-
-
-
-
+; --------------------------------------
 
 ; FILE *fopen(const char *path, const char *mode)
 fopen:
-    xor eax, eax ; eax is file mode (0 invalid)
-    xor ebx, ebx ; ebx is file access (0 invalid)
+    ; decode mode from first char - into r8b
+    mov dl, [rsi]
+    cmp dl, 'r' ; read mode
+    move r8b, 1
+    je .decoded
+    cmp dl, 'w' ; write mode
+    move r8b, 2
+    je .decoded
+    cmp dl, 'a' ; append mode
+    move r8b, 3
+    je .decoded
+    ; otherwise unknown open mode
+    xor rax, rax
+    ret
     
-    .mode_top:
-        mov dl, [rsi] ; get the mode character
-        cmp dl, 0
-        je .mode_end ; null term is end of mode string
-        
-        cmp dl, 'r'
-        
-    .mode_end:
-        
-
+    ; decode the rest of the characters
+    
+    
+; --------------------------------------
 
 segment .rodata
 
