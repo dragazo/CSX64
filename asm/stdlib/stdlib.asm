@@ -71,7 +71,7 @@ atexit:
     inc r9d
     mov [atexit_len], r9d
     
-    xor rax, rax ; return 0 (success)
+    xor eax, eax ; return 0 (success)
     ret
 ; void exit(int status);
 ; terminates execution with the specified status (return value).
@@ -79,25 +79,27 @@ atexit:
 ; it is undefined behavior for these functions to make calls to exit() or atexit().
 ; it is recommended not to directly call sys_exit, as some of the atexit() cleanup may be important.
 exit:
-    ; save status
-    push edi
+    ; we'll use call-safe registers
+    ; no need to preserve them since we won't be returning
+    mov r15d, edi          ; status in r15d
+    mov r14d, [atexit_len] ; len in r14
+    mov r13, [atexit_dat]  ; ptr in r13
     
-    ; call all the functions
+    ; for(int i = len-1; i >= 0; --i)
+    ; -- i = r14d
+    dec r14
+    jmp .aft
     .loop:
-        mov ecx, [atexit_len]
-        jrcxz .done
-        
-        dec ecx
-        mov [atexit_len], ecx
-        mov rdx, [atexit_dat]
-        
-        call [rdx + 8*rcx]
-        jmp .loop
+        call [r13 + 8*r14]
+        dec r14
+    .aft:
+        cmp r14, 0
+        jge .loop
     
     .done:
     ; terminate with specified status
     mov eax, sys_exit
-    pop edi
+    mov edi, r15d
     syscall
     ; program terminated
     
@@ -352,27 +354,29 @@ atof:
 NULL: equ 0
 
 ; void *align(void *ptr, ulong align);
+; align value must be a power of 2
 _align:
-    ; get position in block (rdx)
+    ; get position in block (rcx)
+    mov rbx, rsi
+    dec rbx
+    mov rcx, rdi
+    and rcx, rbx
+    
+    ; aligned in rax
     mov rax, rdi
-    xor rdx, rdx
-    div rsi
+    sub rsi, rcx
+    add rax, rsi
     
-    ; if at 0, already aligned
-    cmp rdx, 0
-    jz .ret
-    
-    ; otherwise align it
-    sub rsi, rdx
-    add rdi, rsi
-    
-    .ret:
-    mov rax, rdi
+    ; if pos was zero, return the unaligned instead
+    cmp rcx, 0
+    movz rax, rdi
     ret
 
 ; -------------------------------------------
 
-_malloc_step: equ 1 * 1024 * 1024 ; the amount of memory for malloc to request at a time
+; the amount of memory for malloc to request at a time
+; must be a power of 2
+_malloc_step: equ 1 * 1024 * 1024
 
 ; <- stack | ([void *next][void *prev][... data ...])...
 ; pointers will be 8-byte aligned.
@@ -483,13 +487,12 @@ malloc:
     ; -- if we got here, we went out of range of the malloc field -- ;
     
     ; put position to add block in r8 (overwrite prev if not in use, otherwise malloc_end)
-    cmp r12, [malloc_beg]
-    jb .begin_add
+    cmp r12, 0
+    jz .begin_add
     mov rax, [r12]
     bt rax, 0
-    jc .begin_add
-    mov r8, r12
-    mov r12, [r8 + 8]
+    movnc r8, r12
+    movnc r12, [r8 + 8]
     
     .begin_add:
     ; get program break
@@ -530,14 +533,10 @@ malloc:
     mov eax, sys_brk
     syscall
     
-    ; if we got a nonzero return, return null (bad stuff)
+    ; if we got a zero return, we're good
     cmp rax, 0
-    jnz .bad_stuff
-    
-    ; otherwise, go back to the case where we had enough space
-    jmp .enough_space
-    
-    .bad_stuff:
+    jz .enough_space
+    ; otherwise it failed - return null
     xor rax, rax
     ret
 ; void *calloc(qword size);
@@ -558,11 +557,11 @@ calloc:
     jz .ret
     
     ; zero the contents
+    jrcxz .ret ; hopefully redundant, but safer to make sure
     .loop:
         sub rcx, 8
         mov qword ptr [rax + rcx], 0
-        jrcxz .ret
-        jmp .loop
+        jnz .loop
     
     .ret: ret
 ; void *realloc(void *ptr, qword size);
@@ -589,17 +588,71 @@ realloc:
     ret
     .resize:
     
+    ; align the size (for later)
+    mov r8, rdi
+    mov rdi, rsi
+    mov esi, 8
+    call _align
+    mov rsi, rax ; aligned size back in rsi
+    mov rdi, r8  ; pointer back in rdi
+    
     ; compute the size of this block
     mov rcx, [rdi - 16]
     and cl, ~1
+    mov rbx, rcx ; save a copy of next in rbx
     sub rcx, rdi
     
     ; if we already have enough space, we're good
     cmp rcx, rsi
     jae .ret
-    
     ; compute the smaller size into rcx
     mova rcx, rsi
+    
+    ; we're going down the route of needing a new array
+    ; if next is malloc_end, we can still do it in-place
+    cmp rbx, [malloc_end]
+    jne .new_array
+    
+    mov eax, sys_brk
+    xor ebx, ebx
+    syscall             ; current break point in rax
+    lea r8, [rdi + rsi] ; break point needed in r8 (this is why we aligned size earlier)
+    
+    ; if we have enough room, just move malloc_end
+    cmp r8, rax
+    ja .more_mem
+    
+    .good_mem:
+    mov [malloc_end], r8
+    or r8b, 1
+    mov [rdi - 16], r8
+    mov rax, rdi
+    ret
+    
+    .more_mem:
+    ; otherwise we need to allocate more space
+    ; align request size to a multiple of _malloc_step
+    mov r10, rdi
+    mov r11, rax ; save current break in r11
+    mov rdi, r8
+    sub rdi, rax
+    mov rsi, _malloc_step
+    call _align
+    ; and allocate that much extra memory
+    mov rbx, rax
+    add rbx, r11
+    mov eax, sys_brk
+    syscall
+    mov rdi, r10
+    
+    ; if it succeeded, we're done
+    cmp rax, 0
+    jz .good_mem
+    ; otherwise it failed - return null
+    xor rax, rax
+    ret
+    
+    .new_array: ; sad days, everybody, we need a new array
     
     ; otherwise we need a new array
     push rcx
@@ -611,18 +664,20 @@ realloc:
     pop rcx      ; smaller size in rcx
     
     ; copy the contents up to the smaller size
+    ; (this is why we aligned the size earlier)
+    jrcxz .done ; hopefully refundant but safer to check
     .loop:
         sub rcx, 8
         mov rax, [rdi + rcx]
         mov [rsi + rcx], rax
-        jrcxz .done
-        jmp .loop
+        jnz .loop
     
     .done:
     ; free the old array
     push rsi
     call free
-    pop rdi ; new array in rdi
+    pop rax
+    ret
     
     .ret:
     mov rax, rdi
@@ -649,13 +704,17 @@ free:
     ; get prev in rcx
     mov rcx, [rdi + 8]
     ; if prev is in range
-    cmp rcx, [malloc_beg]
-    jb .ret
+    cmp rcx, 0
+    jz .nomerge_left
     ; add our raw memory to prev->next (simpler than having to test bit 0)
     sub rdx, rdi
     add [rcx], rdx
+    ret
     
-    .ret: ret
+    .nomerge_left:
+    ; if we're not merging left, we need to update our next
+    mov [rdi], rdx
+    ret
 
 ; -------------------------------------------
 
