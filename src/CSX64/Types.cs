@@ -20,7 +20,7 @@ namespace CSX64
 
         NOP,
         HLT, SYSCALL,
-        PUSHF, POPF,
+        STLDF,
         FlagManip,
 
         SETcc, MOV, MOVcc, XCHG,
@@ -43,6 +43,8 @@ namespace CSX64
 
         // x87 instructions
 
+        FWAIT,
+        FINIT, FCLEX,
         FSTLD_WORD,
         FLD_const, FLD, FST, FXCH, FMOVcc,
 
@@ -73,15 +75,16 @@ namespace CSX64
     }
     public enum SyscallCode
     {
+        Exit,
+
         Read, Write,
         Open, Close,
+
         Flush,
         Seek, Tell,
 
         Move, Remove,
         Mkdir, Rmdir,
-
-        Exit,
 
         Brk,
     }

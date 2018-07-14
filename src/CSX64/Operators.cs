@@ -401,32 +401,43 @@ namespace CSX64
 
         // -- impl -- //
 
-        private bool ProcessPUSHF()
+        private const UInt64 ModifiableFlags = 0x003f0fd5ul;
+
+        /*
+        [8: mode]
+            mode = 0: pushf
+            mode = 1: pushfd
+            mode = 2: pushfq
+            mode = 3: popf
+            mode = 4: popfd
+            mode = 5: popfq
+            mode = 6: sahf
+            mode = 7: lahf
+        */
+        private bool ProcessSTLDF()
         {
             if (!GetMemAdv(1, out UInt64 ext)) return false;
-
+            
             switch (ext)
             {
+                // pushf
                 case 0:
                 case 1: // VM and RF flags are cleared in the stored image
                 case 2:
                     return PushRaw(Size(ext + 1), RFLAGS & ~0x30000ul);
-
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
-            }
-        }
-        private bool ProcessPOPF()
-        {
-            if (!GetMemAdv(1, out UInt64 ext)) return false;
-
-            switch (ext)
-            {
-                case 0:
-                case 1: // can't modify reserved flags
-                case 2:
-                    if (!PopRaw(Size(ext + 1), out ext)) return false;
-                    RFLAGS = RFLAGS & ~0x003f0fd5ul | ext & 0x003f0fd5ul;
+                
+                // popf
+                case 3:
+                case 4: // can't modify reserved flags
+                case 5:
+                    if (!PopRaw(Size(ext - 2), out ext)) return false;
+                    RFLAGS = (RFLAGS & ~ModifiableFlags) | (ext & ModifiableFlags);
                     return true;
+
+                // sahf
+                case 6: RFLAGS = (RFLAGS & ~ModifiableFlags) | (AH & ModifiableFlags); return true;
+                // lahf
+                case 7: AH = (byte)RFLAGS; return true;
 
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
@@ -1671,6 +1682,16 @@ namespace CSX64
         // -- floating point stuff -- //
 
         /// <summary>
+        /// Initializes the FPU as if by FINIT
+        /// </summary>
+        private void FINIT()
+        {
+            FPU_control = 0x3bf;
+            FPU_status = 0;
+            FPU_tag = 0xffff;
+        }
+
+        /// <summary>
         /// Computes the FPU tag for the specified value
         /// </summary>
         /// <param name="val">the value to test</param>
@@ -1782,19 +1803,31 @@ namespace CSX64
 
         /*
         [8: mode]   [address]
-            mode = 0: FSTCW
-            mode = 1: FLDCW
+            mode = 0: FSTSW AX
+            mode = 1: FSTSW
+            mode = 2: FSTCW
+            mode = 3: FLDCW
             else UND
         */
         private bool ProcessFSTLD_WORD()
         {
-            if (!GetMemAdv(1, out UInt64 s) || !GetAddressAdv(out UInt64 m)) return false;
+            UInt64 m;
+            if (!GetMemAdv(1, out UInt64 s)) return false;
 
-            // write through mode
+            // handle FSTSW AX case specially (doesn't have an address)
+            if (s == 0)
+            {
+                AX = FPU_status;
+                return true;
+            }
+            else if (!GetAddressAdv(out m)) return false;
+
+            // switch through mode
             switch (s)
             {
-                case 0: return SetMemRaw(m, 2, FPU_control);
-                case 1:
+                case 1: return SetMemRaw(m, 2, FPU_status);
+                case 2: return SetMemRaw(m, 2, FPU_control);
+                case 3:
                     if (!GetMemRaw(m, 2, out m)) return false;
                     FPU_control = (UInt16)m;
                     return true;

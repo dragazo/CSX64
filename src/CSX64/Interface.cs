@@ -130,9 +130,7 @@ namespace CSX64
             for (int i = 0; i < CPURegisters.Length; ++i) CPURegisters[i].x64 = Rand.NextUInt64();
 
             // set up fpu registers
-            FPU_control = 0x3bf;
-            FPU_status = 0;
-            FPU_tag = 0xffff;
+            FINIT();
 
             // set up vpu registers
             for (int i = 0; i < ZMMRegisters.Length; ++i)
@@ -267,6 +265,8 @@ namespace CSX64
         {
             switch (RAX)
             {
+                case (UInt64)SyscallCode.Exit: Exit((int)RBX); return true;
+
                 case (UInt64)SyscallCode.Read: return Sys_Read();
                 case (UInt64)SyscallCode.Write: return Sys_Write();
                 
@@ -282,8 +282,6 @@ namespace CSX64
                 case (UInt64)SyscallCode.Remove: return Sys_Remove();
                 case (UInt64)SyscallCode.Mkdir: return Sys_Mkdir();
                 case (UInt64)SyscallCode.Rmdir: return Sys_Rmdir();
-
-                case (UInt64)SyscallCode.Exit: Exit((int)CPURegisters[1].x64); return true;
 
                 case (UInt64)SyscallCode.Brk: return Sys_Brk();
 
@@ -320,8 +318,7 @@ namespace CSX64
                 case OPCode.HLT: Terminate(ErrorCode.Abort); return true;
                 case OPCode.SYSCALL: if (Syscall()) return true; Terminate(ErrorCode.UnhandledSyscall); return false;
 
-                case OPCode.PUSHF: return ProcessPUSHF();
-                case OPCode.POPF: return ProcessPOPF();
+                case OPCode.STLDF: return ProcessSTLDF();
 
                 case OPCode.FlagManip: return ProcessFlagManip();
 
@@ -389,6 +386,11 @@ namespace CSX64
                 case OPCode.AAA: return ProcessAAA();
 
                 // x87 instructions
+
+                case OPCode.FWAIT: return true; // thus far fpu ops are synchronous with cpu ops
+
+                case OPCode.FINIT: FINIT(); return true;
+                case OPCode.FCLEX: FPU_status &= 0xff00; return true;
 
                 case OPCode.FSTLD_WORD: return ProcessFSTLD_WORD();
 

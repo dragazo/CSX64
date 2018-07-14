@@ -3959,13 +3959,16 @@ namespace CSX64
                         case "HLT": if (!args.TryProcessNoArgOp(OPCode.HLT)) return args.res; break;
                         case "SYSCALL": if (!args.TryProcessNoArgOp(OPCode.SYSCALL)) return args.res; break;
 
-                        case "PUSHF": if (!args.TryProcessNoArgOp(OPCode.PUSHF, true, 0)) return args.res; break;
-                        case "PUSHFD": if (!args.TryProcessNoArgOp(OPCode.PUSHF, true, 1)) return args.res; break;
-                        case "PUSHFQ": if (!args.TryProcessNoArgOp(OPCode.PUSHF, true, 2)) return args.res; break;
+                        case "PUSHF": if (!args.TryProcessNoArgOp(OPCode.STLDF, true, 0)) return args.res; break;
+                        case "PUSHFD": if (!args.TryProcessNoArgOp(OPCode.STLDF, true, 1)) return args.res; break;
+                        case "PUSHFQ": if (!args.TryProcessNoArgOp(OPCode.STLDF, true, 2)) return args.res; break;
 
-                        case "POPF": if (!args.TryProcessNoArgOp(OPCode.POPF, true, 0)) return args.res; break;
-                        case "POPFD": if (!args.TryProcessNoArgOp(OPCode.POPF, true, 1)) return args.res; break;
-                        case "POPFQ": if (!args.TryProcessNoArgOp(OPCode.POPF, true, 2)) return args.res; break;
+                        case "POPF": if (!args.TryProcessNoArgOp(OPCode.STLDF, true, 3)) return args.res; break;
+                        case "POPFD": if (!args.TryProcessNoArgOp(OPCode.STLDF, true, 4)) return args.res; break;
+                        case "POPFQ": if (!args.TryProcessNoArgOp(OPCode.STLDF, true, 5)) return args.res; break;
+
+                        case "SAHF": if (!args.TryProcessNoArgOp(OPCode.STLDF, true, 6)) return args.res; break;
+                        case "LAHF": if (!args.TryProcessNoArgOp(OPCode.STLDF, true, 7)) return args.res; break;
 
                         case "STC": if (!args.TryProcessFlagManip(OPCode.FlagManip, 0, true)) return args.res; break;
                         case "STI": if (!args.TryProcessFlagManip(OPCode.FlagManip, 1, true)) return args.res; break;
@@ -4141,11 +4144,37 @@ namespace CSX64
                         // x87 instructions
 
                         case "FNOP": if (!args.TryProcessNoArgOp(OPCode.NOP)) return args.res; break; // no sense in wasting another opcode on no-op
-                        case "FWAIT": break; // allow FWAIT and WAIT but don't do anything (exceptions in CSX64 are immediate)
-                        case "WAIT": break;
 
-                        case "FSTCW": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 0, 1)) return args.res; break;
-                        case "FLDCW": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 1, 1)) return args.res; break;
+                        case "FWAIT": if (!args.TryProcessNoArgOp(OPCode.FWAIT)) return args.res; break;
+
+                        case "FINIT":
+                            if (!args.TryAppendByte((byte)OPCode.FWAIT)) return args.res;
+                            goto case "FNINIT"; // c# doesn't allow implicit fallthrough
+                        case "FNINIT": if (!args.TryProcessNoArgOp(OPCode.FINIT)) return args.res; break;
+
+                        case "FCLEX":
+                            if (!args.TryAppendByte((byte)OPCode.FWAIT)) return args.res;
+                            goto case "FNCLEX"; // c# doesn't allow implicit fallthrough
+                        case "FNCLEX": if (!args.TryProcessNoArgOp(OPCode.FCLEX)) return args.res; break;
+
+                        case "FSTSW":
+                            if (!args.TryAppendByte((byte)OPCode.FWAIT)) return args.res;
+                            goto case "FNSTSW"; // c# doesn't allow implicit fallthrough
+                        case "FNSTSW": // handle FNSTSW AX case here since the other forms don't allow it
+                            if (args.args.Length == 1 && args.args[0].ToUpper() == "AX")
+                            {
+                                if (!args.TryAppendByte((byte)OPCode.FSTLD_WORD)) return args.res;
+                                if (!args.TryAppendByte(0)) return args.res;
+                            }
+                            else if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 1, 1)) return args.res;
+                            break;
+
+                        case "FSTCW":
+                            if (!args.TryAppendByte((byte)OPCode.FWAIT)) return args.res;
+                            goto case "FNSTCW"; // c# doesn't allow implicit fallthrough
+                        case "FNSTCW": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 2, 1)) return args.res; break;
+
+                        case "FLDCW": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 3, 1)) return args.res; break;
 
                         case "FLD1": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 0)) return args.res; break;
                         case "FLDL2T": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 1)) return args.res; break;

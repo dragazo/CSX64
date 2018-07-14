@@ -97,6 +97,7 @@ namespace CSX64
 
             return true;
         }
+
         private bool Sys_Flush()
         {
             // get fd index

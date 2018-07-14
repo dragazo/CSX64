@@ -56,6 +56,7 @@ fopen:
     xor rax, rax
     ret
     
+    .decoded:
     ; decode the rest of the characters
     
     
