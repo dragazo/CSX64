@@ -1912,6 +1912,9 @@ namespace CSX64
             mode = 8: int32M <- st(0)
             mode = 9: || + pop
             mode = 10: int64M <- st(0) + pop
+            mode = 11: int16M <- st(0) + pop (truncation)
+            mode = 12: int32M <- st(0) + pop (truncation)
+            mode = 13: int64M <- st(0) + pop (truncation)
             else UND
         */
         private bool ProcessFST()
@@ -1943,6 +1946,9 @@ namespace CSX64
                         case 6: case 7: if (!SetMemRaw(m, 2, (UInt64)(Int64)PerformRoundTrip(ST(0)))) return false; break;
                         case 8: case 9: if (!SetMemRaw(m, 4, (UInt64)(Int64)PerformRoundTrip(ST(0)))) return false; break;
                         case 10: if (!SetMemRaw(m, 8, (UInt64)(Int64)PerformRoundTrip(ST(0)))) return false; break;
+                        case 11: if (!SetMemRaw(m, 2, (UInt64)(Int64)ST(0))) return false; break;
+                        case 12: if (!SetMemRaw(m, 4, (UInt64)(Int64)ST(0))) return false; break;
+                        case 13: if (!SetMemRaw(m, 8, (UInt64)(Int64)ST(0))) return false; break;
 
                         default: Terminate(ErrorCode.UndefinedBehavior); return false;
                     }
@@ -1951,8 +1957,8 @@ namespace CSX64
 
             switch (s & 15)
             {
-                case 1: case 3: case 5: case 7: case 9: return PopFPU(out double temp);
-                default: return true;
+                case 0: case 2: case 4: case 6: case 8: return true;
+                default: return PopFPU();
             }
         }
         private bool ProcessFXCH()
@@ -2334,7 +2340,7 @@ namespace CSX64
         }
 
         /*
-        [1:][3: i][4: mode]
+        [1: unordered][3: i][4: mode]
             mode = 0: cmp st(0), st(i)
             mode = 1: || + pop
             mode = 2: || + 2x pop
@@ -2346,6 +2352,8 @@ namespace CSX64
             mode = 8: || + pop
             mode = 9: cmp st(0), int32
             mode = 10: || + pop
+            mode = 11 cmp st(0), st(i) eflags
+            mode = 12 || + pop
             else UND
         */
         private bool ProcessFCOM()
@@ -2360,6 +2368,8 @@ namespace CSX64
                 case 0:
                 case 1:
                 case 2:
+                case 11:
+                case 12:
                     if (ST_Tag(0) == FPU_Tag_empty || ST_Tag(s >> 4) == FPU_Tag_empty) { Terminate(ErrorCode.FPUAccessViolation); return false; }
                     a = ST(0); b = ST(s >> 4);
                     break;
@@ -2381,61 +2391,42 @@ namespace CSX64
                     break;
             }
 
+            bool x, y, z; // temporaries for cmp flag data
+
             // do the comparison
-            if (a > b) { FPU_C3 = false; FPU_C2 = false; FPU_C0 = false; }
-            else if (a < b) { FPU_C3 = false; FPU_C2 = false; FPU_C0 = true; }
-            else if (a == b) { FPU_C3 = true; FPU_C2 = false; FPU_C0 = false; }
+            if (a > b) { x = false; y = false; z = false; }
+            else if (a < b) { x = false; y = false; z = true; }
+            else if (a == b) { x = true; y = false; z = false; }
             // otherwise is unordered
             else
             {
-                // FCOM throws in this case (FUCOM is the one that doesn't)
-                Terminate(ErrorCode.ArithmeticError); return false;
+                if ((s & 128) == 0) { Terminate(ErrorCode.ArithmeticError); return false; }
+                x = y = z = true;
             }
 
-            // C1 is cleared
-            FPU_C1 = false;
+            // eflags
+            if (s == 11 || s == 12)
+            {
+                ZF = x;
+                PF = y;
+                CF = z;
+            }
+            // fflags
+            else
+            {
+                FPU_C3 = x;
+                FPU_C2 = y;
+                FPU_C0 = z;
+            }
+            FPU_C1 = false; // C1 is cleared in either case
 
             // handle popping cases
             switch (s & 7)
             {
-                case 2: return PopFPU(out a) && PopFPU(out a);
-                case 1: case 4: case 6: case 8: case 10: return PopFPU(out a);
+                case 2: return PopFPU() && PopFPU();
+                case 1: case 4: case 6: case 8: case 10: case 12: return PopFPU();
+                default: return true;
             }
-
-            return true;
-        }
-        /*
-        [1: pop][1: unordered][2:][1:][3: i]
-            cmp st(0), st(i)
-            unordered allows NaN
-        */
-        private bool ProcessFCOMI()
-        {
-            if (!GetMemAdv(1, out UInt64 s)) return false;
-
-            if (ST_Tag(0) == FPU_Tag_empty || ST_Tag(s) == FPU_Tag_empty) { Terminate(ErrorCode.FPUAccessViolation); return false; }
-
-            double a = ST(0);
-            double b = ST(s);
-
-            // do the comparison
-            if (a > b) { ZF = false; PF = false; CF = false; }
-            else if (a < b) { ZF = false; PF = false; CF = true; }
-            else if (a == b) { ZF = true; PF = false; CF = false; }
-            // otherwise is unordered
-            else
-            {
-                // if unordered, set flags accordingly, otherwise is arithmetic error
-                if ((s & 64) != 0) { ZF = true; PF = true; CF = true; }
-                else { Terminate(ErrorCode.ArithmeticError); return false; }
-            }
-
-            // C1 is cleared (C0, C2, C3 not affected)
-            FPU_C1 = false;
-
-            // handle popping case
-            if ((s & 128) != 0) return PopFPU(out a);
-            else return true;
         }
 
         private bool ProcessFSIN()

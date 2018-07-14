@@ -3390,7 +3390,7 @@ namespace CSX64
 
                 return true;
             }
-            public bool TryProcessFST(OPCode op, bool integral, bool pop)
+            public bool TryProcessFST(OPCode op, bool integral, bool pop, bool trunc)
             {
                 if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 1 operand"); return false; }
 
@@ -3415,14 +3415,14 @@ namespace CSX64
                     // if this is integral (i.e. truncation store)
                     if (integral)
                     {
-                        if (sizecode == 1) { if (!TryAppendVal(1, pop ? 7 : 6ul)) return false; }
-                        else if (sizecode == 2) { if (!TryAppendVal(1, pop ? 9 : 8ul)) return false; }
+                        if (sizecode == 1) { if (!TryAppendVal(1, pop ? trunc ? 11 : 7ul : 6)) return false; }
+                        else if (sizecode == 2) { if (!TryAppendVal(1, pop ? trunc ? 12 : 9ul : 8)) return false; }
                         else if (sizecode == 3)
                         {
                             // there isn't a non-popping 64-bit int store
                             if (!pop) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size is not supported"); return false; }
 
-                            if (!TryAppendVal(1, 10)) return false;
+                            if (!TryAppendVal(1, trunc ? 13 : 10ul)) return false;
                         }
                         else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size is not supported"); return false; }
                     }
@@ -3441,7 +3441,7 @@ namespace CSX64
 
                 return true;
             }
-            public bool TryProcessFCOM(OPCode op, bool integral, bool pop, bool pop2)
+            public bool TryProcessFCOM(OPCode op, bool integral, bool pop, bool pop2, bool eflags, bool unordered)
             {
                 // write the op code
                 if (!TryAppendByte((byte)op)) return false;
@@ -3450,14 +3450,16 @@ namespace CSX64
                 if (args.Length == 0)
                 {
                     if (integral) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 1 operand"); return false; }
+                    if (eflags) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 2 operands"); return false; }
 
                     // no args is same as using st(1) (plus additional case of double pop)
-                    if (!TryAppendVal(1, (1 << 4) | (pop2 ? 2 : pop ? 1 : 0ul))) return false;
+                    if (!TryAppendVal(1, (unordered ? 128 : 0ul) | (1 << 4) | (pop2 ? 2 : pop ? 1 : 0ul))) return false;
                 }
                 else if (args.Length == 1)
                 {
                     // double pop doesn't accept operands
                     if (pop2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected no operands"); return false; }
+                    if (eflags) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 2 operands"); return false; }
 
                     // register
                     if (TryParseFPURegister(args[0], out UInt64 reg))
@@ -3465,7 +3467,7 @@ namespace CSX64
                         // integral forms only store to memory
                         if (integral) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected a memory value"); return false; }
 
-                        if (!TryAppendVal(1, (reg << 4) | (pop ? 1 : 0ul))) return false;
+                        if (!TryAppendVal(1, (unordered ? 128 : 0ul) | (reg << 4) | (pop ? 1 : 0ul))) return false;
                     }
                     // memory
                     else if (args[0][args[0].Length - 1] == ']')
@@ -3477,19 +3479,21 @@ namespace CSX64
                         // handle size cases
                         if (sizecode == 1)
                         {
+                            // this mode only allows int
                             if (!integral) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size is not supported"); return false; }
 
-                            if (!TryAppendVal(1, pop ? 8 : 7ul)) return false;
+                            if (!TryAppendVal(1, (unordered ? 128 : 0ul) | (pop ? 8 : 7ul))) return false;
                         }
                         else if (sizecode == 2)
                         {
-                            if (!TryAppendVal(1, integral ? pop ? 10 : 9ul : pop ? 4 : 3ul)) return false;
+                            if (!TryAppendVal(1, (unordered ? 128 : 0ul) | (integral ? pop ? 10 : 9ul : pop ? 4 : 3ul))) return false;
                         }
                         else if (sizecode == 3)
                         {
+                            // this mode only allows fp
                             if (integral) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size is not supported"); return false; }
 
-                            if (!TryAppendVal(1, pop ? 6 : 5ul)) return false;
+                            if (!TryAppendVal(1, (unordered ? 128 : 0ul) | (pop ? 6 : 5ul))) return false;
                         }
                         else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size is not supported"); return false; }
 
@@ -3498,19 +3502,19 @@ namespace CSX64
                     }
                     else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected an fpu register or a memory value"); return false; }
                 }
+                else if (args.Length == 2)
+                {
+                    if (integral) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 1 operand"); return false; }
+                    if (pop2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected no operands"); return false; }
+
+                    if (!TryParseFPURegister(args[0], out UInt64 reg_a) || !TryParseFPURegister(args[1], out UInt64 reg_b)) return false;
+
+                    // first arg must be st0
+                    if (reg_a != 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: First operand must be ST(0)"); return false; }
+
+                    if (!TryAppendVal(1, (unordered ? 128 : 0ul) | (reg_b << 4) | (pop ? 12 : 11ul))) return false;
+                }
                 else { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Too many operands"); return false; }
-
-                return true;
-            }
-            public bool TryProcessFCOMI(OPCode op, bool unordered, bool pop)
-            {
-                if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 2 operands"); return false; }
-
-                if (!TryParseFPURegister(args[0], out UInt64 reg) || reg != 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: First operand must be ST(0)"); return false; }
-                if (!TryParseFPURegister(args[1], out reg)) return false;
-
-                if (!TryAppendByte((byte)op)) return false;
-                if (!TryAppendVal(1, (pop ? 128 : 0ul) | (unordered ? 64 : 0ul) | reg)) return false;
 
                 return true;
             }
@@ -4187,10 +4191,11 @@ namespace CSX64
                         case "FLD": if (!args.TryProcessFLD(OPCode.FLD, false)) return args.res; break;
                         case "FILD": if (!args.TryProcessFLD(OPCode.FLD, true)) return args.res; break;
 
-                        case "FST": if (!args.TryProcessFST(OPCode.FST, false, false)) return args.res; break;
-                        case "FIST": if (!args.TryProcessFST(OPCode.FST, true, false)) return args.res; break;
-                        case "FSTP": if (!args.TryProcessFST(OPCode.FST, false, true)) return args.res; break;
-                        case "FISTP": if (!args.TryProcessFST(OPCode.FST, true, true)) return args.res; break;
+                        case "FST": if (!args.TryProcessFST(OPCode.FST, false, false, false)) return args.res; break;
+                        case "FIST": if (!args.TryProcessFST(OPCode.FST, true, false, false)) return args.res; break;
+                        case "FSTP": if (!args.TryProcessFST(OPCode.FST, false, true, false)) return args.res; break;
+                        case "FISTP": if (!args.TryProcessFST(OPCode.FST, true, true, false)) return args.res; break;
+                        case "FISTTP": if (!args.TryProcessFST(OPCode.FST, true, true, true)) return args.res; break;
 
                         case "FXCH": // no arg version swaps st0 and st1
                             if (args.args.Length == 0) { if (!args.TryProcessNoArgOp(OPCode.FXCH, true, 1)) return args.res; break; }
@@ -4244,16 +4249,22 @@ namespace CSX64
                         case "FXAM": if (!args.TryProcessNoArgOp(OPCode.FXAM)) return args.res; break;
                         case "FTST": if (!args.TryProcessNoArgOp(OPCode.FTST)) return args.res; break;
 
-                        case "FCOM": if (!args.TryProcessFCOM(OPCode.FCOM, false, false, false)) return args.res; break;
-                        case "FCOMP": if (!args.TryProcessFCOM(OPCode.FCOM, false, true, false)) return args.res; break;
-                        case "FCOMPP": if (!args.TryProcessFCOM(OPCode.FCOM, false, false, true)) return args.res; break;
-                        case "FICOM": if (!args.TryProcessFCOM(OPCode.FCOM, true, false, false)) return args.res; break;
-                        case "FICOMP": if (!args.TryProcessFCOM(OPCode.FCOM, true, true, false)) return args.res; break;
+                        case "FCOM": if (!args.TryProcessFCOM(OPCode.FCOM, false, false, false, false, false)) return args.res; break;
+                        case "FCOMP": if (!args.TryProcessFCOM(OPCode.FCOM, false, true, false, false, false)) return args.res; break;
+                        case "FCOMPP": if (!args.TryProcessFCOM(OPCode.FCOM, false, false, true, false, false)) return args.res; break;
 
-                        case "FCOMI": if (!args.TryProcessFCOMI(OPCode.FCOMI, false, false)) return args.res; break;
-                        case "FCOMIP": if (!args.TryProcessFCOMI(OPCode.FCOMI, false, true)) return args.res; break;
-                        case "FUCOMI": if (!args.TryProcessFCOMI(OPCode.FCOMI, true, false)) return args.res; break;
-                        case "FUCOMIP": if (!args.TryProcessFCOMI(OPCode.FCOMI, true, true)) return args.res; break;
+                        case "FUCOM": if (!args.TryProcessFCOM(OPCode.FCOM, false, false, false, false, true)) return args.res; break;
+                        case "FUCOMP": if (!args.TryProcessFCOM(OPCode.FCOM, false, true, false, false, true)) return args.res; break;
+                        case "FUCOMPP": if (!args.TryProcessFCOM(OPCode.FCOM, false, false, true, false, true)) return args.res; break;
+
+                        case "FCOMI": if (!args.TryProcessFCOM(OPCode.FCOM, false, false, false, true, false)) return args.res; break;
+                        case "FCOMIP": if (!args.TryProcessFCOM(OPCode.FCOM, false, true, false, true, false)) return args.res; break;
+
+                        case "FUCOMI": if (!args.TryProcessFCOM(OPCode.FCOM, false, false, false, true, true)) return args.res; break;
+                        case "FUCOMIP": if (!args.TryProcessFCOM(OPCode.FCOM, false, true, false, true, true)) return args.res; break;
+
+                        case "FICOM": if (!args.TryProcessFCOM(OPCode.FCOM, true, false, false, false, false)) return args.res; break;
+                        case "FICOMP": if (!args.TryProcessFCOM(OPCode.FCOM, true, true, false, false, false)) return args.res; break;
 
                         case "FSIN": if (!args.TryProcessNoArgOp(OPCode.FSIN)) return args.res; break;
                         case "FCOS": if (!args.TryProcessNoArgOp(OPCode.FCOS)) return args.res; break;

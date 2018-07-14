@@ -423,7 +423,6 @@ namespace CSX64
                 case OPCode.FXAM: return ProcessFXAM();
                 case OPCode.FTST: return ProcessFTST();
                 case OPCode.FCOM: return ProcessFCOM();
-                case OPCode.FCOMI: return ProcessFCOMI();
 
                 case OPCode.FSIN: return ProcessFSIN();
                 case OPCode.FCOS: return ProcessFCOS();
