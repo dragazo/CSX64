@@ -344,7 +344,7 @@ namespace CSX64
                 case OPCode.ADD: return ProcessADD();
                 case OPCode.SUB: return ProcessSUB();
 
-                case OPCode.MUL: return ProcessMUL();
+                case OPCode.MUL_x: return ProcessMUL_x();
                 case OPCode.IMUL: return ProcessIMUL();
                 case OPCode.DIV: return ProcessDIV();
                 case OPCode.IDIV: return ProcessIDIV();
@@ -382,8 +382,8 @@ namespace CSX64
                 case OPCode.Cxy: return ProcessCxy();
                 case OPCode.MOVxX: return ProcessMOVxX();
 
-                case OPCode.ADC_x: return ProcessADC_x();
-                case OPCode.AAA: return ProcessAAA();
+                case OPCode.ADXX: return ProcessADXX();
+                case OPCode.AAX: return ProcessAAX();
 
                 // x87 instructions
 
@@ -455,6 +455,8 @@ namespace CSX64
                 case OPCode.VPU_SUBS: return TryProcessVEC_SUBS();
                 case OPCode.VPU_SUBUS: return TryProcessVEC_SUBUS();
 
+                case OPCode.VPU_MULL: return TryProcessVEC_MULL();
+
                 case OPCode.VPU_FMIN: return TryProcessVEC_FMIN();
                 case OPCode.VPU_FMAX: return TryProcessVEC_FMAX();
 
@@ -462,6 +464,9 @@ namespace CSX64
                 case OPCode.VPU_SMIN: return TryProcessVEC_SMIN();
                 case OPCode.VPU_UMAX: return TryProcessVEC_UMAX();
                 case OPCode.VPU_SMAX: return TryProcessVEC_SMAX();
+
+                case OPCode.VPU_FADDSUB: return TryProcessVEC_FADDSUB();
+                case OPCode.VPU_AVG: return TryProcessVEC_AVG();
 
                 // misc instructions
 

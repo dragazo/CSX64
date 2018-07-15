@@ -3117,15 +3117,6 @@ namespace CSX64
 
                 return true;
             }
-            public bool TryProcessFlagManip(OPCode op, UInt64 flag, bool value)
-            {
-                if (args.Length != 0) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected no operands"); return false; }
-
-                if (!TryAppendVal(1, (UInt64)op)) return false;
-                if (!TryAppendVal(1, (value ? 128 : 0ul) | flag)) return false;
-
-                return true;
-            }
 
             private bool __TryProcessShift_mid()
             {
@@ -3974,15 +3965,15 @@ namespace CSX64
                         case "SAHF": if (!args.TryProcessNoArgOp(OPCode.STLDF, true, 6)) return args.res; break;
                         case "LAHF": if (!args.TryProcessNoArgOp(OPCode.STLDF, true, 7)) return args.res; break;
 
-                        case "STC": if (!args.TryProcessFlagManip(OPCode.FlagManip, 0, true)) return args.res; break;
-                        case "STI": if (!args.TryProcessFlagManip(OPCode.FlagManip, 1, true)) return args.res; break;
-                        case "STD": if (!args.TryProcessFlagManip(OPCode.FlagManip, 2, true)) return args.res; break;
-                        case "STAC": if (!args.TryProcessFlagManip(OPCode.FlagManip, 3, true)) return args.res; break;
-
-                        case "CLC": if (!args.TryProcessFlagManip(OPCode.FlagManip, 0, false)) return args.res; break;
-                        case "CLI": if (!args.TryProcessFlagManip(OPCode.FlagManip, 1, false)) return args.res; break;
-                        case "CLD": if (!args.TryProcessFlagManip(OPCode.FlagManip, 2, false)) return args.res; break;
-                        case "CLAC": if (!args.TryProcessFlagManip(OPCode.FlagManip, 3, false)) return args.res; break;
+                        case "STC": if (!args.TryProcessNoArgOp(OPCode.FlagManip, true, 0)) return args.res; break;
+                        case "CLC": if (!args.TryProcessNoArgOp(OPCode.FlagManip, true, 1)) return args.res; break;
+                        case "STI": if (!args.TryProcessNoArgOp(OPCode.FlagManip, true, 2)) return args.res; break;
+                        case "CLI": if (!args.TryProcessNoArgOp(OPCode.FlagManip, true, 3)) return args.res; break;
+                        case "STD": if (!args.TryProcessNoArgOp(OPCode.FlagManip, true, 4)) return args.res; break;
+                        case "CLD": if (!args.TryProcessNoArgOp(OPCode.FlagManip, true, 5)) return args.res; break;
+                        case "STAC": if (!args.TryProcessNoArgOp(OPCode.FlagManip, true, 6)) return args.res; break;
+                        case "CLAC": if (!args.TryProcessNoArgOp(OPCode.FlagManip, true, 7)) return args.res; break;
+                        case "CMC": if (!args.TryProcessNoArgOp(OPCode.FlagManip, true, 8)) return args.res; break;
 
                         case "SETZ": case "SETE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 0, 1)) return args.res; break;
                         case "SETNZ": case "SETNE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 1, 1)) return args.res; break;
@@ -4072,7 +4063,8 @@ namespace CSX64
                         case "ADD": if (!args.TryProcessBinaryOp(OPCode.ADD)) return args.res; break;
                         case "SUB": if (!args.TryProcessBinaryOp(OPCode.SUB)) return args.res; break;
 
-                        case "MUL": if (!args.TryProcessIMMRM(OPCode.MUL)) return args.res; break;
+                        case "MUL": if (!args.TryProcessIMMRM(OPCode.MUL_x, true, 0)) return args.res; break;
+                        case "MULX": if (!args.TryProcessRR_RM(OPCode.MUL_x, true, 1, 12)) return args.res; break;
                         case "IMUL":
                             switch (args.args.Length)
                             {
@@ -4140,10 +4132,12 @@ namespace CSX64
                         case "MOVZX": if (!args.TryProcessMOVxX(OPCode.MOVxX, false)) return args.res; break;
                         case "MOVSX": if (!args.TryProcessMOVxX(OPCode.MOVxX, true)) return args.res; break;
 
-                        case "ADC": if (!args.TryProcessBinaryOp(OPCode.ADC_x, true, 0)) return args.res; break;
-                        case "ADCX": if (!args.TryProcessBinaryOp_R_RM(OPCode.ADC_x, true, 1, 12)) return args.res; break;
+                        case "ADC": if (!args.TryProcessBinaryOp(OPCode.ADXX, true, 0)) return args.res; break;
+                        case "ADCX": if (!args.TryProcessBinaryOp_R_RM(OPCode.ADXX, true, 1, 12)) return args.res; break;
+                        case "ADOX": if (!args.TryProcessBinaryOp_R_RM(OPCode.ADXX, true, 2, 12)) return args.res; break;
 
-                        case "AAA": if (!args.TryProcessNoArgOp(OPCode.AAA)) return args.res; break;
+                        case "AAA": if (!args.TryProcessNoArgOp(OPCode.AAX, true, 0)) return args.res; break;
+                        case "AAS": if (!args.TryProcessNoArgOp(OPCode.AAX, true, 1)) return args.res; break;
 
                         // x87 instructions
 
@@ -4361,6 +4355,10 @@ namespace CSX64
                         case "PSUBUSW": if (!args.TryProcessVPUBinary(OPCode.VPU_SUBUS, 1, true, true, false)) return args.res; break;
                         case "PSUBUSB": if (!args.TryProcessVPUBinary(OPCode.VPU_SUBUS, 0, true, true, false)) return args.res; break;
 
+                        case "PMULLQ": if (!args.TryProcessVPUBinary(OPCode.VPU_MULL, 3, true, true, false)) return args.res; break;
+                        case "PMULLD": if (!args.TryProcessVPUBinary(OPCode.VPU_MULL, 2, true, true, false)) return args.res; break;
+                        case "PMULLW": if (!args.TryProcessVPUBinary(OPCode.VPU_MULL, 1, true, true, false)) return args.res; break;
+
                         case "MINSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FMIN, 3, false, false, true)) return args.res; break;
                         case "MINSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FMIN, 2, false, false, true)) return args.res; break;
 
@@ -4392,6 +4390,12 @@ namespace CSX64
                         case "PMAXSD": if (!args.TryProcessVPUBinary(OPCode.VPU_SMAX, 2, true, true, false)) return args.res; break;
                         case "PMAXSW": if (!args.TryProcessVPUBinary(OPCode.VPU_SMAX, 1, true, true, false)) return args.res; break;
                         case "PMAXSB": if (!args.TryProcessVPUBinary(OPCode.VPU_SMAX, 0, true, true, false)) return args.res; break;
+
+                        case "ADDSUBPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FADDSUB, 3, true, true, false)) return args.res; break;
+                        case "ADDSUBPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FADDSUB, 2, true, true, false)) return args.res; break;
+
+                        case "PAVGW": if (!args.TryProcessVPUBinary(OPCode.VPU_AVG, 1, true, true, false)) return args.res; break;
+                        case "PAVGB": if (!args.TryProcessVPUBinary(OPCode.VPU_AVG, 0, true, true, false)) return args.res; break;
 
                         // misc instructions
 

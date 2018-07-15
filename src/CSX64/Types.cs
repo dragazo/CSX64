@@ -30,7 +30,7 @@ namespace CSX64
         LEA,
 
         ADD, SUB,
-        MUL, IMUL, DIV, IDIV,
+        MUL_x, IMUL, DIV, IDIV,
         SHL, SHR, SAL, SAR, ROL, ROR, RCL, RCR,
         AND, OR, XOR,
         INC, DEC, NEG, NOT,
@@ -39,7 +39,7 @@ namespace CSX64
 
         BSWAP, BEXTR, BLSI, BLSMSK, BLSR, ANDN, BTx,
         Cxy, MOVxX,
-        ADC_x, AAA,
+        ADXX, AAX,
 
         // x87 instructions
 
@@ -64,11 +64,14 @@ namespace CSX64
         VPU_AND, VPU_OR, VPU_XOR, VPU_ANDN,
         VPU_ADD, VPU_ADDS, VPU_ADDUS,
         VPU_SUB, VPU_SUBS, VPU_SUBUS,
-        VPU_MUL,
+        VPU_MULL,
 
         VPU_FMIN, VPU_FMAX,
         VPU_UMIN, VPU_SMIN, VPU_UMAX, VPU_SMAX,
         
+        VPU_FADDSUB,
+        VPU_AVG,
+
         // misc instructions
 
         DEBUG = 255

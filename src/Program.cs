@@ -58,6 +58,7 @@ usage: csx [<options>] [--] <pathspec>...
         --entry <entry>    main entry point for linker
     -o, --out <pathspec>   specifies explicit output path
         --fs               sets the file system flag
+        --time             after execution, display elapsed time
         --end              remaining args are pathspec
 
 if no -g/-a/-l provided, executes a console program
@@ -83,7 +84,7 @@ report bugs to https://github.com/dragazo/CSX64/issues
         /// The main entry point for the application.
         /// </summary>
         [STAThread]
-        private static int Main(string[] args)
+        private static unsafe int Main(string[] args)
         {
             if (!BitConverter.IsLittleEndian) { Print("ERROR: This platform is not little-endian"); return -1; }
 
@@ -99,6 +100,7 @@ report bugs to https://github.com/dragazo/CSX64/issues
             string entry_point = null;                           // main entry point for linker
             string output = null;                                // output path
             bool fsf = false;                                    // fsf flag
+            bool time = false;                                   // time flag
             bool accepting_options = true;                       // marks that we're still accepting options
 
             // process the terminal args
@@ -119,6 +121,7 @@ report bugs to https://github.com/dragazo/CSX64/issues
                         case "--entry": if (entry_point != null || i + 1 >= args.Length) { Print("usage error - see -h for help"); return 0; } entry_point = args[++i]; break;
                         case "--end": accepting_options = false; break;
                         case "--fs": fsf = true; break;
+                        case "--time": time = true; break;
                         
                         case "--": break; // -- is a no-op separator
 
@@ -156,7 +159,7 @@ report bugs to https://github.com/dragazo/CSX64/issues
             {
                 case ProgramAction.ExecuteConsole:
                     if (pathspec.Count == 0) { Print("Expected a file to execute"); return 0; }
-                    return RunRawConsole(pathspec[0], pathspec.ToArray(), fsf);
+                    return RunRawConsole(pathspec[0], pathspec.ToArray(), fsf, time);
 
                 case ProgramAction.ExecuteGraphical:
                     if (pathspec.Count == 0) { Print("Expected a file to execute"); return 0; }
@@ -540,14 +543,14 @@ report bugs to https://github.com/dragazo/CSX64/issues
         /// </summary>
         /// <param name="path">the file to execute</param>
         /// <param name="args">the command line arguments for the client program</param>
-        private static int RunRawConsole(string path, string[] args, bool fsf)
+        private static int RunRawConsole(string path, string[] args, bool fsf, bool time)
         {
             // read the binary data
             int ret = LoadBinaryFile(path, out byte[] exe);
             if (ret != 0) return ret;
 
             // run as a console client and return success flag
-            return RunRawConsole(exe, args, fsf);
+            return RunRawConsole(exe, args, fsf, time);
         }
         /// <summary>
         /// Executes a program via the graphical client. returns true if there were no errors
@@ -568,7 +571,7 @@ report bugs to https://github.com/dragazo/CSX64/issues
         /// </summary>
         /// <param name="exe">the code to execute</param>
         /// <param name="args">the command line arguments for the client program</param>
-        private static int RunRawConsole(byte[] exe, string[] args, bool fsf)
+        private static int RunRawConsole(byte[] exe, string[] args, bool fsf, bool time)
         {
             // create the computer
             using (Computer computer = new Computer())
@@ -583,10 +586,12 @@ report bugs to https://github.com/dragazo/CSX64/issues
                 computer.GetFD(0).Open(Console.OpenStandardInput(), false, false); 
                 computer.GetFD(1).Open(Console.OpenStandardOutput(), false, false);
                 computer.GetFD(2).Open(Console.OpenStandardError(), false, false);
-                
+
                 // begin execution
+                DateTime start = DateTime.Now;
                 while (computer.Tick()) ;
-                
+                DateTime stop = DateTime.Now;
+
                 // if there was an error
                 if (computer.Error != ErrorCode.None)
                 {
@@ -595,8 +600,14 @@ report bugs to https://github.com/dragazo/CSX64/issues
                     // return execution error code
                     return ExecErrorReturnCode;
                 }
-                // otherwise use return value
-                else return computer.ReturnValue;
+                // otherwise no error
+                else
+                {
+                    // print elapsed time
+                    if (time) Print($"\n\nElapsed Time: {(stop - start)}");
+                    // use return value
+                    return computer.ReturnValue;
+                }
             }
         }
         /// <summary>

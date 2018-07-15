@@ -315,31 +315,31 @@ namespace CSX64
             mem = 0: [1: src_2_h][3:][4: src_2]
             mem = 1: [address_src_2]
         */
-        private bool FetchRR_RMFormat(out UInt64 s, out UInt64 dest, out UInt64 a, out UInt64 b)
+        private bool FetchRR_RMFormat(out UInt64 s1, out UInt64 s2, out UInt64 dest, out UInt64 a, out UInt64 b)
         {
-            dest = a = b = 0; // zero these so compiler won't complain
+            s2 = dest = a = b = 0; // zero these so compiler won't complain
 
-            if (!GetMemAdv(1, out s) || !GetMemAdv(1, out a)) return false;
-            UInt64 sizecode = (s >> 2) & 3;
+            if (!GetMemAdv(1, out s1) || !GetMemAdv(1, out s2)) return false;
+            UInt64 sizecode = (s1 >> 2) & 3;
 
             // if dest is high
-            if ((s & 2) != 0)
+            if ((s1 & 2) != 0)
             {
-                if (sizecode != 0 || (s & 0xc0) != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
-                dest = CPURegisters[s >> 4].x8h;
+                if (sizecode != 0 || (s1 & 0xc0) != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+                dest = CPURegisters[s1 >> 4].x8h;
             }
-            else dest = CPURegisters[s >> 4][sizecode];
+            else dest = CPURegisters[s1 >> 4][sizecode];
 
             // if a is high
-            if ((a & 128) != 0)
+            if ((s2 & 128) != 0)
             {
-                if (sizecode != 0 || (a & 0x0c) != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
-                a = CPURegisters[a & 15].x8h;
+                if (sizecode != 0 || (s2 & 0x0c) != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+                a = CPURegisters[s2 & 15].x8h;
             }
-            else a = CPURegisters[a & 15][sizecode];
+            else a = CPURegisters[s2 & 15][sizecode];
 
             // if b is register
-            if ((s & 1) == 0)
+            if ((s1 & 1) == 0)
             {
                 if (!GetMemAdv(1, out b)) return false;
 
@@ -359,11 +359,11 @@ namespace CSX64
 
             return true;
         }
-        private bool StoreRR_RMFormat(UInt64 s, UInt64 res)
+        private bool StoreRR_RMFormat(UInt64 s1, UInt64 res)
         {
             // if dest is high
-            if ((s & 2) != 0) CPURegisters[s >> 4].x8h = (byte)res;
-            else CPURegisters[s >> 4][(s >> 2) & 3] = res;
+            if ((s1 & 2) != 0) CPURegisters[s1 >> 4].x8h = (byte)res;
+            else CPURegisters[s1 >> 4][(s1 >> 2) & 3] = res;
 
             return true;
         }
@@ -444,24 +444,33 @@ namespace CSX64
         }
 
         /*
-        [1: value][7: flag_id]
-            flag = 0: CF
-            flag = 1: IF
-            flag = 2: DF
-            flag = 3: AC
-            else UND
+        [8: ext]
+            ext = 0: set   CF
+            ext = 1: clear CF
+            ext = 2: set   IF
+            ext = 3: clear IF
+            ext = 4: set   DF
+            ext = 5: clear DF
+            ext = 6: set   AC
+            ext = 7: clear AC
+            ext = 8: flip  CF
+            elxe UND
         */
         private bool ProcessFlagManip()
         {
             if (!GetMemAdv(1, out UInt64 s)) return false;
 
-            bool value = (s & 0x80) != 0;
-            switch (s & 0x7f)
+            switch (s)
             {
-                case 0: CF = value; return true;
-                case 1: IF = value; return true;
-                case 2: DF = value; return true;
-                case 3: AC = value; return true;
+                case 0: CF = true; return true;
+                case 1: CF = false; return true;
+                case 2: IF = true; return true;
+                case 3: IF = false; return true;
+                case 4: DF = true; return true;
+                case 5: DF = false; return true;
+                case 6: AC = true; return true;
+                case 7: AC = false; return true;
+                case 8: CF = !CF; return true;
 
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
@@ -844,6 +853,18 @@ namespace CSX64
             return !apply || StoreBinaryOpFormat(s1, s2, m, res);
         }
 
+        private bool ProcessMUL_x()
+        {
+            if (!GetMemAdv(1, out UInt64 ext)) return false;
+
+            switch (ext)
+            {
+                case 0: return ProcessMUL();
+                case 1: return ProcessMULX();
+
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
+            }
+        }
         private bool ProcessMUL()
         {
             if (!FetchIMMRMFormat(out UInt64 s, out UInt64 a)) return false;
@@ -880,6 +901,30 @@ namespace CSX64
             ZF = Rand.NextBool();
             AF = Rand.NextBool();
             PF = Rand.NextBool();
+
+            return true;
+        }
+        private bool ProcessMULX()
+        {
+            if (!FetchRR_RMFormat(out UInt64 s1, out UInt64 s2, out UInt64 dest, out UInt64 a, out UInt64 b)) return false;
+
+            UInt64 res;
+            BigInteger full;
+
+            // switch through register sizes
+            switch ((s1 >> 2) & 3)
+            {
+                case 2:
+                    res = a * b;
+                    CPURegisters[s1 >> 4].x32 = (UInt32)(res >> 32); CPURegisters[s2 & 15].x32 = (UInt32)res;
+                    break;
+                case 3:
+                    full = new BigInteger(a) * b;
+                    CPURegisters[s1 >> 4].x64 = (UInt64)(full >> 64); CPURegisters[s2 & 15].x64 = (UInt64)(full & 0xffffffffffffffff);
+                    break;
+
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
+            }
 
             return true;
         }
@@ -1483,8 +1528,8 @@ namespace CSX64
         }
         private bool ProcessANDN()
         {
-            if (!FetchRR_RMFormat(out UInt64 s, out UInt64 dest, out UInt64 a, out UInt64 b)) return false;
-            UInt64 sizecode = (s >> 2) & 3;
+            if (!FetchRR_RMFormat(out UInt64 s1, out UInt64 s2, out UInt64 dest, out UInt64 a, out UInt64 b)) return false;
+            UInt64 sizecode = (s1 >> 2) & 3;
 
             // only supports 32 and 64-bit operands
             if (sizecode != 2 && sizecode != 3) { Terminate(ErrorCode.UndefinedBehavior); return false; }
@@ -1498,9 +1543,17 @@ namespace CSX64
             AF = Rand.NextBool();
             PF = Rand.NextBool();
 
-            return StoreRR_RMFormat(s, res);
+            return StoreRR_RMFormat(s1, res);
         }
 
+        /*
+        [8: ext]   [binary]
+            ext = 0: BT
+            ext = 1: BTS
+            ext = 2: BTR
+            ext = 3: BTC
+            else UND
+        */
         private bool ProcessBTx()
         {
             if (!GetMemAdv(1, out UInt64 ext)) return false;
@@ -1628,39 +1681,67 @@ namespace CSX64
         [8: ext]   [binary]
             ext = 0: ADC
             ext = 1: ADCX
+            ext = 2: ADOX
             else UND
         */
-        private bool ProcessADC_x()
+        private bool ProcessADXX()
         {
             // get extended code - ensure it's valid
             if (!GetMemAdv(1, out UInt64 ext)) return false;
-            if (ext > 1) { Terminate(ErrorCode.UndefinedBehavior); return false; }
 
             if (!FetchBinaryOpFormat(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
             UInt64 sizecode = (s1 >> 2) & 3;
 
-            // ADCX only allows 32/64 bit
-            if (ext == 1 && sizecode != 2 && sizecode != 3) { Terminate(ErrorCode.UndefinedBehavior); return false; }
-
             UInt64 res = a + b;
-            if (CF) ++res; // also add carry flag
+
+            switch (ext)
+            {
+                case 0: case 1: if (CF) ++res; break;
+                case 2: if (OF) ++res; break;
+
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
+            }
+
             res = Truncate(res, sizecode);
 
-            CF = res < a; // CF updated in both cases
-            if (ext == 0) // others updated in ADC case
+            switch (ext)
             {
-                UpdateFlagsZSP(res, sizecode);
-                AF = (res & 0xf) < (a & 0xf); // AF is just like CF but only the low nibble
-                OF = Positive(a, sizecode) == Positive(b, sizecode) && Positive(a, sizecode) != Positive(res, sizecode);
+                case 0:
+                    CF = res < a;
+                    UpdateFlagsZSP(res, sizecode);
+                    AF = (res & 0xf) < (a & 0xf); // AF is just like CF but only the low nibble
+                    OF = Positive(a, sizecode) == Positive(b, sizecode) && Positive(a, sizecode) != Positive(res, sizecode);
+                    break;
+                case 1:
+                    CF = res < a;
+                    break;
+                case 2:
+                    OF = Positive(a, sizecode) == Positive(b, sizecode) && Positive(a, sizecode) != Positive(res, sizecode);
+                    break;
             }
 
             return StoreBinaryOpFormat(s1, s2, m, res);
         }
-        private bool ProcessAAA()
+        /*
+        [8: ext]
+            ext = 0: AAA
+            ext = 1: AAS
+            else UND
+        */
+        private bool ProcessAAX()
         {
+            if (!GetMemAdv(1, out UInt64 ext)) return false;
+            if (ext > 1) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+
             if ((AL & 0xf) > 9 || AF)
             {
-                AX += 0x106;
+                // handle ext cases here
+                if (ext == 0) AX += 0x106;
+                else
+                {
+                    AX -= 6;
+                    --AH;
+                }
                 AF = true;
                 CF = true;
             }
@@ -2545,7 +2626,7 @@ namespace CSX64
 
         // -- vpu stuff -- //
 
-        private delegate bool VPUBinaryDelegate(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b);
+        private delegate bool VPUBinaryDelegate(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index);
 
         /*
         [5: reg][1: aligned][2: reg_size]   [1: has_mask][1: zmask][1: scalar][1:][2: elem_size][2: mode]   ([count: mask])
@@ -2666,7 +2747,7 @@ namespace CSX64
                     if ((mask & 1) != 0)
                     {
                         // hand over to the delegate for processing
-                        if (!func(elem_sizecode, out UInt64 res, ZMMRegisters[src1]._uint(elem_sizecode, i), ZMMRegisters[src2]._uint(elem_sizecode, i))) return false;
+                        if (!func(elem_sizecode, out UInt64 res, ZMMRegisters[src1]._uint(elem_sizecode, i), ZMMRegisters[src2]._uint(elem_sizecode, i), i)) return false;
                         ZMMRegisters[dest]._uint(elem_sizecode, i, res);
                     }
                     else if (zmask) ZMMRegisters[dest]._uint(elem_sizecode, i, 0);
@@ -2684,7 +2765,7 @@ namespace CSX64
                         if (!GetMemRaw(m, Size(elem_sizecode), out UInt64 res)) return false;
 
                         // hand over to the delegate for processing
-                        if (!func(elem_sizecode, out res, ZMMRegisters[src1]._uint(elem_sizecode, i), res)) return false;
+                        if (!func(elem_sizecode, out res, ZMMRegisters[src1]._uint(elem_sizecode, i), res, i)) return false;
                         ZMMRegisters[dest]._uint(elem_sizecode, i, res);
                     }
                     else if (zmask) ZMMRegisters[dest]._uint(elem_sizecode, i, 0);
@@ -2693,7 +2774,7 @@ namespace CSX64
             return true;
         }
 
-        private bool __TryPerformVEC_FADD(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        private bool __TryPerformVEC_FADD(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             // 64-bit fp
             if (elem_sizecode == 3) res = DoubleAsUInt64(AsDouble(a) + AsDouble(b));
@@ -2702,7 +2783,7 @@ namespace CSX64
 
             return true;
         }
-        private bool __TryPerformVEC_FSUB(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        private bool __TryPerformVEC_FSUB(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             // 64-bit fp
             if (elem_sizecode == 3) res = DoubleAsUInt64(AsDouble(a) - AsDouble(b));
@@ -2711,7 +2792,7 @@ namespace CSX64
 
             return true;
         }
-        private bool __TryPerformVEC_FMUL(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        private bool __TryPerformVEC_FMUL(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             // 64-bit fp
             if (elem_sizecode == 3) res = DoubleAsUInt64(AsDouble(a) * AsDouble(b));
@@ -2720,7 +2801,7 @@ namespace CSX64
 
             return true;
         }
-        private bool __TryPerformVEC_FDIV(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        private bool __TryPerformVEC_FDIV(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             // 64-bit fp
             if (elem_sizecode == 3) res = DoubleAsUInt64(AsDouble(a) / AsDouble(b));
@@ -2735,22 +2816,22 @@ namespace CSX64
         private bool TryProcessVEC_FMUL() => ProcessVPUBinary(12, __TryPerformVEC_FMUL);
         private bool TryProcessVEC_FDIV() => ProcessVPUBinary(12, __TryPerformVEC_FDIV);
 
-        private bool __TryPerformVEC_AND(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        private bool __TryPerformVEC_AND(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             res = a & b;
             return true;
         }
-        private bool __TryPerformVEC_OR(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        private bool __TryPerformVEC_OR(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             res = a | b;
             return true;
         }
-        private bool __TryPerformVEC_XOR(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        private bool __TryPerformVEC_XOR(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             res = a ^ b;
             return true;
         }
-        private bool __TryPerformVEC_ANDN(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        private bool __TryPerformVEC_ANDN(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             res = ~a & b;
             return true;
@@ -2761,12 +2842,12 @@ namespace CSX64
         private bool TryProcessVEC_XOR() => ProcessVPUBinary(15, __TryPerformVEC_XOR);
         private bool TryProcessVEC_ANDN() => ProcessVPUBinary(15, __TryPerformVEC_ANDN);
 
-        private bool __TryPerformVEC_ADD(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        private bool __TryPerformVEC_ADD(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             res = a + b;
             return true;
         }
-        private bool __TryPerformVEC_ADDS(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        private bool __TryPerformVEC_ADDS(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             // get sign mask
             UInt64 smask = SignMask(elem_sizecode);
@@ -2783,7 +2864,7 @@ namespace CSX64
 
             return true;
         }
-        private bool __TryPerformVEC_ADDUS(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        private bool __TryPerformVEC_ADDUS(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             // get trunc mask
             UInt64 tmask = TruncMask(elem_sizecode);
@@ -2800,17 +2881,17 @@ namespace CSX64
         private bool TryProcessVEC_ADDS() => ProcessVPUBinary(15, __TryPerformVEC_ADDS);
         private bool TryProcessVEC_ADDUS() => ProcessVPUBinary(15, __TryPerformVEC_ADDUS);
 
-        private bool __TryPerformVEC_SUB(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        private bool __TryPerformVEC_SUB(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             res = a - b;
             return true;
         }
-        private bool __TryPerformVEC_SUBS(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        private bool __TryPerformVEC_SUBS(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
-            // refer to addition form
-            return __TryPerformVEC_ADDS(elem_sizecode, out res, a, Truncate(~b + 1, elem_sizecode));
+            // since this one's signed, we can just add the negative
+            return __TryPerformVEC_ADDS(elem_sizecode, out res, a, Truncate(~b + 1, elem_sizecode), index);
         }
-        private bool __TryPerformVEC_SUBUS(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        private bool __TryPerformVEC_SUBUS(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             // handle unsigned sub saturation
             res = a > b ? a - b : 0;
@@ -2821,7 +2902,15 @@ namespace CSX64
         private bool TryProcessVEC_SUBS() => ProcessVPUBinary(15, __TryPerformVEC_SUBS);
         private bool TryProcessVEC_SUBUS() => ProcessVPUBinary(15, __TryPerformVEC_SUBUS);
 
-        private bool __TryProcessVEC_FMIN(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        private bool __TryPerformVEC_MULL(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
+        {
+            res = (UInt64)((Int64)SignExtend(a, elem_sizecode) * (Int64)SignExtend(b, elem_sizecode));
+            return true;
+        }
+        
+        private bool TryProcessVEC_MULL() => ProcessVPUBinary(15, __TryPerformVEC_MULL);
+
+        private bool __TryProcessVEC_FMIN(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             // this exploits c# returning false on comparison to NaN. see http://www.felixcloutier.com/x86/MINPD.html for the actual algorithm
             if (elem_sizecode == 3) res = AsDouble(a) < AsDouble(b) ? a : b;
@@ -2829,7 +2918,7 @@ namespace CSX64
 
             return true;
         }
-        private bool __TryProcessVEC_FMAX(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        private bool __TryProcessVEC_FMAX(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             // this exploits c# returning false on comparison to NaN. see http://www.felixcloutier.com/x86/MAXPD.html for the actual algorithm
             if (elem_sizecode == 3) res = AsDouble(a) > AsDouble(b) ? a : b;
@@ -2841,23 +2930,23 @@ namespace CSX64
         private bool TryProcessVEC_FMIN() => ProcessVPUBinary(12, __TryProcessVEC_FMIN);
         private bool TryProcessVEC_FMAX() => ProcessVPUBinary(12, __TryProcessVEC_FMAX);
 
-        private bool __TryProcessVEC_UMIN(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        private bool __TryProcessVEC_UMIN(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             res = a < b ? a : b; // a and b are guaranteed to be properly truncated, so this is invariant of size
             return true;
         }
-        private bool __TryProcessVEC_SMIN(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        private bool __TryProcessVEC_SMIN(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             // just extend to 64-bit and do a signed compare
             res = (Int64)SignExtend(a, elem_sizecode) < (Int64)SignExtend(b, elem_sizecode) ? a : b;
             return true;
         }
-        private bool __TryProcessVEC_UMAX(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        private bool __TryProcessVEC_UMAX(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             res = a > b ? a : b; // a and b are guaranteed to be properly truncated, so this is invariant of size
             return true;
         }
-        private bool __TryProcessVEC_SMAX(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b)
+        private bool __TryProcessVEC_SMAX(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             // just extend to 64-bit and do a signed compare
             res = (Int64)SignExtend(a, elem_sizecode) > (Int64)SignExtend(b, elem_sizecode) ? a : b;
@@ -2868,5 +2957,25 @@ namespace CSX64
         private bool TryProcessVEC_SMIN() => ProcessVPUBinary(15, __TryProcessVEC_SMIN);
         private bool TryProcessVEC_UMAX() => ProcessVPUBinary(15, __TryProcessVEC_UMAX);
         private bool TryProcessVEC_SMAX() => ProcessVPUBinary(15, __TryProcessVEC_SMAX);
+
+        private bool __TryPerformVEC_FADDSUB(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
+        {
+            // 64-bit fp
+            if (elem_sizecode == 3) res = DoubleAsUInt64(index % 2 == 0 ? AsDouble(a) - AsDouble(b) : AsDouble(a) + AsDouble(b));
+            // 32-bit fp
+            else res = FloatAsUInt64(index % 2 == 0 ? AsFloat((UInt32)a) - AsFloat((UInt32)b) : AsFloat((UInt32)a) + AsFloat((UInt32)b));
+
+            return true;
+        }
+
+        private bool TryProcessVEC_FADDSUB() => ProcessVPUBinary(12, __TryPerformVEC_FADDSUB);
+
+        private bool __TryPerformVEC_AVG(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
+        {
+            res = (a + b + 1) >> 1; // doesn't work for 64-bit, but Intel doesn't offer a 64-bit variant anyway, so that's fine
+            return true;
+        }
+
+        private bool TryProcessVEC_AVG() => ProcessVPUBinary(3, __TryPerformVEC_AVG);
     }
 }
