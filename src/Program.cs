@@ -589,7 +589,7 @@ report bugs to https://github.com/dragazo/CSX64/issues
 
                 // begin execution
                 DateTime start = DateTime.Now;
-                while (computer.Tick()) ;
+                while (computer.Running) computer.Tick(UInt64.MaxValue - 1);
                 DateTime stop = DateTime.Now;
 
                 // if there was an error

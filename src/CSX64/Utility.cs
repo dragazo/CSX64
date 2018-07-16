@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 using System.IO;
+using System.Runtime.CompilerServices;
 
 // -- Utility -- //
 
@@ -14,6 +15,7 @@ namespace CSX64
         /// <summary>
         /// Swaps the contents of the specified l-values
         /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void Swap<T>(ref T a, ref T b)
         {
             T temp = a;
@@ -25,6 +27,7 @@ namespace CSX64
         /// Returns true if this value is a power of two. (zero returns false)
         /// </summary>
         /// <param name="val">the value to test</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool IsPowerOf2(this UInt64 val)
         {
             return val != 0 && (val & (val - 1)) == 0;
@@ -33,6 +36,7 @@ namespace CSX64
         /// Returns true if this value is a power of two. (zero returns false)
         /// </summary>
         /// <param name="val">the value to test</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool IsPowerOf2(this UInt32 val)
         {
             return val != 0 && (val & (val - 1)) == 0;
@@ -45,6 +49,7 @@ namespace CSX64
         /// <param name="a">the first (larger) power of 2</param>
         /// <param name="b">the second (smaller) power of 2</param>
         /// <returns></returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool Extract2PowersOf2(this UInt64 val, out UInt64 a, out UInt64 b)
         {
             // isolate the lowest power of 2
@@ -61,6 +66,7 @@ namespace CSX64
             return val == 0 && a != 0 && b != 0;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void ExtractDouble(double val, out double exp, out double sig)
         {
             if (double.IsNaN(val))
@@ -99,6 +105,7 @@ namespace CSX64
                 if (val < 0) sig = -sig;
             }
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static double AssembleDouble(double exp, double sig)
         {
             return sig * Math.Pow(2, exp);
@@ -108,6 +115,7 @@ namespace CSX64
         /// Returns true if the floating-point value is denormalized (including +-0)
         /// </summary>
         /// <param name="val">the value to test</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool IsDenorm(this double val)
         {
             // denorm has exponent field of zero
@@ -118,6 +126,7 @@ namespace CSX64
         /// Gets a random UInt64 value
         /// </summary>
         /// <param name="rand">random object to use</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static UInt64 NextUInt64(this Random rand)
         {
             return ((UInt64)(UInt32)rand.Next() << 32) | (UInt32)rand.Next();
@@ -126,6 +135,7 @@ namespace CSX64
         /// Gets a random boolean
         /// </summary>
         /// <param name="rand">the random object to use</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool NextBool(this Random rand)
         {
             return rand.Next(2) == 1;
@@ -155,6 +165,7 @@ namespace CSX64
 
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool Write(this byte[] arr, UInt64 pos, UInt64 size, UInt64 val) // this template specialization is for speed
         {
             // make sure we're not exceeding memory bounds
@@ -176,6 +187,7 @@ namespace CSX64
         /// <param name="pos">the index to begin at</param>
         /// <param name="size">the size of the value in bytes</param>
         /// <param name="res">the read value</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool Read(this byte[] arr, UInt64 pos, UInt64 size, out UInt64 res)
         {
             // make sure we're not exceeding memory bounds
@@ -195,6 +207,7 @@ namespace CSX64
         /// <param name="data">the byte array</param>
         /// <param name="size">the size in bytes of the value to write</param>
         /// <param name="val">the value to write</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void Append(this List<byte> arr, UInt64 size, UInt64 val)
         {
             // write the value (little-endian)
@@ -210,6 +223,7 @@ namespace CSX64
         /// </summary>
         /// <param name="address">the address to examine</param>
         /// <param name="size">the size to align to</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static UInt64 AlignOffset(UInt64 address, UInt64 size)
         {
             UInt64 pos = address % size;
@@ -221,6 +235,7 @@ namespace CSX64
         /// <param name="address">the starting address</param>
         /// <param name="size">the size to align to</param>
         /// <returns></returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static UInt64 Align(UInt64 address, UInt64 size)
         {
             return address + AlignOffset(address, size);
@@ -230,6 +245,7 @@ namespace CSX64
         /// </summary>
         /// <param name="arr">the data array to pad</param>
         /// <param name="count">the amount of padding in bytes</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void Pad(this List<byte> arr, UInt64 count)
         {
             for (; count > 0; --count) arr.Add(0);
@@ -239,6 +255,7 @@ namespace CSX64
         /// </summary>
         /// <param name="arr">the array to align</param>
         /// <param name="size">the size to align to</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void Align(this List<byte> arr, UInt64 size)
         {
             arr.Pad(AlignOffset((UInt64)arr.Count, size));
@@ -250,11 +267,12 @@ namespace CSX64
         /// <param name="arr">the data array to write to</param>
         /// <param name="pos">the position in the array to begin writing</param>
         /// <param name="str">the string to write</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool WriteCString(this byte[] arr, UInt64 pos, string str)
         {
             // make sure we're not exceeding memory bounds
             if (pos >= (UInt64)arr.Length || pos + (UInt64)(str.Length + 1) > (UInt64)arr.Length) return false;
-            
+
             // write each character
             for (int i = 0; i < str.Length; ++i) arr[pos + (UInt64)i] = (byte)str[i];
             // write a null terminator
@@ -268,6 +286,7 @@ namespace CSX64
         /// <param name="arr">the data array to read from</param>
         /// <param name="pos">the position in the array to begin reading</param>
         /// <param name="str">the string read</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool ReadCString(this byte[] arr, UInt64 pos, out string str)
         {
             StringBuilder b = new StringBuilder();
@@ -520,6 +539,7 @@ namespace CSX64
         /// Gets the bitmask for the sign bit of an integer with the specified sizecode
         /// </summary>
         /// <param name="sizecode">the sizecode specifying the width of integer to examine</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static UInt64 SignMask(UInt64 sizecode)
         {
             return 1ul << ((8 << (UInt16)sizecode) - 1);
@@ -528,6 +548,7 @@ namespace CSX64
         /// Gets the bitmask that includes the entire valid domain of an integer with the specified width
         /// </summary>
         /// <param name="sizecode">the sizecode specifying the width of integer to examine</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static UInt64 TruncMask(UInt64 sizecode)
         {
             UInt64 res = SignMask(sizecode);
@@ -539,6 +560,7 @@ namespace CSX64
         /// </summary>
         /// <param name="val">the value to process</param>
         /// <param name="sizecode">the current size code of the value</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool Positive(UInt64 val, UInt64 sizecode)
         {
             return (val & SignMask(sizecode)) == 0;
@@ -548,6 +570,7 @@ namespace CSX64
         /// </summary>
         /// <param name="val">the value to process</param>
         /// <param name="sizecode">the current size code of the value</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool Negative(UInt64 val, UInt64 sizecode)
         {
             return (val & SignMask(sizecode)) != 0;
@@ -558,6 +581,7 @@ namespace CSX64
         /// </summary>
         /// <param name="val">the value to sign extend</param>
         /// <param name="sizecode">the current size code</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static UInt64 SignExtend(UInt64 val, UInt64 sizecode)
         {
             return Positive(val, sizecode) ? val : val | ~TruncMask(sizecode);
@@ -567,6 +591,7 @@ namespace CSX64
         /// </summary>
         /// <param name="val">the value to truncate</param>
         /// <param name="sizecode">the size code to truncate to</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static UInt64 Truncate(UInt64 val, UInt64 sizecode)
         {
             return val & TruncMask(sizecode);
@@ -576,6 +601,7 @@ namespace CSX64
         /// Parses a 2-bit size code into an actual size (in bytes) 0:1  1:2  2:4  3:8
         /// </summary>
         /// <param name="sizecode">the code to parse</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static UInt64 Size(UInt64 sizecode)
         {
             return 1ul << (ushort)sizecode;
@@ -584,6 +610,7 @@ namespace CSX64
         /// Parses a 2-bit size code into an actual size (in bits) 0:8  1:16  2:32  3:64
         /// </summary>
         /// <param name="sizecode">the code to parse</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static UInt64 SizeBits(UInt64 sizecode)
         {
             return 8ul << (ushort)sizecode;
@@ -594,6 +621,7 @@ namespace CSX64
         /// </summary>
         /// <param name="size">the size</param>
         /// <exception cref="ArgumentException"></exception>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static UInt64 Sizecode(UInt64 size)
         {
             if (!IsPowerOf2(size)) throw new ArgumentException("argument to Sizecode() was not a power of 2");
@@ -610,6 +638,7 @@ namespace CSX64
         /// returns an elementary word size in bytes sufficient to hold the specified number of bits
         /// </summary>
         /// <param name="bits">the number of bits in the representation</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static UInt64 BitsToBytes(UInt64 bits)
         {
             if (bits <= 8) return 1;
@@ -623,6 +652,7 @@ namespace CSX64
         /// Interprets a double as its raw bits
         /// </summary>
         /// <param name="val">value to interpret</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static unsafe UInt64 DoubleAsUInt64(double val)
         {
             return *(UInt64*)&val;
@@ -631,6 +661,7 @@ namespace CSX64
         /// Interprets raw bits as a double
         /// </summary>
         /// <param name="val">value to interpret</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static unsafe double AsDouble(UInt64 val)
         {
             return *(double*)&val;
@@ -640,6 +671,7 @@ namespace CSX64
         /// Interprets a float as its raw bits (placed in low 32 bits)
         /// </summary>
         /// <param name="val">the float to interpret</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static unsafe UInt64 FloatAsUInt64(float val)
         {
             return *(UInt32*)&val;
@@ -648,6 +680,7 @@ namespace CSX64
         /// Interprets raw bits as a float (low 32 bits)
         /// </summary>
         /// <param name="val">the bits to interpret</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static unsafe float AsFloat(UInt32 val)
         {
             return *(float*)&val;

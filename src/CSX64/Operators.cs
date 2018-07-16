@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using static CSX64.Utility;
 
 // -- Operators -- //
@@ -18,6 +19,7 @@ namespace CSX64
                 dest <- f(M[address], imm)
             (dh and sh mark AH, BH, CH, or DH for dest or src)
         */
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool FetchTernaryOpFormat(out UInt64 s, out UInt64 a, out UInt64 b)
         {
             if (!GetMemAdv(1, out s)) { a = b = 0; return false; }
@@ -43,6 +45,7 @@ namespace CSX64
             }
             else return GetAddressAdv(out a) && GetMemRaw(a, Size(sizecode), out a);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool StoreTernaryOPFormat(UInt64 s, UInt64 res)
         {
             if ((s & 2) != 0) CPURegisters[s >> 4].x8h = (byte)res;
@@ -60,6 +63,7 @@ namespace CSX64
             Else UND
             (dh and sh mark AH, BH, CH, or DH for dest or src)
         */
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool FetchBinaryOpFormat(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b,
             bool get_a = true, int _a_sizecode = -1, int _b_sizecode = -1, bool allow_b_mem = true)
         {
@@ -146,6 +150,7 @@ namespace CSX64
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool StoreBinaryOpFormat(UInt64 s1, UInt64 s2, UInt64 m, UInt64 res)
         {
             UInt64 sizecode = (s1 >> 2) & 3;
@@ -174,6 +179,7 @@ namespace CSX64
             mem = 1: [address]   M[address] <- f(M[address])
             (dh marks AH, BH, CH, or DH for dest)
         */
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a, bool get_a = true, int _a_sizecode = -1)
         {
             m = a = 0; // zero a and m (for get_a logic and so compiler won't complain)
@@ -206,6 +212,7 @@ namespace CSX64
                 default: return true; // this should never happen but compiler is complainy
             }
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool StoreUnaryOpFormat(UInt64 s, UInt64 m, UInt64 res)
         {
             UInt64 sizecode = (s >> 2) & 3;
@@ -228,6 +235,7 @@ namespace CSX64
         /*
         [4: dest][2: size][1: dh][1: mem]   [1: CL][1:][6: count]   ([address])
         */
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool FetchShiftOpFormat(out UInt64 s, out UInt64 m, out UInt64 val, out UInt64 count)
         {
             m = val = count = 0; // zero these because compiler is a vengeful god
@@ -258,6 +266,7 @@ namespace CSX64
             // otherwise is memory value
             else return GetAddressAdv(out m) && GetMemRaw(m, Size(sizecode), out val);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool StoreShiftOpFormat(UInt64 s, UInt64 m, UInt64 res)
         {
             UInt64 sizecode = (s >> 2) & 3;
@@ -282,6 +291,7 @@ namespace CSX64
             mode = 2: [size: imm]   imm
             mode = 3: [address]     M[address]
         */
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool FetchIMMRMFormat(out UInt64 s, out UInt64 a, int _a_sizecode = -1)
         {
             a = 0; // so compiler won't complain
@@ -315,6 +325,7 @@ namespace CSX64
             mem = 0: [1: src_2_h][3:][4: src_2]
             mem = 1: [address_src_2]
         */
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool FetchRR_RMFormat(out UInt64 s1, out UInt64 s2, out UInt64 dest, out UInt64 a, out UInt64 b)
         {
             s2 = dest = a = b = 0; // zero these so compiler won't complain
@@ -359,6 +370,7 @@ namespace CSX64
 
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool StoreRR_RMFormat(UInt64 s1, UInt64 res)
         {
             // if dest is high
@@ -369,6 +381,7 @@ namespace CSX64
         }
 
         // updates the flags for integral ops (identical for most integral ops)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void UpdateFlagsZSP(UInt64 value, UInt64 sizecode)
         {
             ZF = value == 0;
@@ -380,6 +393,7 @@ namespace CSX64
             PF = parity;
         }
         // updates the flags for floating point ops
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void UpdateFlagsDouble(double value)
         {
             ZF = value == 0;
@@ -389,6 +403,7 @@ namespace CSX64
             CF = double.IsInfinity(value);
             PF = double.IsNaN(value);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void UpdateFlagsFloat(float value)
         {
             ZF = value == 0;
@@ -414,10 +429,11 @@ namespace CSX64
             mode = 6: sahf
             mode = 7: lahf
         */
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessSTLDF()
         {
             if (!GetMemAdv(1, out UInt64 ext)) return false;
-            
+
             switch (ext)
             {
                 // pushf
@@ -425,7 +441,7 @@ namespace CSX64
                 case 1: // VM and RF flags are cleared in the stored image
                 case 2:
                     return PushRaw(Size(ext + 1), RFLAGS & ~0x30000ul);
-                
+
                 // popf
                 case 3:
                 case 4: // can't modify reserved flags
@@ -456,6 +472,7 @@ namespace CSX64
             ext = 8: flip  CF
             elxe UND
         */
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFlagManip()
         {
             if (!GetMemAdv(1, out UInt64 s)) return false;
@@ -497,6 +514,7 @@ namespace CSX64
             cnd = 16: G
             cnd = 17: GE
         */
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessSETcc()
         {
             if (!GetMemAdv(1, out UInt64 ext)) return false;
@@ -531,6 +549,7 @@ namespace CSX64
             return StoreUnaryOpFormat(s, m, flag ? 1 : 0ul);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessMOV()
         {
             if (!FetchBinaryOpFormat(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b, false)) return false;
@@ -558,6 +577,7 @@ namespace CSX64
             cnd = 16: G
             cnd = 17: GE
         */
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessMOVcc()
         {
             if (!GetMemAdv(1, out UInt64 ext)) return false;
@@ -615,6 +635,7 @@ namespace CSX64
 		        M[address] <- r1
             (r1h and r2h mark AH, BH, CH, or DH for r1 or r2)
         */
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessXCHG()
         {
             UInt64 a, b, temp_1, temp_2;
@@ -664,6 +685,7 @@ namespace CSX64
             return true;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessJMP(ref UInt64 aft)
         {
             if (!FetchIMMRMFormat(out UInt64 s, out UInt64 val)) return false;
@@ -699,6 +721,7 @@ namespace CSX64
             cnd = 17: GE
             cnd = 18: CXZ/ECXZ/RCXZ
         */
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessJcc()
         {
             if (!GetMemAdv(1, out UInt64 ext)) return false;
@@ -739,6 +762,7 @@ namespace CSX64
 
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessLOOPcc()
         {
             // get the cc continue flag
@@ -772,6 +796,7 @@ namespace CSX64
             return true;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessPUSH()
         {
             if (!FetchIMMRMFormat(out UInt64 s, out UInt64 a)) return false;
@@ -787,6 +812,7 @@ namespace CSX64
             mem = 0:             reg
             mem = 1: [address]   M[address]
         */
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessPOP()
         {
             if (!GetMemAdv(1, out UInt64 s)) return false;
@@ -812,6 +838,7 @@ namespace CSX64
         [4: dest][2: size][2:]   [address]
             dest <- address
         */
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessLEA()
         {
             if (!GetMemAdv(1, out UInt64 s) || !GetAddressAdv(out UInt64 address)) return false;
@@ -824,6 +851,7 @@ namespace CSX64
             return true;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessADD()
         {
             if (!FetchBinaryOpFormat(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
@@ -838,6 +866,7 @@ namespace CSX64
 
             return StoreBinaryOpFormat(s1, s2, m, res);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessSUB(bool apply = true)
         {
             if (!FetchBinaryOpFormat(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
@@ -853,6 +882,7 @@ namespace CSX64
             return !apply || StoreBinaryOpFormat(s1, s2, m, res);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessMUL_x()
         {
             if (!GetMemAdv(1, out UInt64 ext)) return false;
@@ -865,6 +895,7 @@ namespace CSX64
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessMUL()
         {
             if (!FetchIMMRMFormat(out UInt64 s, out UInt64 a)) return false;
@@ -904,6 +935,7 @@ namespace CSX64
 
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessMULX()
         {
             if (!FetchRR_RMFormat(out UInt64 s1, out UInt64 s2, out UInt64 dest, out UInt64 a, out UInt64 b)) return false;
@@ -928,6 +960,7 @@ namespace CSX64
 
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessIMUL()
         {
             if (!GetMemAdv(1, out UInt64 mode)) return false;
@@ -941,6 +974,7 @@ namespace CSX64
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessUnary_IMUL()
         {
             if (!FetchIMMRMFormat(out UInt64 s, out UInt64 _a)) return false;
@@ -985,6 +1019,7 @@ namespace CSX64
 
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessBinary_IMUL()
         {
             if (!FetchBinaryOpFormat(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 _a, out UInt64 _b)) return false;
@@ -1026,6 +1061,7 @@ namespace CSX64
 
             return StoreBinaryOpFormat(s1, s2, m, (UInt64)res);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessTernary_IMUL()
         {
             if (!FetchTernaryOpFormat(out UInt64 s, out UInt64 _a, out UInt64 _b)) return false;
@@ -1068,6 +1104,7 @@ namespace CSX64
             return StoreTernaryOPFormat(s, (UInt64)res);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessDIV()
         {
             if (!FetchIMMRMFormat(out UInt64 s, out UInt64 a)) return false;
@@ -1115,6 +1152,7 @@ namespace CSX64
 
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessIDIV()
         {
             if (!FetchIMMRMFormat(out UInt64 s, out UInt64 _a)) return false;
@@ -1167,6 +1205,7 @@ namespace CSX64
             return true;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessSHL()
         {
             if (!FetchShiftOpFormat(out UInt64 s, out UInt64 m, out UInt64 val, out UInt64 count)) return false;
@@ -1186,6 +1225,7 @@ namespace CSX64
             }
             else return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessSHR()
         {
             if (!FetchShiftOpFormat(out UInt64 s, out UInt64 m, out UInt64 val, out UInt64 count)) return false;
@@ -1206,6 +1246,7 @@ namespace CSX64
             else return true;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessSAL()
         {
             if (!FetchShiftOpFormat(out UInt64 s, out UInt64 m, out UInt64 val, out UInt64 count)) return false;
@@ -1225,6 +1266,7 @@ namespace CSX64
             }
             else return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessSAR()
         {
             if (!FetchShiftOpFormat(out UInt64 s, out UInt64 m, out UInt64 val, out UInt64 count)) return false;
@@ -1245,6 +1287,7 @@ namespace CSX64
             else return false;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessROL()
         {
             if (!FetchShiftOpFormat(out UInt64 s, out UInt64 m, out UInt64 val, out UInt64 count)) return false;
@@ -1264,6 +1307,7 @@ namespace CSX64
             }
             else return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessROR()
         {
             if (!FetchShiftOpFormat(out UInt64 s, out UInt64 m, out UInt64 val, out UInt64 count)) return false;
@@ -1284,6 +1328,7 @@ namespace CSX64
             else return true;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessRCL()
         {
             if (!FetchShiftOpFormat(out UInt64 s, out UInt64 m, out UInt64 val, out UInt64 count)) return false;
@@ -1310,6 +1355,7 @@ namespace CSX64
             }
             else return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessRCR()
         {
             if (!FetchShiftOpFormat(out UInt64 s, out UInt64 m, out UInt64 val, out UInt64 count)) return false;
@@ -1337,11 +1383,12 @@ namespace CSX64
             else return true;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessAND(bool apply = true)
         {
             if (!FetchBinaryOpFormat(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
             UInt64 sizecode = (s1 >> 2) & 3;
-            
+
             UInt64 res = a & b;
 
             UpdateFlagsZSP(res, sizecode);
@@ -1350,6 +1397,7 @@ namespace CSX64
 
             return !apply || StoreBinaryOpFormat(s1, s2, m, res);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessOR()
         {
             if (!FetchBinaryOpFormat(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
@@ -1363,6 +1411,7 @@ namespace CSX64
 
             return StoreBinaryOpFormat(s1, s2, m, res);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessXOR()
         {
             if (!FetchBinaryOpFormat(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b)) return false;
@@ -1377,6 +1426,7 @@ namespace CSX64
             return StoreBinaryOpFormat(s1, s2, m, res);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessINC()
         {
             if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
@@ -1390,6 +1440,7 @@ namespace CSX64
 
             return StoreUnaryOpFormat(s, m, res);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessDEC()
         {
             if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
@@ -1403,6 +1454,7 @@ namespace CSX64
 
             return StoreUnaryOpFormat(s, m, res);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessNEG()
         {
             if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
@@ -1417,6 +1469,7 @@ namespace CSX64
 
             return StoreUnaryOpFormat(s, m, res);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessNOT()
         {
             if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
@@ -1427,6 +1480,7 @@ namespace CSX64
             return StoreUnaryOpFormat(s, m, res);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessCMPZ()
         {
             if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
@@ -1438,6 +1492,7 @@ namespace CSX64
             return true;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessBSWAP()
         {
             if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
@@ -1461,6 +1516,7 @@ namespace CSX64
 
             return StoreUnaryOpFormat(s, m, res);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessBEXTR()
         {
             if (!FetchBinaryOpFormat(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b, true, -1, 1)) return false;
@@ -1479,6 +1535,7 @@ namespace CSX64
 
             return StoreBinaryOpFormat(s1, s2, m, res);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessBLSI()
         {
             if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
@@ -1495,6 +1552,7 @@ namespace CSX64
 
             return StoreUnaryOpFormat(s, m, res);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessBLSMSK()
         {
             if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
@@ -1510,6 +1568,7 @@ namespace CSX64
 
             return StoreUnaryOpFormat(s, m, res);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessBLSR()
         {
             if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 a)) return false;
@@ -1526,6 +1585,7 @@ namespace CSX64
 
             return StoreUnaryOpFormat(s, m, res);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessANDN()
         {
             if (!FetchRR_RMFormat(out UInt64 s1, out UInt64 s2, out UInt64 dest, out UInt64 a, out UInt64 b)) return false;
@@ -1554,6 +1614,7 @@ namespace CSX64
             ext = 3: BTC
             else UND
         */
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessBTx()
         {
             if (!GetMemAdv(1, out UInt64 ext)) return false;
@@ -1589,6 +1650,7 @@ namespace CSX64
             ext = 4: CWDE
             ext = 5: CDQE
         */
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessCxy()
         {
             if (!GetMemAdv(1, out UInt64 ext)) return false;
@@ -1621,6 +1683,7 @@ namespace CSX64
             else UND
             (sh marks that source is (ABCD)H)
         */
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessMOVxX()
         {
             if (!GetMemAdv(1, out UInt64 s1) || !GetMemAdv(1, out UInt64 s2)) return false;
@@ -1632,7 +1695,12 @@ namespace CSX64
             {
                 switch (s1 & 15)
                 {
-                    case 0: case 1: case 2: case 4: case 6: case 8:
+                    case 0:
+                    case 1:
+                    case 2:
+                    case 4:
+                    case 6:
+                    case 8:
                         if ((s2 & 64) != 0) // if high register
                         {
                             // make sure we're in registers A-D
@@ -1684,6 +1752,7 @@ namespace CSX64
             ext = 2: ADOX
             else UND
         */
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessADXX()
         {
             // get extended code - ensure it's valid
@@ -1728,6 +1797,7 @@ namespace CSX64
             ext = 1: AAS
             else UND
         */
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessAAX()
         {
             if (!GetMemAdv(1, out UInt64 ext)) return false;
@@ -1765,6 +1835,7 @@ namespace CSX64
         /// <summary>
         /// Initializes the FPU as if by FINIT
         /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void FINIT()
         {
             FPU_control = 0x3bf;
@@ -1776,6 +1847,7 @@ namespace CSX64
         /// Computes the FPU tag for the specified value
         /// </summary>
         /// <param name="val">the value to test</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static byte ComputeFPUTag(double val)
         {
             if (double.IsNaN(val) || double.IsInfinity(val) || val.IsDenorm()) return FPU_Tag_special;
@@ -1787,6 +1859,7 @@ namespace CSX64
         /// Performs a round trip on the value based on the current state of the <see cref="FPU_RC"/> flag
         /// </summary>
         /// <param name="val">the value to round</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private double PerformRoundTrip(double val)
         {
             switch (FPU_RC)
@@ -1812,6 +1885,7 @@ namespace CSX64
             mode = 6: st(0) <- f(st(0), int32M)
             else UND
         */
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool FetchFPUBinaryFormat(out UInt64 s, out double a, out double b)
         {
             if (!GetMemAdv(1, out s)) { a = b = 0; return false; }
@@ -1826,7 +1900,7 @@ namespace CSX64
                 case 2:
                     if (ST_Tag(0) == FPU_Tag_empty || ST_Tag(s >> 4) == FPU_Tag_empty) { Terminate(ErrorCode.FPUAccessViolation); a = b = 0; return false; }
                     b = ST(0); a = ST(s >> 4); return true;
-                
+
                 default:
                     if (ST_Tag(0) == FPU_Tag_empty) { Terminate(ErrorCode.FPUAccessViolation); a = b = 0; return false; }
                     a = ST(0); b = 0;
@@ -1842,6 +1916,7 @@ namespace CSX64
                     }
             }
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool StoreFPUBinaryFormat(UInt64 s, double res)
         {
             switch (s & 7)
@@ -1853,6 +1928,7 @@ namespace CSX64
             }
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool PushFPU(double val)
         {
             // decrement top (wraps automatically as a 3-bit unsigned value)
@@ -1866,6 +1942,7 @@ namespace CSX64
 
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool PopFPU(out double val)
         {
             // if this register is not in use, it's an error
@@ -1877,10 +1954,10 @@ namespace CSX64
 
             // increment top (wraps automatically as a 3-bit unsigned value)
             ++FPU_TOP;
-            
+
             return true;
         }
-        private bool PopFPU() => PopFPU(out double _);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool PopFPU() => PopFPU(out double _);
 
         /*
         [8: mode]   [address]
@@ -1890,6 +1967,7 @@ namespace CSX64
             mode = 3: FLDCW
             else UND
         */
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFSTLD_WORD()
         {
             UInt64 m;
@@ -1917,6 +1995,7 @@ namespace CSX64
             }
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFLD_const()
         {
             if (!GetMemAdv(1, out UInt64 ext)) return false;
@@ -1949,6 +2028,7 @@ namespace CSX64
             mode = 5: push m64int
             else UND
         */
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFLD()
         {
             if (!GetMemAdv(1, out UInt64 s)) return false;
@@ -1998,6 +2078,7 @@ namespace CSX64
             mode = 13: int64M <- st(0) + pop (truncation)
             else UND
         */
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFST()
         {
             if (!GetMemAdv(1, out UInt64 s)) return false;
@@ -2042,6 +2123,7 @@ namespace CSX64
                 default: return PopFPU();
             }
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFXCH()
         {
             if (!GetMemAdv(1, out UInt64 i)) return false;
@@ -2071,6 +2153,7 @@ namespace CSX64
             cc = 6: U  (=P)
             cc = 7: NU (=NP)
         */
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFMOVcc()
         {
             if (!GetMemAdv(1, out UInt64 s)) return false;
@@ -2106,6 +2189,7 @@ namespace CSX64
             return true;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFADD()
         {
             if (!FetchFPUBinaryFormat(out UInt64 s, out double a, out double b)) return false;
@@ -2119,6 +2203,7 @@ namespace CSX64
 
             return StoreFPUBinaryFormat(s, res);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFSUB()
         {
             if (!FetchFPUBinaryFormat(out UInt64 s, out double a, out double b)) return false;
@@ -2132,6 +2217,7 @@ namespace CSX64
 
             return StoreFPUBinaryFormat(s, res);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFSUBR()
         {
             if (!FetchFPUBinaryFormat(out UInt64 s, out double a, out double b)) return false;
@@ -2146,6 +2232,7 @@ namespace CSX64
             return StoreFPUBinaryFormat(s, res);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFMUL()
         {
             if (!FetchFPUBinaryFormat(out UInt64 s, out double a, out double b)) return false;
@@ -2159,6 +2246,7 @@ namespace CSX64
 
             return StoreFPUBinaryFormat(s, res);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFDIV()
         {
             if (!FetchFPUBinaryFormat(out UInt64 s, out double a, out double b)) return false;
@@ -2172,6 +2260,7 @@ namespace CSX64
 
             return StoreFPUBinaryFormat(s, res);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFDIVR()
         {
             if (!FetchFPUBinaryFormat(out UInt64 s, out double a, out double b)) return false;
@@ -2186,6 +2275,7 @@ namespace CSX64
             return StoreFPUBinaryFormat(s, res);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessF2XM1()
         {
             if (ST_Tag(0) == FPU_Tag_empty) { Terminate(ErrorCode.FPUAccessViolation); return false; }
@@ -2204,6 +2294,7 @@ namespace CSX64
 
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFABS()
         {
             if (ST_Tag(0) == FPU_Tag_empty) { Terminate(ErrorCode.FPUAccessViolation); return false; }
@@ -2217,6 +2308,7 @@ namespace CSX64
 
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFCHS()
         {
             if (ST_Tag(0) == FPU_Tag_empty) { Terminate(ErrorCode.FPUAccessViolation); return false; }
@@ -2230,6 +2322,7 @@ namespace CSX64
 
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFPREM()
         {
             if (ST_Tag(0) == FPU_Tag_empty || ST_Tag(1) == FPU_Tag_empty) { Terminate(ErrorCode.FPUAccessViolation); return false; }
@@ -2253,6 +2346,7 @@ namespace CSX64
 
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFPREM1()
         {
             if (ST_Tag(0) == FPU_Tag_empty || ST_Tag(1) == FPU_Tag_empty) { Terminate(ErrorCode.FPUAccessViolation); return false; }
@@ -2273,9 +2367,10 @@ namespace CSX64
             FPU_C1 = (bits & 1) != 0;
             FPU_C2 = false;
             FPU_C3 = (bits & 2) != 0;
-            
+
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFRNDINT()
         {
             if (ST_Tag(0) == FPU_Tag_empty) { Terminate(ErrorCode.FPUAccessViolation); return false; }
@@ -2289,9 +2384,10 @@ namespace CSX64
             FPU_C1 = res > val;
             FPU_C2 = Rand.NextBool();
             FPU_C3 = Rand.NextBool();
-            
+
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFSQRT()
         {
             if (ST_Tag(0) == FPU_Tag_empty) { Terminate(ErrorCode.FPUAccessViolation); return false; }
@@ -2305,6 +2401,7 @@ namespace CSX64
 
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFYL2X()
         {
             if (ST_Tag(0) == FPU_Tag_empty || ST_Tag(1) == FPU_Tag_empty) { Terminate(ErrorCode.FPUAccessViolation); return false; }
@@ -2314,14 +2411,15 @@ namespace CSX64
 
             PopFPU(); // pop stack and place in the new st(0)
             ST(0, b * Math.Log(a, 2));
-            
+
             FPU_C0 = Rand.NextBool();
             FPU_C1 = Rand.NextBool();
             FPU_C2 = Rand.NextBool();
             FPU_C3 = Rand.NextBool();
-            
+
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFYL2XP1()
         {
             if (ST_Tag(0) == FPU_Tag_empty || ST_Tag(1) == FPU_Tag_empty) { Terminate(ErrorCode.FPUAccessViolation); return false; }
@@ -2339,6 +2437,7 @@ namespace CSX64
 
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFXTRACT()
         {
             if (ST_Tag(0) == FPU_Tag_empty) { Terminate(ErrorCode.FPUAccessViolation); return false; }
@@ -2356,6 +2455,7 @@ namespace CSX64
             ST(0, exp);
             return PushFPU(sig);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFSCALE()
         {
             if (ST_Tag(0) == FPU_Tag_empty || ST_Tag(1) == FPU_Tag_empty) { Terminate(ErrorCode.FPUAccessViolation); return false; }
@@ -2377,6 +2477,7 @@ namespace CSX64
             return true;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFXAM()
         {
             double val = ST(0);
@@ -2400,6 +2501,7 @@ namespace CSX64
 
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFTST()
         {
             if (ST_Tag(0) == FPU_Tag_empty) { Terminate(ErrorCode.FPUAccessViolation); return false; }
@@ -2437,6 +2539,7 @@ namespace CSX64
             mode = 12 || + pop
             else UND
         */
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFCOM()
         {
             if (!GetMemAdv(1, out UInt64 s)) return false;
@@ -2510,6 +2613,7 @@ namespace CSX64
             }
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFSIN()
         {
             if (ST_Tag(0) == FPU_Tag_empty) { Terminate(ErrorCode.FPUAccessViolation); return false; }
@@ -2523,6 +2627,7 @@ namespace CSX64
 
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFCOS()
         {
             if (ST_Tag(0) == FPU_Tag_empty) { Terminate(ErrorCode.FPUAccessViolation); return false; }
@@ -2536,6 +2641,7 @@ namespace CSX64
 
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFSINCOS()
         {
             if (ST_Tag(0) == FPU_Tag_empty) { Terminate(ErrorCode.FPUAccessViolation); return false; }
@@ -2552,6 +2658,7 @@ namespace CSX64
             ST(0, Math.Sin(val));
             return PushFPU(Math.Cos(val));
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFPTAN()
         {
             if (ST_Tag(0) == FPU_Tag_empty) { Terminate(ErrorCode.FPUAccessViolation); return false; }
@@ -2562,10 +2669,11 @@ namespace CSX64
             FPU_C1 = Rand.NextBool();
             FPU_C2 = false;
             FPU_C3 = Rand.NextBool();
-            
+
             // also push 1 onto fpu stack
             return PushFPU(1);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFPATAN()
         {
             if (ST_Tag(0) == FPU_Tag_empty || ST_Tag(1) == FPU_Tag_empty) { Terminate(ErrorCode.FPUAccessViolation); return false; }
@@ -2589,6 +2697,7 @@ namespace CSX64
             mode = 0: inc
             mode = 1: dec
         */
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFINCDECSTP()
         {
             if (!GetMemAdv(1, out UInt64 ext)) return false;
@@ -2609,6 +2718,7 @@ namespace CSX64
 
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFFREE()
         {
             if (!GetMemAdv(1, out UInt64 i)) return false;
@@ -2620,7 +2730,7 @@ namespace CSX64
             FPU_C1 = Rand.NextBool();
             FPU_C2 = Rand.NextBool();
             FPU_C3 = Rand.NextBool();
-            
+
             return true;
         }
 
@@ -2635,6 +2745,7 @@ namespace CSX64
             mode = 2: [address]      M[address] <- src
             else UND
         */
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessVPUMove()
         {
             // read settings bytes
@@ -2646,7 +2757,7 @@ namespace CSX64
             if (reg_sizecode == 3) { Terminate(ErrorCode.UndefinedBehavior); return false; }
             if (reg_sizecode != 2 && (s1 & 0x80) != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
             int reg = (int)(s1 >> 3);
-            
+
             // get number of elements to process (accounting for scalar flag)
             int elem_count = (s2 & 0x20) != 0 ? 1 : (int)(Size(reg_sizecode + 4) >> (UInt16)elem_sizecode);
 
@@ -2693,13 +2804,13 @@ namespace CSX64
                         {
                             if (!SetMemRaw(m, Size(elem_sizecode), ZMMRegisters[reg]._uint(elem_sizecode, i))) return false;
                         }
-                        else if(zmask && !SetMemRaw(m, Size(elem_sizecode), 0)) return false;
+                        else if (zmask && !SetMemRaw(m, Size(elem_sizecode), 0)) return false;
 
                     break;
 
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
-            
+
             return true;
         }
         /*
@@ -2707,6 +2818,7 @@ namespace CSX64
             mem = 0: [3:][5: src2]   dest <- f(src1, src2)
             mem = 1: [address]       dest <- f(src1, M[address])
         */
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessVPUBinary(UInt64 elem_size_mask, VPUBinaryDelegate func)
         {
             // read settings bytes
@@ -2774,6 +2886,7 @@ namespace CSX64
             return true;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool __TryPerformVEC_FADD(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             // 64-bit fp
@@ -2783,6 +2896,7 @@ namespace CSX64
 
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool __TryPerformVEC_FSUB(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             // 64-bit fp
@@ -2792,6 +2906,7 @@ namespace CSX64
 
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool __TryPerformVEC_FMUL(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             // 64-bit fp
@@ -2801,6 +2916,7 @@ namespace CSX64
 
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool __TryPerformVEC_FDIV(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             // 64-bit fp
@@ -2811,42 +2927,48 @@ namespace CSX64
             return true;
         }
 
-        private bool TryProcessVEC_FADD() => ProcessVPUBinary(12, __TryPerformVEC_FADD);
-        private bool TryProcessVEC_FSUB() => ProcessVPUBinary(12, __TryPerformVEC_FSUB);
-        private bool TryProcessVEC_FMUL() => ProcessVPUBinary(12, __TryPerformVEC_FMUL);
-        private bool TryProcessVEC_FDIV() => ProcessVPUBinary(12, __TryPerformVEC_FDIV);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool TryProcessVEC_FADD() => ProcessVPUBinary(12, __TryPerformVEC_FADD);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool TryProcessVEC_FSUB() => ProcessVPUBinary(12, __TryPerformVEC_FSUB);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool TryProcessVEC_FMUL() => ProcessVPUBinary(12, __TryPerformVEC_FMUL);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool TryProcessVEC_FDIV() => ProcessVPUBinary(12, __TryPerformVEC_FDIV);
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool __TryPerformVEC_AND(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             res = a & b;
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool __TryPerformVEC_OR(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             res = a | b;
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool __TryPerformVEC_XOR(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             res = a ^ b;
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool __TryPerformVEC_ANDN(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             res = ~a & b;
             return true;
         }
 
-        private bool TryProcessVEC_AND() => ProcessVPUBinary(15, __TryPerformVEC_AND);
-        private bool TryProcessVEC_OR() => ProcessVPUBinary(15, __TryPerformVEC_OR);
-        private bool TryProcessVEC_XOR() => ProcessVPUBinary(15, __TryPerformVEC_XOR);
-        private bool TryProcessVEC_ANDN() => ProcessVPUBinary(15, __TryPerformVEC_ANDN);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool TryProcessVEC_AND() => ProcessVPUBinary(15, __TryPerformVEC_AND);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool TryProcessVEC_OR() => ProcessVPUBinary(15, __TryPerformVEC_OR);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool TryProcessVEC_XOR() => ProcessVPUBinary(15, __TryPerformVEC_XOR);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool TryProcessVEC_ANDN() => ProcessVPUBinary(15, __TryPerformVEC_ANDN);
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool __TryPerformVEC_ADD(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             res = a + b;
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool __TryPerformVEC_ADDS(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             // get sign mask
@@ -2864,6 +2986,7 @@ namespace CSX64
 
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool __TryPerformVEC_ADDUS(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             // get trunc mask
@@ -2877,20 +3000,23 @@ namespace CSX64
             return true;
         }
 
-        private bool TryProcessVEC_ADD() => ProcessVPUBinary(15, __TryPerformVEC_ADD);
-        private bool TryProcessVEC_ADDS() => ProcessVPUBinary(15, __TryPerformVEC_ADDS);
-        private bool TryProcessVEC_ADDUS() => ProcessVPUBinary(15, __TryPerformVEC_ADDUS);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool TryProcessVEC_ADD() => ProcessVPUBinary(15, __TryPerformVEC_ADD);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool TryProcessVEC_ADDS() => ProcessVPUBinary(15, __TryPerformVEC_ADDS);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool TryProcessVEC_ADDUS() => ProcessVPUBinary(15, __TryPerformVEC_ADDUS);
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool __TryPerformVEC_SUB(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             res = a - b;
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool __TryPerformVEC_SUBS(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             // since this one's signed, we can just add the negative
             return __TryPerformVEC_ADDS(elem_sizecode, out res, a, Truncate(~b + 1, elem_sizecode), index);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool __TryPerformVEC_SUBUS(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             // handle unsigned sub saturation
@@ -2898,18 +3024,20 @@ namespace CSX64
             return true;
         }
 
-        private bool TryProcessVEC_SUB() => ProcessVPUBinary(15, __TryPerformVEC_SUB);
-        private bool TryProcessVEC_SUBS() => ProcessVPUBinary(15, __TryPerformVEC_SUBS);
-        private bool TryProcessVEC_SUBUS() => ProcessVPUBinary(15, __TryPerformVEC_SUBUS);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool TryProcessVEC_SUB() => ProcessVPUBinary(15, __TryPerformVEC_SUB);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool TryProcessVEC_SUBS() => ProcessVPUBinary(15, __TryPerformVEC_SUBS);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool TryProcessVEC_SUBUS() => ProcessVPUBinary(15, __TryPerformVEC_SUBUS);
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool __TryPerformVEC_MULL(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             res = (UInt64)((Int64)SignExtend(a, elem_sizecode) * (Int64)SignExtend(b, elem_sizecode));
             return true;
         }
-        
-        private bool TryProcessVEC_MULL() => ProcessVPUBinary(15, __TryPerformVEC_MULL);
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool TryProcessVEC_MULL() => ProcessVPUBinary(15, __TryPerformVEC_MULL);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool __TryProcessVEC_FMIN(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             // this exploits c# returning false on comparison to NaN. see http://www.felixcloutier.com/x86/MINPD.html for the actual algorithm
@@ -2918,6 +3046,7 @@ namespace CSX64
 
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool __TryProcessVEC_FMAX(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             // this exploits c# returning false on comparison to NaN. see http://www.felixcloutier.com/x86/MAXPD.html for the actual algorithm
@@ -2927,25 +3056,29 @@ namespace CSX64
             return true;
         }
 
-        private bool TryProcessVEC_FMIN() => ProcessVPUBinary(12, __TryProcessVEC_FMIN);
-        private bool TryProcessVEC_FMAX() => ProcessVPUBinary(12, __TryProcessVEC_FMAX);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool TryProcessVEC_FMIN() => ProcessVPUBinary(12, __TryProcessVEC_FMIN);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool TryProcessVEC_FMAX() => ProcessVPUBinary(12, __TryProcessVEC_FMAX);
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool __TryProcessVEC_UMIN(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             res = a < b ? a : b; // a and b are guaranteed to be properly truncated, so this is invariant of size
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool __TryProcessVEC_SMIN(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             // just extend to 64-bit and do a signed compare
             res = (Int64)SignExtend(a, elem_sizecode) < (Int64)SignExtend(b, elem_sizecode) ? a : b;
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool __TryProcessVEC_UMAX(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             res = a > b ? a : b; // a and b are guaranteed to be properly truncated, so this is invariant of size
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool __TryProcessVEC_SMAX(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             // just extend to 64-bit and do a signed compare
@@ -2953,11 +3086,12 @@ namespace CSX64
             return true;
         }
 
-        private bool TryProcessVEC_UMIN() => ProcessVPUBinary(15, __TryProcessVEC_UMIN);
-        private bool TryProcessVEC_SMIN() => ProcessVPUBinary(15, __TryProcessVEC_SMIN);
-        private bool TryProcessVEC_UMAX() => ProcessVPUBinary(15, __TryProcessVEC_UMAX);
-        private bool TryProcessVEC_SMAX() => ProcessVPUBinary(15, __TryProcessVEC_SMAX);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool TryProcessVEC_UMIN() => ProcessVPUBinary(15, __TryProcessVEC_UMIN);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool TryProcessVEC_SMIN() => ProcessVPUBinary(15, __TryProcessVEC_SMIN);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool TryProcessVEC_UMAX() => ProcessVPUBinary(15, __TryProcessVEC_UMAX);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool TryProcessVEC_SMAX() => ProcessVPUBinary(15, __TryProcessVEC_SMAX);
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool __TryPerformVEC_FADDSUB(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             // 64-bit fp
@@ -2968,14 +3102,15 @@ namespace CSX64
             return true;
         }
 
-        private bool TryProcessVEC_FADDSUB() => ProcessVPUBinary(12, __TryPerformVEC_FADDSUB);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool TryProcessVEC_FADDSUB() => ProcessVPUBinary(12, __TryPerformVEC_FADDSUB);
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool __TryPerformVEC_AVG(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index)
         {
             res = (a + b + 1) >> 1; // doesn't work for 64-bit, but Intel doesn't offer a 64-bit variant anyway, so that's fine
             return true;
         }
 
-        private bool TryProcessVEC_AVG() => ProcessVPUBinary(3, __TryPerformVEC_AVG);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool TryProcessVEC_AVG() => ProcessVPUBinary(3, __TryPerformVEC_AVG);
     }
 }

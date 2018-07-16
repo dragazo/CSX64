@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using static CSX64.Utility;
 
@@ -12,7 +13,7 @@ namespace CSX64
         None, OutOfBounds, UnhandledSyscall, UndefinedBehavior, ArithmeticError, Abort,
         IOFailure, FSDisabled, AccessViolation, InsufficientFDs, FDNotInUse, NotImplemented, StackOverflow,
         FPUStackOverflow, FPUStackUnderflow, FPUError, FPUAccessViolation,
-        AlignmentViolation
+        AlignmentViolation, UnknownOp,
     }
     public enum OPCode
     {
@@ -68,7 +69,7 @@ namespace CSX64
 
         VPU_FMIN, VPU_FMAX,
         VPU_UMIN, VPU_SMIN, VPU_UMAX, VPU_SMAX,
-        
+
         VPU_FADDSUB,
         VPU_AVG,
 
@@ -99,7 +100,7 @@ namespace CSX64
     public struct CPURegister
     {
         [FieldOffset(0)] public UInt64 x64;
-        public UInt32 x32 { get => (UInt32)x64; set => x64 = value; }
+        public UInt32 x32 { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (UInt32)x64; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => x64 = value; }
         [FieldOffset(0)] public UInt16 x16;
         [FieldOffset(0)] public byte x8;
 
@@ -111,6 +112,7 @@ namespace CSX64
         /// <param name="sizecode">the size code to select</param>
         internal UInt64 this[UInt64 sizecode]
         {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get
             {
                 switch (sizecode)
@@ -123,6 +125,7 @@ namespace CSX64
                     default: throw new ArgumentOutOfRangeException("register sizecode must be on range [0,3]");
                 }
             }
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             set
             {
                 switch (sizecode)
@@ -643,7 +646,7 @@ namespace CSX64
         public bool Tell(out long pos)
         {
             if (!InUse) throw new AccessViolationException("Attempt to flush a FileDescriptor that was not in use");
-            
+
             // return position (the getter can throw)
             try { pos = BaseStream.Position; return true; }
             catch (Exception) { pos = -1; return false; }

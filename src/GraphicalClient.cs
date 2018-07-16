@@ -138,9 +138,7 @@ namespace CSX64
                 await Task.Delay(RenderDelay);
 
                 // tick processor
-                UInt32 i;
-                for (i = 0; i < 10000 && Computer.Tick(); ++i) ;
-                Ticks += i;
+                Ticks += Computer.Tick(10000);
 
                 // acount for re-rendering
                 if (Computer.Invalidated)

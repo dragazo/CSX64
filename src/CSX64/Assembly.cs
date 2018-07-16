@@ -4478,7 +4478,7 @@ namespace CSX64
 
             // -- finalize -- //
 
-                // verify integrity of file
+            // verify integrity of file
             if (!args.VerifyIntegrity()) return args.res;
 
             // rename all the symbols we can shorten (done after verify to ensure there's no verify error messages with the renamed symbols)

@@ -334,9 +334,7 @@ namespace CSX64
                 await Task.Delay(RenderDelay);
 
                 // tick processor
-                UInt64 i;
-                for (i = 0; i < TicksPerCycle && !C.SuspendedRead && C.Tick(); ++i) ;
-                Ticks += i;
+                Ticks += C.Tick(TicksPerCycle);
 
                 Pull(); // pull data
 
