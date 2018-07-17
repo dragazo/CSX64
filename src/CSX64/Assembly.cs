@@ -1130,10 +1130,23 @@ namespace CSX64
         };
         private static readonly HashSet<char> UnaryOps = new HashSet<char>() { '+', '-', '~', '!', '*', '/' };
 
-        private static readonly string[] VerifyLegalExpressionIgnores =
+        private static readonly Dictionary<AsmSegment, string> SegOffsets = new Dictionary<AsmSegment, string>()
         {
-            "#TEXT", "#RODATA", "#DATA", "#BSS",
-            "##TEXT", "##RODATA", "##DATA", "##BSS",
+            [AsmSegment.TEXT] = "#t",
+            [AsmSegment.RODATA] = "#r",
+            [AsmSegment.DATA] = "#d",
+            [AsmSegment.BSS] = "#b",
+        };
+        private static readonly Dictionary<AsmSegment, string> SegOrigins = new Dictionary<AsmSegment, string>()
+        {
+            [AsmSegment.TEXT] = "#T",
+            [AsmSegment.RODATA] = "#R",
+            [AsmSegment.DATA] = "#D",
+            [AsmSegment.BSS] = "#B",
+        };
+
+        private static readonly HashSet<string> VerifyLegalExpressionIgnores = new HashSet<string>()
+        {
             "__heap__"
         };
 
@@ -1871,7 +1884,7 @@ namespace CSX64
                             // must be in a segment
                             if (current_seg == AsmSegment.INVALID) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to take an address outside of a segment"); return false; }
 
-                            temp = new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Token = $"#{current_seg}" }, Right = new Expr() { IntResult = line_pos_in_seg } };
+                            temp = new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Token = SegOffsets[current_seg] }, Right = new Expr() { IntResult = line_pos_in_seg } };
                         }
                         // if it's the start of segment macro
                         else if (val == StartOfSegMacro)
@@ -1879,7 +1892,7 @@ namespace CSX64
                             // must be in a segment
                             if (current_seg == AsmSegment.INVALID) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to take an address outside of a segment"); return false; }
 
-                            temp = new Expr() { Token = $"##{current_seg}" };
+                            temp = new Expr() { Token = SegOrigins[current_seg] };
                         }
                         // otherwise it's a normal value/symbol
                         else
@@ -2464,7 +2477,10 @@ namespace CSX64
                 if (expr.IsLeaf)
                 {
                     // if it's already been evaluated or we know about it somehow, we're good
-                    if (expr.IsEvaluated || file.Symbols.ContainsKey(expr.Token) || file.ExternalSymbols.Contains(expr.Token) || VerifyLegalExpressionIgnores.Contains(expr.Token)) return true;
+                    if (expr.IsEvaluated || file.Symbols.ContainsKey(expr.Token) || file.ExternalSymbols.Contains(expr.Token)
+                        || SegOffsets.ContainsValue(expr.Token) || SegOrigins.ContainsValue(expr.Token)
+                        || VerifyLegalExpressionIgnores.Contains(expr.Token))
+                        return true;
                     // otherwise we don't know what it is
                     else { res = new AssembleResult(AssembleError.UnknownSymbol, $"Unknown symbol: {expr.Token}"); return false; }
                 }
@@ -2553,7 +2569,7 @@ namespace CSX64
                         // addresses must be in a valid segment
                         if (current_seg == AsmSegment.INVALID) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to address outside of a segment"); return false; }
 
-                        file.Symbols.Add(label_def, new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Token = $"#{current_seg}" }, Right = new Expr() { IntResult = line_pos_in_seg } });
+                        file.Symbols.Add(label_def, new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Token = SegOffsets[current_seg] }, Right = new Expr() { IntResult = line_pos_in_seg } });
                     }
                 }
 
@@ -4610,9 +4626,9 @@ namespace CSX64
                 foreach (HoleData hole in obj.DataHoles) hole.Address += (UInt32)data.Count;
 
                 // append segments
-                for (int i = 0; i < obj.Text.Count; ++i) text.Add(obj.Text[i]);
-                for (int i = 0; i < obj.Rodata.Count; ++i) rodata.Add(obj.Rodata[i]);
-                for (int i = 0; i < obj.Data.Count; ++i) data.Add(obj.Data[i]);
+                text.AddRange(obj.Text);
+                rodata.AddRange(obj.Rodata);
+                data.AddRange(obj.Data);
                 bsslen += obj.BssLen;
 
                 // for each external symbol
@@ -4645,17 +4661,17 @@ namespace CSX64
                 // alias the object file
                 ObjectFile obj = entry.Key;
 
-                // define the segment offsets
-                obj.Symbols.Add("##TEXT", new Expr() { IntResult = 0 });
-                obj.Symbols.Add("##RODATA", new Expr() { IntResult = (UInt64)text.Count });
-                obj.Symbols.Add("##DATA", new Expr() { IntResult = (UInt64)text.Count + (UInt64)rodata.Count });
-                obj.Symbols.Add("##BSS", new Expr() { IntResult = (UInt64)text.Count + (UInt64)rodata.Count + (UInt64)data.Count });
+                // define the segment origins
+                obj.Symbols.Add(SegOrigins[AsmSegment.TEXT], new Expr() { IntResult = 0 });
+                obj.Symbols.Add(SegOrigins[AsmSegment.RODATA], new Expr() { IntResult = (UInt64)text.Count });
+                obj.Symbols.Add(SegOrigins[AsmSegment.DATA], new Expr() { IntResult = (UInt64)text.Count + (UInt64)rodata.Count });
+                obj.Symbols.Add(SegOrigins[AsmSegment.BSS], new Expr() { IntResult = (UInt64)text.Count + (UInt64)rodata.Count + (UInt64)data.Count });
 
                 // and file-scope segment offsets
-                obj.Symbols.Add("#TEXT", new Expr() { IntResult = entry.Value.Item1 });
-                obj.Symbols.Add("#RODATA", new Expr() { IntResult = (UInt64)text.Count + entry.Value.Item2 });
-                obj.Symbols.Add("#DATA", new Expr() { IntResult = (UInt64)text.Count + (UInt64)rodata.Count + entry.Value.Item3 });
-                obj.Symbols.Add("#BSS", new Expr() { IntResult = (UInt64)text.Count + (UInt64)rodata.Count + (UInt64)data.Count + entry.Value.Item4 });
+                obj.Symbols.Add(SegOffsets[AsmSegment.TEXT], new Expr() { IntResult = entry.Value.Item1 });
+                obj.Symbols.Add(SegOffsets[AsmSegment.RODATA], new Expr() { IntResult = (UInt64)text.Count + entry.Value.Item2 });
+                obj.Symbols.Add(SegOffsets[AsmSegment.DATA], new Expr() { IntResult = (UInt64)text.Count + (UInt64)rodata.Count + entry.Value.Item3 });
+                obj.Symbols.Add(SegOffsets[AsmSegment.BSS], new Expr() { IntResult = (UInt64)text.Count + (UInt64)rodata.Count + (UInt64)data.Count + entry.Value.Item4 });
 
                 // and everything else
                 obj.Symbols.Add("__heap__", new Expr() { IntResult = (UInt64)text.Count + (UInt64)rodata.Count + (UInt64)data.Count + bsslen });
