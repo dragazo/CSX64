@@ -1685,7 +1685,7 @@ namespace CSX64
             public bool TryAppendAddress(UInt64 a, UInt64 b, Expr hole)
             {
                 if (!TryAppendVal(1, a)) return false;
-                if ((a & 0x0c) != 0) { if (!TryAppendVal(1, b)) return false; }
+                if ((a & 3) != 0) { if (!TryAppendVal(1, b)) return false; }
                 if ((a & 0x80) != 0) { if (!TryAppendExpr(Size((a >> 2) & 3), hole)) return false; }
 
                 return true;
@@ -2222,7 +2222,7 @@ namespace CSX64
                 }
             }
 
-            public bool TryParseAddressReg(string label, ref Expr hole, out bool present, out UInt64 m)
+            private bool TryParseAddressReg(string label, ref Expr hole, out bool present, out UInt64 m)
             {
                 m = 0; present = false; // initialize out params
 

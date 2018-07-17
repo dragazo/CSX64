@@ -567,7 +567,7 @@ namespace CSX64
 
             return true;
         }
-
+        
         /// <summary>
         /// Reads a value from memory (fails with OutOfBounds if invalid). if SMF is set, delays 
         /// </summary>
@@ -624,8 +624,8 @@ namespace CSX64
             res = 0; // initialize res - functions as imm parsing location, so it has to start at 0
 
             // get the settings byte and regs byte if applicable
-            if (!GetMemAdv(1, out settings) || (settings & 0x0c) != 0 && !GetMemAdv(1, out regs)) return false;
-
+            if (!GetMemAdv(1, out settings) || (settings & 3) != 0 && !GetMemAdv(1, out regs)) return false;
+            
             // get the sizecode
             sizecode = (settings >> 2) & 3;
             // 8-bit addressing is not allowed

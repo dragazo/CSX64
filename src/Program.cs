@@ -174,6 +174,7 @@ report bugs to https://github.com/dragazo/CSX64/issues
                             int res = Assemble(path);
                             if (res != 0) return res;
                         }
+                        
                         return 0;
                     }
                     else // otherwise, we're expecting only one input with a named output

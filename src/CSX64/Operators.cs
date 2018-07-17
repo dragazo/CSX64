@@ -67,10 +67,8 @@ namespace CSX64
         private bool FetchBinaryOpFormat(out UInt64 s1, out UInt64 s2, out UInt64 m, out UInt64 a, out UInt64 b,
             bool get_a = true, int _a_sizecode = -1, int _b_sizecode = -1, bool allow_b_mem = true)
         {
-            m = a = b = 0; // zero the things (compiler is annoying me)
-
             // read settings
-            if (!GetMemAdv(1, out s1) || !GetMemAdv(1, out s2)) { s2 = 0; return false; }
+            if (!GetMemAdv(1, out s1) || !GetMemAdv(1, out s2)) { s2 = m = a = b = 0; return false; }
 
             // if they requested an explicit size for a, change it in the settings byte
             if (_a_sizecode != -1) s1 = (s1 & 0xf3) | ((UInt64)_a_sizecode << 2);
@@ -87,18 +85,19 @@ namespace CSX64
                     if ((s1 & 2) != 0)
                     {
                         // make sure we're in registers 0-3 and 8-bit mode
-                        if ((s1 & 0xc0) != 0 || a_sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
-                        if (get_a) a = CPURegisters[s1 >> 4].x8h;
+                        if ((s1 & 0xc0) != 0 || a_sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); m = a = b = 0; return false; }
+                        a = CPURegisters[s1 >> 4].x8h;
                     }
-                    else if (get_a) a = CPURegisters[s1 >> 4][a_sizecode];
+                    else a = CPURegisters[s1 >> 4][a_sizecode];
                     // if sh is flagged
                     if ((s1 & 1) != 0)
                     {
                         // make sure we're in registers 0-3 and 8-bit mode
-                        if ((s2 & 0x0c) != 0 || b_sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+                        if ((s2 & 0x0c) != 0 || b_sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); m = b = 0; return false; }
                         b = CPURegisters[s2 & 15].x8h;
                     }
                     else b = CPURegisters[s2 & 15][b_sizecode];
+                    m = 0; // for compiler
                     return true;
 
                 case 1:
@@ -106,36 +105,40 @@ namespace CSX64
                     if ((s1 & 2) != 0)
                     {
                         // make sure we're in registers 0-3 and 8-bit mode
-                        if ((s1 & 0xc0) != 0 || a_sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
-                        if (get_a) a = CPURegisters[s1 >> 4].x8h;
+                        if ((s1 & 0xc0) != 0 || a_sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); m = a = b = 0; return false; }
+                        a = CPURegisters[s1 >> 4].x8h;
                     }
-                    else if (get_a) a = CPURegisters[s1 >> 4][a_sizecode];
+                    else a = CPURegisters[s1 >> 4][a_sizecode];
+                    m = 0; // for compiler
                     // get imm
                     return GetMemAdv(Size(b_sizecode), out b);
 
                 case 2:
                     // handle allow_b_mem case
-                    if (!allow_b_mem) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+                    if (!allow_b_mem) { Terminate(ErrorCode.UndefinedBehavior); m = a = b = 0; return false; }
 
                     // if dh is flagged
                     if ((s1 & 2) != 0)
                     {
                         // make sure we're in registers 0-3 and 8-bit mode
-                        if ((s1 & 0xc0) != 0 || a_sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
-                        if (get_a) a = CPURegisters[s1 >> 4].x8h;
+                        if ((s1 & 0xc0) != 0 || a_sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); m = a = b = 0; return false; }
+                        a = CPURegisters[s1 >> 4].x8h;
                     }
-                    else if (get_a) a = CPURegisters[s1 >> 4][a_sizecode];
+                    else a = CPURegisters[s1 >> 4][a_sizecode];
                     // get mem
-                    return GetAddressAdv(out m) && GetMemRaw(m, Size(b_sizecode), out b);
+                    if (!GetAddressAdv(out m) || !GetMemRaw(m, Size(b_sizecode), out b)) { b = 0; return false; }
+                    return true;
 
                 case 3:
                     // get mem
-                    if (!GetAddressAdv(out m) || get_a && !GetMemRaw(m, Size(a_sizecode), out a)) return false;
+                    if (!GetAddressAdv(out m)) { a = b = 0; return false; }
+                    if (get_a) { if (!GetMemRaw(m, Size(a_sizecode), out a)) { b = 0; return false; } }
+                    else a = 0;
                     // if sh is flagged
                     if ((s1 & 1) != 0)
                     {
                         // make sure we're in registers 0-3 and 8-bit mode
-                        if ((s2 & 0x0c) != 0 || b_sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+                        if ((s2 & 0x0c) != 0 || b_sizecode != 0) { Terminate(ErrorCode.UndefinedBehavior); b = 0; return false; }
                         b = CPURegisters[s2 & 15].x8h;
                     }
                     else b = CPURegisters[s2 & 15][b_sizecode];
@@ -143,11 +146,13 @@ namespace CSX64
 
                 case 4:
                     // get mem
-                    if (!GetAddressAdv(out m) || get_a && !GetMemRaw(m, Size(a_sizecode), out a)) return false;
+                    if (!GetAddressAdv(out m)) { a = b = 0; return false; }
+                    if (get_a) { if (!GetMemRaw(m, Size(a_sizecode), out a)) { b = 0; return false; } }
+                    else a = 0;
                     // get imm
                     return GetMemAdv(Size(b_sizecode), out b);
 
-                default: Terminate(ErrorCode.UndefinedBehavior); return false;
+                default: Terminate(ErrorCode.UndefinedBehavior); m = a = b = 0; return false;
             }
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
