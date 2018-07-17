@@ -159,11 +159,11 @@ report bugs to https://github.com/dragazo/CSX64/issues
             {
                 case ProgramAction.ExecuteConsole:
                     if (pathspec.Count == 0) { Print("Expected a file to execute"); return 0; }
-                    return RunRawConsole(pathspec[0], pathspec.ToArray(), fsf, time);
+                    return RunConsole(pathspec[0], pathspec.ToArray(), fsf, time);
 
                 case ProgramAction.ExecuteGraphical:
                     if (pathspec.Count == 0) { Print("Expected a file to execute"); return 0; }
-                    return RunGraphicalClient(pathspec[0], pathspec.ToArray(), fsf);
+                    return RunGraphical(pathspec[0], pathspec.ToArray(), fsf);
 
                 case ProgramAction.Assemble:
                     if (pathspec.Count == 0) { Print("Assembler expected at least 1 file to assemble"); return 0; }
@@ -544,27 +544,27 @@ report bugs to https://github.com/dragazo/CSX64/issues
         /// </summary>
         /// <param name="path">the file to execute</param>
         /// <param name="args">the command line arguments for the client program</param>
-        private static int RunRawConsole(string path, string[] args, bool fsf, bool time)
+        private static int RunConsole(string path, string[] args, bool fsf, bool time)
         {
             // read the binary data
             int ret = LoadBinaryFile(path, out byte[] exe);
             if (ret != 0) return ret;
 
             // run as a console client and return success flag
-            return RunRawConsole(exe, args, fsf, time);
+            return RunConsole(exe, args, fsf, time);
         }
         /// <summary>
         /// Executes a program via the graphical client. returns true if there were no errors
         /// </summary>
         /// <param name="path">the file to execute</param>
-        private static int RunGraphicalClient(string path, string[] args, bool fsf)
+        private static int RunGraphical(string path, string[] args, bool fsf)
         {
             // read the binary data
             int ret = LoadBinaryFile(path, out byte[] exe);
             if (ret != 0) return ret;
 
             // run as a console client and return success flag
-            return RunGraphicalClient(exe, args, fsf);
+            return RunGraphical(exe, args, fsf);
         }
 
         /// <summary>
@@ -572,7 +572,7 @@ report bugs to https://github.com/dragazo/CSX64/issues
         /// </summary>
         /// <param name="exe">the code to execute</param>
         /// <param name="args">the command line arguments for the client program</param>
-        private static int RunRawConsole(byte[] exe, string[] args, bool fsf, bool time)
+        private static int RunConsole(byte[] exe, string[] args, bool fsf, bool time)
         {
             // create the computer
             using (Computer computer = new Computer())
@@ -615,7 +615,7 @@ report bugs to https://github.com/dragazo/CSX64/issues
         /// Executes a program via the graphical client. returns true if there were no errors
         /// </summary>
         /// <param name="exe">the code to execute</param>
-        private static int RunGraphicalClient(byte[] exe, string[] args, bool fsf)
+        private static int RunGraphical(byte[] exe, string[] args, bool fsf)
         {
             // create the computer
             using (GraphicalComputer computer = new GraphicalComputer())

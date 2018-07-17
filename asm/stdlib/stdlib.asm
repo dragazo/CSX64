@@ -99,7 +99,7 @@ exit:
     .done:
     ; terminate with specified status
     mov eax, sys_exit
-    mov edi, r15d
+    mov ebx, r15d
     syscall
     ; program terminated
     

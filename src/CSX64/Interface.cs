@@ -136,7 +136,7 @@ namespace CSX64
 
             // set up vpu registers
             for (int i = 0; i < ZMMRegisters.Length; ++i)
-                for (int j = 0; j < 8; ++j) ZMMRegisters[i].uint64(j, Rand.NextUInt64());
+                for (int j = 0; j < 8; ++j) ZMMRegisters[i].uint64(j) = Rand.NextUInt64();
 
             // set execution state
             RIP = 0;

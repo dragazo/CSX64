@@ -100,126 +100,24 @@ namespace CSX64
         // source: https://en.wikipedia.org/wiki/FLAGS_register
         // source: http://www.eecg.toronto.edu/~amza/www.mindsec.com/files/x86regs.html
 
-        public bool CF
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (RFLAGS & 0x0001ul) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => RFLAGS = (RFLAGS & ~0x0001ul) | (value ? 0x0001ul : 0);
-        }
-        public bool PF
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (RFLAGS & 0x0004ul) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => RFLAGS = (RFLAGS & ~0x0004ul) | (value ? 0x0004ul : 0);
-        }
-        public bool AF
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (RFLAGS & 0x0010ul) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => RFLAGS = (RFLAGS & ~0x0010ul) | (value ? 0x0010ul : 0);
-        }
-        public bool ZF
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (RFLAGS & 0x0040ul) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => RFLAGS = (RFLAGS & ~0x0040ul) | (value ? 0x0040ul : 0);
-        }
-        public bool SF
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (RFLAGS & 0x0080ul) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => RFLAGS = (RFLAGS & ~0x0080ul) | (value ? 0x0080ul : 0);
-        }
-        public bool TF
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (RFLAGS & 0x0100ul) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => RFLAGS = (RFLAGS & ~0x0100ul) | (value ? 0x0100ul : 0);
-        }
-        public bool IF
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (RFLAGS & 0x0200ul) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => RFLAGS = (RFLAGS & ~0x0200ul) | (value ? 0x0200ul : 0);
-        }
-        public bool DF
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (RFLAGS & 0x0400ul) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => RFLAGS = (RFLAGS & ~0x0400ul) | (value ? 0x0400ul : 0);
-        }
-        public bool OF
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (RFLAGS & 0x0800ul) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => RFLAGS = (RFLAGS & ~0x0800ul) | (value ? 0x0800ul : 0);
-        }
-        public byte IOPL
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (byte)((RFLAGS >> 12) & 3);
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => RFLAGS = (RFLAGS & ~0x3000ul) | ((UInt64)(value & 3) << 12);
-        }
-        public bool NT
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (RFLAGS & 0x4000ul) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => RFLAGS = (RFLAGS & ~0x4000ul) | (value ? 0x4000ul : 0);
-        }
+        public bool CF { [MethodImpl(MethodImplOptions.AggressiveInlining)]   get => (RFLAGS & 0x0001ul) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => RFLAGS = (RFLAGS & ~0x0001ul) | (value ? 0x0001ul : 0); }
+        public bool PF { [MethodImpl(MethodImplOptions.AggressiveInlining)]   get => (RFLAGS & 0x0004ul) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => RFLAGS = (RFLAGS & ~0x0004ul) | (value ? 0x0004ul : 0); }
+        public bool AF { [MethodImpl(MethodImplOptions.AggressiveInlining)]   get => (RFLAGS & 0x0010ul) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => RFLAGS = (RFLAGS & ~0x0010ul) | (value ? 0x0010ul : 0); }
+        public bool ZF { [MethodImpl(MethodImplOptions.AggressiveInlining)]   get => (RFLAGS & 0x0040ul) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => RFLAGS = (RFLAGS & ~0x0040ul) | (value ? 0x0040ul : 0); }
+        public bool SF { [MethodImpl(MethodImplOptions.AggressiveInlining)]   get => (RFLAGS & 0x0080ul) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => RFLAGS = (RFLAGS & ~0x0080ul) | (value ? 0x0080ul : 0); }
+        public bool TF { [MethodImpl(MethodImplOptions.AggressiveInlining)]   get => (RFLAGS & 0x0100ul) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => RFLAGS = (RFLAGS & ~0x0100ul) | (value ? 0x0100ul : 0); }
+        public bool IF { [MethodImpl(MethodImplOptions.AggressiveInlining)]   get => (RFLAGS & 0x0200ul) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => RFLAGS = (RFLAGS & ~0x0200ul) | (value ? 0x0200ul : 0); }
+        public bool DF { [MethodImpl(MethodImplOptions.AggressiveInlining)]   get => (RFLAGS & 0x0400ul) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => RFLAGS = (RFLAGS & ~0x0400ul) | (value ? 0x0400ul : 0); }
+        public bool OF { [MethodImpl(MethodImplOptions.AggressiveInlining)]   get => (RFLAGS & 0x0800ul) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => RFLAGS = (RFLAGS & ~0x0800ul) | (value ? 0x0800ul : 0); }
+        public byte IOPL { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (byte)((RFLAGS >> 12) & 3); [MethodImpl(MethodImplOptions.AggressiveInlining)] set => RFLAGS = (RFLAGS & ~0x3000ul) | ((UInt64)(value & 3) << 12); }
+        public bool NT { [MethodImpl(MethodImplOptions.AggressiveInlining)]   get => (RFLAGS & 0x4000ul) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => RFLAGS = (RFLAGS & ~0x4000ul) | (value ? 0x4000ul : 0); }
 
-        public bool RF
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (RFLAGS & 0x0001_0000ul) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => RFLAGS = (RFLAGS & ~0x0001_0000ul) | (value ? 0x0001_0000ul : 0);
-        }
-        public bool VM
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (RFLAGS & 0x0002_0000ul) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => RFLAGS = (RFLAGS & ~0x0002_0000ul) | (value ? 0x0002_0000ul : 0);
-        }
-        public bool AC
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (RFLAGS & 0x0004_0000ul) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => RFLAGS = (RFLAGS & ~0x0004_0000ul) | (value ? 0x0004_0000ul : 0);
-        }
-        public bool VIF
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (RFLAGS & 0x0008_0000ul) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => RFLAGS = (RFLAGS & ~0x0008_0000ul) | (value ? 0x0008_0000ul : 0);
-        }
-        public bool VIP
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (RFLAGS & 0x0010_0000ul) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => RFLAGS = (RFLAGS & ~0x0010_0000ul) | (value ? 0x0010_0000ul : 0);
-        }
-        public bool ID
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (RFLAGS & 0x0020_0000ul) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => RFLAGS = (RFLAGS & ~0x0020_0000ul) | (value ? 0x0020_0000ul : 0);
-        }
+        public bool RF { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (RFLAGS & 0x0001_0000ul) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => RFLAGS = (RFLAGS & ~0x0001_0000ul) | (value ? 0x0001_0000ul : 0); }
+        public bool VM { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (RFLAGS & 0x0002_0000ul) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => RFLAGS = (RFLAGS & ~0x0002_0000ul) | (value ? 0x0002_0000ul : 0); }
+        public bool AC { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (RFLAGS & 0x0004_0000ul) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => RFLAGS = (RFLAGS & ~0x0004_0000ul) | (value ? 0x0004_0000ul : 0); }
+        public bool VIF { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (RFLAGS & 0x0008_0000ul) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => RFLAGS = (RFLAGS & ~0x0008_0000ul) | (value ? 0x0008_0000ul : 0); }
+        public bool VIP { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (RFLAGS & 0x0010_0000ul) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => RFLAGS = (RFLAGS & ~0x0010_0000ul) | (value ? 0x0010_0000ul : 0); }
+        public bool ID { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (RFLAGS & 0x0020_0000ul) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => RFLAGS = (RFLAGS & ~0x0020_0000ul) | (value ? 0x0020_0000ul : 0); }
 
         public bool cc_b { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => CF; }
         public bool cc_be { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => CF || ZF; }
@@ -234,273 +132,39 @@ namespace CSX64
         /// <summary>
         /// Indicates that we're allowed to run file system instructions
         /// </summary>
-        public bool FSF
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (RFLAGS & 0x000_0001_0000_0000ul) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => RFLAGS = (RFLAGS & ~0x000_0001_0000_0000ul) | (value ? 0x000_0001_0000_0000ul : 0);
-        }
+        public bool FSF { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (RFLAGS & 0x000_0001_0000_0000ul) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => RFLAGS = (RFLAGS & ~0x000_0001_0000_0000ul) | (value ? 0x000_0001_0000_0000ul : 0); }
 
         // source : http://www.website.masmforum.com/tutorials/fptute/fpuchap1.htm
 
-        /// <summary>
-        /// FPU Invalid Operation Mask
-        /// </summary>
-        public bool FPU_IM
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (FPU_control & 0x0001) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => FPU_control = (UInt16)((FPU_control & ~0x0001) | (value ? 0x0001 : 0));
-        }
-        /// <summary>
-        /// FPU Denormalized Operand Mask
-        /// </summary>
-        public bool FPU_DM
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (FPU_control & 0x0002ul) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => FPU_control = (UInt16)((FPU_control & ~0x0002ul) | (value ? 0x0002ul : 0));
-        }
-        /// <summary>
-        /// FPU Zero Divide Mask
-        /// </summary>
-        public bool FPU_ZM
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (FPU_control & 0x0004ul) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => FPU_control = (UInt16)((FPU_control & ~0x0004ul) | (value ? 0x0004ul : 0));
-        }
-        /// <summary>
-        /// FPU Overflow Mask
-        /// </summary>
-        public bool FPU_OM
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (FPU_control & 0x0008ul) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => FPU_control = (UInt16)((FPU_control & ~0x0008ul) | (value ? 0x0008ul : 0));
-        }
-        /// <summary>
-        /// FPU Underflow Mask
-        /// </summary>
-        public bool FPU_UM
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (FPU_control & 0x0010) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => FPU_control = (UInt16)((FPU_control & ~0x0010) | (value ? 0x0010 : 0));
-        }
-        /// <summary>
-        /// FPU Precision Mask
-        /// </summary>
-        public bool FPU_PM
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (FPU_control & 0x0020) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => FPU_control = (UInt16)((FPU_control & ~0x0020) | (value ? 0x0020 : 0));
-        }
-        /// <summary>
-        /// FPU Interrupt Enable Mask
-        /// </summary>
-        public bool FPU_IEM
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (FPU_control & 0x0080) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => FPU_control = (UInt16)((FPU_control & ~0x0080) | (value ? 0x0080 : 0));
-        }
-        /// <summary>
-        /// FPU Precision Control
-        /// </summary>
-        public byte FPU_PC
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (byte)((FPU_control >> 8) & 3);
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => FPU_control = (UInt16)((FPU_control & ~0x300) | ((value & 3) << 8));
-        }
-        /// <summary>
-        /// FPU Rounding Control
-        /// </summary>
-        public byte FPU_RC
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (byte)((FPU_control >> 10) & 3);
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => FPU_control = (UInt16)((FPU_control & ~0xc00) | ((value & 3) << 10));
-        }
-        /// <summary>
-        /// FPU Infinity Control
-        /// </summary>
-        public bool FPU_IC
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (FPU_control & 0x1000) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => FPU_control = (UInt16)((FPU_control & ~0x1000) | (value ? 0x1000 : 0));
-        }
+        public bool FPU_IM { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (FPU_control & 0x0001) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => FPU_control = (UInt16)((FPU_control & ~0x0001) | (value ? 0x0001 : 0)); }
+        public bool FPU_DM { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (FPU_control & 0x0002) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => FPU_control = (UInt16)((FPU_control & ~0x0002) | (value ? 0x0002 : 0)); }
+        public bool FPU_ZM { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (FPU_control & 0x0004) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => FPU_control = (UInt16)((FPU_control & ~0x0004) | (value ? 0x0004 : 0)); }
+        public bool FPU_OM { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (FPU_control & 0x0008) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => FPU_control = (UInt16)((FPU_control & ~0x0008) | (value ? 0x0008 : 0)); }
+        public bool FPU_UM { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (FPU_control & 0x0010) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => FPU_control = (UInt16)((FPU_control & ~0x0010) | (value ? 0x0010 : 0)); }
+        public bool FPU_PM { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (FPU_control & 0x0020) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => FPU_control = (UInt16)((FPU_control & ~0x0020) | (value ? 0x0020 : 0)); }
+        public bool FPU_IEM { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (FPU_control & 0x0080) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => FPU_control = (UInt16)((FPU_control & ~0x0080) | (value ? 0x0080 : 0)); }
+        public byte FPU_PC { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (byte)((FPU_control >> 8) & 3); [MethodImpl(MethodImplOptions.AggressiveInlining)] set => FPU_control = (UInt16)((FPU_control & ~0x300) | ((value & 3) << 8)); }
+        public byte FPU_RC { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (byte)((FPU_control >> 10) & 3); [MethodImpl(MethodImplOptions.AggressiveInlining)] set => FPU_control = (UInt16)((FPU_control & ~0xc00) | ((value & 3) << 10)); }
+        public bool FPU_IC { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (FPU_control & 0x1000) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => FPU_control = (UInt16)((FPU_control & ~0x1000) | (value ? 0x1000 : 0)); }
 
-        /// <summary>
-        /// FPU Invalid Operation Exception
-        /// </summary>
-        public bool FPU_I
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (FPU_status & 0x0001) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => FPU_status = (UInt16)((FPU_status & ~0x0001) | (value ? 0x0001 : 0));
-        }
-        /// <summary>
-        /// FPU Denormalized Exception
-        /// </summary>
-        public bool FPU_D
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (FPU_status & 0x0002) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => FPU_status = (UInt16)((FPU_status & ~0x0002) | (value ? 0x0002 : 0));
-        }
-        /// <summary>
-        /// FPU Zero Divide Exception
-        /// </summary>
-        public bool FPU_Z
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (FPU_status & 0x0004) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => FPU_status = (UInt16)((FPU_status & ~0x0004) | (value ? 0x0004 : 0));
-        }
-        /// <summary>
-        /// FPU Overflow Exception
-        /// </summary>
-        public bool FPU_O
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (FPU_status & 0x0008) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => FPU_status = (UInt16)((FPU_status & ~0x0008) | (value ? 0x0008 : 0));
-        }
-        /// <summary>
-        /// FPU Underflow Exception
-        /// </summary>
-        public bool FPU_U
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (FPU_status & 0x0010) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => FPU_status = (UInt16)((FPU_status & ~0x0010) | (value ? 0x0010 : 0));
-        }
-        /// <summary>
-        /// FPU Precision Exception
-        /// </summary>
-        public bool FPU_P
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (FPU_status & 0x0020) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => FPU_status = (UInt16)((FPU_status & ~0x0020) | (value ? 0x0020 : 0));
-        }
-        /// <summary>
-        /// FPU Stack Fault Exception
-        /// </summary>
-        public bool FPU_SF
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (FPU_status & 0x0040) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => FPU_status = (UInt16)((FPU_status & ~0x0040) | (value ? 0x0040 : 0));
-        }
-        /// <summary>
-        /// FPU Interrupt Request
-        /// </summary>
-        public bool FPU_IR
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (FPU_status & 0x0080) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => FPU_status = (UInt16)((FPU_status & ~0x0080) | (value ? 0x0080 : 0));
-        }
-        /// <summary>
-        /// FPU Busy
-        /// </summary>
-        public bool FPU_B
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (FPU_status & 0x8000) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => FPU_status = (UInt16)((FPU_status & ~0x8000) | (value ? 0x8000 : 0));
-        }
-        /// <summary>
-        /// FPU Condition 0
-        /// </summary>
-        public bool FPU_C0
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (FPU_status & 0x0100) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => FPU_status = (UInt16)((FPU_status & ~0x0100) | (value ? 0x0100 : 0));
-        }
-        /// <summary>
-        /// FPU Condition 1
-        /// </summary>
-        public bool FPU_C1
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (FPU_status & 0x0200) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => FPU_status = (UInt16)((FPU_status & ~0x0200) | (value ? 0x0200 : 0));
-        }
-        /// <summary>
-        /// FPU Condition 2
-        /// </summary>
-        public bool FPU_C2
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (FPU_status & 0x0400) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => FPU_status = (UInt16)((FPU_status & ~0x0400) | (value ? 0x0400 : 0));
-        }
-        /// <summary>
-        /// FPU Top of Stack
-        /// </summary>
-        public byte FPU_TOP
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (byte)((FPU_status >> 11) & 7);
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => FPU_status = (UInt16)(FPU_status & ~0x3800 | ((value & 7) << 11));
-        }
-        /// <summary>
-        /// FPU Condition 3
-        /// </summary>
-        public bool FPU_C3
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (FPU_status & 0x4000) != 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => FPU_status = (UInt16)((FPU_status & ~0x4000) | (value ? 0x4000 : 0));
-        }
+        public bool FPU_I { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (FPU_status & 0x0001) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => FPU_status = (UInt16)((FPU_status & ~0x0001) | (value ? 0x0001 : 0)); }
+        public bool FPU_D { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (FPU_status & 0x0002) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => FPU_status = (UInt16)((FPU_status & ~0x0002) | (value ? 0x0002 : 0)); }
+        public bool FPU_Z { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (FPU_status & 0x0004) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => FPU_status = (UInt16)((FPU_status & ~0x0004) | (value ? 0x0004 : 0)); }
+        public bool FPU_O { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (FPU_status & 0x0008) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => FPU_status = (UInt16)((FPU_status & ~0x0008) | (value ? 0x0008 : 0)); }
+        public bool FPU_U { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (FPU_status & 0x0010) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => FPU_status = (UInt16)((FPU_status & ~0x0010) | (value ? 0x0010 : 0)); }
+        public bool FPU_P { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (FPU_status & 0x0020) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => FPU_status = (UInt16)((FPU_status & ~0x0020) | (value ? 0x0020 : 0)); }
+        public bool FPU_SF { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (FPU_status & 0x0040) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => FPU_status = (UInt16)((FPU_status & ~0x0040) | (value ? 0x0040 : 0)); }
+        public bool FPU_IR { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (FPU_status & 0x0080) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => FPU_status = (UInt16)((FPU_status & ~0x0080) | (value ? 0x0080 : 0)); }
+        public bool FPU_B { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (FPU_status & 0x8000) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => FPU_status = (UInt16)((FPU_status & ~0x8000) | (value ? 0x8000 : 0)); }
+        public bool FPU_C0 { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (FPU_status & 0x0100) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => FPU_status = (UInt16)((FPU_status & ~0x0100) | (value ? 0x0100 : 0)); }
+        public bool FPU_C1 { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (FPU_status & 0x0200) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => FPU_status = (UInt16)((FPU_status & ~0x0200) | (value ? 0x0200 : 0)); }
+        public bool FPU_C2 { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (FPU_status & 0x0400) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => FPU_status = (UInt16)((FPU_status & ~0x0400) | (value ? 0x0400 : 0)); }
+        public byte FPU_TOP { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (byte)((FPU_status >> 11) & 7); [MethodImpl(MethodImplOptions.AggressiveInlining)] set => FPU_status = (UInt16)(FPU_status & ~0x3800 | ((value & 7) << 11)); }
+        public bool FPU_C3 { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (FPU_status & 0x4000) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => FPU_status = (UInt16)((FPU_status & ~0x4000) | (value ? 0x4000 : 0)); }
 
-        /// <summary>
-        /// The FPU tag value corresponding to a normal value
-        /// </summary>
         public const byte FPU_Tag_normal = 0;
-        /// <summary>
-        /// The FPU tag value corresponding to zero
-        /// </summary>
         public const byte FPU_Tag_zero = 1;
-        /// <summary>
-        /// The FPU tag value corresponding to a special value (NaN, +-inf, denorm)
-        /// </summary>
         public const byte FPU_Tag_special = 2;
-        /// <summary>
-        /// The FPU tag value corresponding to no value
-        /// </summary>
         public const byte FPU_Tag_empty = 3;
 
         /// <summary>
