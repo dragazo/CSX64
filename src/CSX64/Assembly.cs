@@ -3840,6 +3840,47 @@ namespace CSX64
         }
 
         /// <summary>
+        /// tries to patch and eliminate as many holes as possible. returns true unless there was a hard error during evaluation (e.g. unsupported floating-point format).
+        /// </summary>
+        private static bool _ElimHoles(Dictionary<string, Expr> symbols, List<HoleData> holes, List<byte> seg, ref AssembleResult res)
+        {
+            for (int i = holes.Count - 1; i >= 0; --i)
+            {
+                switch (TryPatchHole(seg, symbols, holes[i], ref res.ErrorMsg))
+                {
+                    case PatchError.None: holes.RemoveAt(i); break; // remove the hole if we solved it
+                    case PatchError.Unevaluated: break;
+                    case PatchError.Error: res.Error = AssembleError.ArgError; return false;
+
+                    default: throw new ArgumentException("Unknown patch error encountered");
+                }
+            }
+
+            return true;
+        }
+        /// <summary>
+        /// tries to patch all holes. returns true only if all holes were patched.
+        /// </summary>
+        private static bool _FixAllHoles(Dictionary<string, Expr> symbols, List<HoleData> holes, List<byte> seg, ref LinkResult res)
+        {
+            for (int i = 0; i < holes.Count; ++i)
+            {
+                switch (TryPatchHole(seg, symbols, holes[i], ref res.ErrorMsg))
+                {
+                    case PatchError.None: break;
+                    case PatchError.Unevaluated: res.Error = LinkError.MissingSymbol; return false;
+                    case PatchError.Error: res.Error = LinkError.FormatError; return false;
+
+                    default: throw new ArgumentException("Unknown patch error encountered");
+                }
+            }
+
+            return true;
+        }
+
+        // ----------------------------------------------
+
+        /// <summary>
         /// Assembles the code into an object file
         /// </summary>
         /// <param name="code">the code to assemble</param>
@@ -4434,39 +4475,9 @@ namespace CSX64
             // link each symbol to internal symbols (minimizes file size)
             foreach (var entry in file.Symbols) entry.Value.Evaluate(file.Symbols, out a, out floating, ref err);
             // eliminate as many holes as possible
-            for (int i = file.TextHoles.Count - 1; i >= 0; --i)
-            {
-                switch (TryPatchHole(file.Text, file.Symbols, file.TextHoles[i], ref err))
-                {
-                    case PatchError.None: file.TextHoles.RemoveAt(i); break; // remove the hole if we solved it
-                    case PatchError.Unevaluated: break;
-                    case PatchError.Error: return new AssembleResult(AssembleError.ArgError, err);
-
-                    default: throw new ArgumentException("Unknown patch error encountered");
-                }
-            }
-            for (int i = file.RodataHoles.Count - 1; i >= 0; --i)
-            {
-                switch (TryPatchHole(file.Rodata, file.Symbols, file.RodataHoles[i], ref err))
-                {
-                    case PatchError.None: file.RodataHoles.RemoveAt(i); break; // remove the hole if we solved it
-                    case PatchError.Unevaluated: break;
-                    case PatchError.Error: return new AssembleResult(AssembleError.ArgError, err);
-
-                    default: throw new ArgumentException("Unknown patch error encountered");
-                }
-            }
-            for (int i = file.DataHoles.Count - 1; i >= 0; --i)
-            {
-                switch (TryPatchHole(file.Data, file.Symbols, file.DataHoles[i], ref err))
-                {
-                    case PatchError.None: file.DataHoles.RemoveAt(i); break; // remove the hole if we solved it
-                    case PatchError.Unevaluated: break;
-                    case PatchError.Error: return new AssembleResult(AssembleError.ArgError, err);
-
-                    default: throw new ArgumentException("Unknown patch error encountered");
-                }
-            }
+            if (!_ElimHoles(file.Symbols, file.TextHoles, file.Text, ref args.res)) return args.res;
+            if (!_ElimHoles(file.Symbols, file.RodataHoles, file.Rodata, ref args.res)) return args.res;
+            if (!_ElimHoles(file.Symbols, file.DataHoles, file.Data, ref args.res)) return args.res;
 
             // -- eliminate as many unnecessary symbols as we can -- //
 
@@ -4522,6 +4533,7 @@ namespace CSX64
             UInt64 _res;
             bool _floating;
             string _err = null;
+            LinkResult res = default(LinkResult);
 
             // -- ensure args are good -- //
 
@@ -4705,39 +4717,9 @@ namespace CSX64
                 ObjectFile obj = entry.Key;
 
                 // patch all the holes
-                foreach (HoleData hole in obj.TextHoles)
-                {
-                    switch (TryPatchHole(text, obj.Symbols, hole, ref _err))
-                    {
-                        case PatchError.None: break;
-                        case PatchError.Unevaluated: return new LinkResult(LinkError.MissingSymbol, _err);
-                        case PatchError.Error: return new LinkResult(LinkError.FormatError, _err);
-
-                        default: throw new ArgumentException("Unknown patch error encountered");
-                    }
-                }
-                foreach (HoleData hole in obj.RodataHoles)
-                {
-                    switch (TryPatchHole(rodata, obj.Symbols, hole, ref _err))
-                    {
-                        case PatchError.None: break;
-                        case PatchError.Unevaluated: return new LinkResult(LinkError.MissingSymbol, _err);
-                        case PatchError.Error: return new LinkResult(LinkError.FormatError, _err);
-
-                        default: throw new ArgumentException("Unknown patch error encountered");
-                    }
-                }
-                foreach (HoleData hole in obj.DataHoles)
-                {
-                    switch (TryPatchHole(data, obj.Symbols, hole, ref _err))
-                    {
-                        case PatchError.None: break;
-                        case PatchError.Unevaluated: return new LinkResult(LinkError.MissingSymbol, _err);
-                        case PatchError.Error: return new LinkResult(LinkError.FormatError, _err);
-
-                        default: throw new ArgumentException("Unknown patch error encountered");
-                    }
-                }
+                if (!_FixAllHoles(obj.Symbols, obj.TextHoles, text, ref res)) return res;
+                if (!_FixAllHoles(obj.Symbols, obj.RodataHoles, rodata, ref res)) return res;
+                if (!_FixAllHoles(obj.Symbols, obj.DataHoles, data, ref res)) return res;
             }
 
             // -- finalize things -- //
