@@ -9,6 +9,23 @@ namespace CSX64
 {
     public partial class Computer
     {
+        // -- op tables -- //
+
+        /// <summary>
+        /// A lookup table of (even) parity for 8-bit values
+        /// </summary>
+        private static readonly bool[] ParityTable =
+        {
+            true, false, false, true, false, true, true, false, false, true, true, false, true, false, false, true, false, true, true, false, true, false, false, true, true, false, false, true, false, true, true, false,
+            false, true, true, false, true, false, false, true, true, false, false, true, false, true, true, false, true, false, false, true, false, true, true, false, false, true, true, false, true, false, false, true,
+            false, true, true, false, true, false, false, true, true, false, false, true, false, true, true, false, true, false, false, true, false, true, true, false, false, true, true, false, true, false, false, true,
+            true, false, false, true, false, true, true, false, false, true, true, false, true, false, false, true, false, true, true, false, true, false, false, true, true, false, false, true, false, true, true, false,
+            false, true, true, false, true, false, false, true, true, false, false, true, false, true, true, false, true, false, false, true, false, true, true, false, false, true, true, false, true, false, false, true,
+            true, false, false, true, false, true, true, false, false, true, true, false, true, false, false, true, false, true, true, false, true, false, false, true, true, false, false, true, false, true, true, false,
+            true, false, false, true, false, true, true, false, false, true, true, false, true, false, false, true, false, true, true, false, true, false, false, true, true, false, false, true, false, true, true, false,
+            false, true, true, false, true, false, false, true, true, false, false, true, false, true, true, false, true, false, false, true, false, true, true, false, false, true, true, false, true, false, false, true,
+        };
+
         // -- op utilities -- //
 
         /*
@@ -391,11 +408,7 @@ namespace CSX64
         {
             ZF = value == 0;
             SF = Negative(value, sizecode);
-
-            // compute parity flag (only of low 8 bits)
-            bool parity = true;
-            for (UInt64 i = 128; i != 0; i >>= 1) if ((value & i) != 0) parity = !parity;
-            PF = parity;
+            PF = ParityTable[value & 0xff];
         }
         // updates the flags for floating point ops
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
