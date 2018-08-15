@@ -3792,17 +3792,6 @@ namespace CSX64
         /// <param name="value">the symbol value</param>
         public static void DefineSymbol(string key, double value) { PredefinedSymbols.Add(key, new Expr() { FloatResult = value }); }
 
-        static Assembly()
-        {
-            // create definitions for all the syscall codes
-            foreach (SyscallCode item in Enum.GetValues(typeof(SyscallCode)))
-                DefineSymbol(item.ToString(), (UInt64)item);
-
-            // create definitions for all the error codes
-            foreach (ErrorCode item in Enum.GetValues(typeof(ErrorCode)))
-                DefineSymbol($"err_{item.ToString().ToLower()}", (UInt64)item);
-        }
-
         // -----------------------------------
 
         /// <summary>

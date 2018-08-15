@@ -167,6 +167,10 @@ report bugs to https://github.com/dragazo/CSX64/issues
 
                 case ProgramAction.Assemble:
                     if (pathspec.Count == 0) { Print("Assembler expected at least 1 file to assemble"); return 0; }
+
+                    // add the assembler predefines now
+                    AddPredefines();
+
                     if (output == null) // if no output is provided, batch process each pathspec
                     {
                         foreach (string path in pathspec)
@@ -189,6 +193,70 @@ report bugs to https://github.com/dragazo/CSX64/issues
             }
 
             return 0;
+        }
+
+        // -- init -- //
+
+        // adds standard symbols to the assembler predefine table
+        private static void AddPredefines()
+        {
+            // -- syscall codes -- //
+
+            Assembly.DefineSymbol("sys_exit", (UInt64)SyscallCode.sys_exit);
+
+            Assembly.DefineSymbol("sys_read", (UInt64)SyscallCode.sys_read);
+            Assembly.DefineSymbol("sys_write", (UInt64)SyscallCode.sys_write);
+            Assembly.DefineSymbol("sys_open", (UInt64)SyscallCode.sys_open);
+            Assembly.DefineSymbol("sys_close", (UInt64)SyscallCode.sys_close);
+            Assembly.DefineSymbol("sys_lseek", (UInt64)SyscallCode.sys_lseek);
+
+            Assembly.DefineSymbol("sys_brk", (UInt64)SyscallCode.sys_brk);
+
+            Assembly.DefineSymbol("sys_rename", (UInt64)SyscallCode.sys_rename);
+            Assembly.DefineSymbol("sys_unlink", (UInt64)SyscallCode.sys_unlink);
+            Assembly.DefineSymbol("sys_mkdir", (UInt64)SyscallCode.sys_mkdir);
+            Assembly.DefineSymbol("sys_rmdir", (UInt64)SyscallCode.sys_rmdir);
+
+            // -- error codes -- //
+
+            Assembly.DefineSymbol("err_none", (UInt64)ErrorCode.None);
+            Assembly.DefineSymbol("err_outofbounds", (UInt64)ErrorCode.OutOfBounds);
+            Assembly.DefineSymbol("err_unhandledsyscall", (UInt64)ErrorCode.UnhandledSyscall);
+            Assembly.DefineSymbol("err_undefinedbehavior", (UInt64)ErrorCode.UndefinedBehavior);
+            Assembly.DefineSymbol("err_arithmeticerror", (UInt64)ErrorCode.ArithmeticError);
+            Assembly.DefineSymbol("err_abort", (UInt64)ErrorCode.Abort);
+            Assembly.DefineSymbol("err_iofailure", (UInt64)ErrorCode.IOFailure);
+            Assembly.DefineSymbol("err_fsdisabled", (UInt64)ErrorCode.FSDisabled);
+            Assembly.DefineSymbol("err_accessviolation", (UInt64)ErrorCode.AccessViolation);
+            Assembly.DefineSymbol("err_insufficientfds", (UInt64)ErrorCode.InsufficientFDs);
+            Assembly.DefineSymbol("err_fdnotinuse", (UInt64)ErrorCode.FDNotInUse);
+            Assembly.DefineSymbol("err_notimplemented", (UInt64)ErrorCode.NotImplemented);
+            Assembly.DefineSymbol("err_stackoverflow", (UInt64)ErrorCode.StackOverflow);
+            Assembly.DefineSymbol("err_fpustackoverflow", (UInt64)ErrorCode.FPUStackOverflow);
+            Assembly.DefineSymbol("err_fpustackunderflow", (UInt64)ErrorCode.FPUStackUnderflow);
+            Assembly.DefineSymbol("err_fpuerror", (UInt64)ErrorCode.FPUError);
+            Assembly.DefineSymbol("err_fpuaccessviolation", (UInt64)ErrorCode.FPUAccessViolation);
+            Assembly.DefineSymbol("err_alignmentviolation", (UInt64)ErrorCode.AlignmentViolation);
+            Assembly.DefineSymbol("err_unknownop", (UInt64)ErrorCode.UnknownOp);
+
+            // -- file open modes -- //
+
+            Assembly.DefineSymbol("O_RDONLY", (UInt64)OpenFlags.read);
+            Assembly.DefineSymbol("O_WRONLY", (UInt64)OpenFlags.write);
+            Assembly.DefineSymbol("O_RDWR", (UInt64)OpenFlags.read_write);
+
+            Assembly.DefineSymbol("O_CREAT", (UInt64)OpenFlags.create);
+            Assembly.DefineSymbol("O_TMPFILE", (UInt64)OpenFlags.temp);
+            Assembly.DefineSymbol("O_TRUNC", (UInt64)OpenFlags.trunc);
+
+            Assembly.DefineSymbol("O_APPEND", (UInt64)OpenFlags.append);
+            Assembly.DefineSymbol("O_BINARY", (UInt64)OpenFlags.binary);
+
+            // -- file seek modes -- //
+
+            Assembly.DefineSymbol("SEEK_SET", (UInt64)SeekMode.set);
+            Assembly.DefineSymbol("SEEK_CUR", (UInt64)SeekMode.cur);
+            Assembly.DefineSymbol("SEEK_END", (UInt64)SeekMode.end);
         }
 
         // -- file io -- //
