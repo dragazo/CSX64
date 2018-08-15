@@ -267,25 +267,20 @@ namespace CSX64
         {
             switch (RAX)
             {
-                case (UInt64)SyscallCode.Exit: Exit((int)RBX); return true;
+                case (UInt64)SyscallCode.sys_exit: Exit((int)RBX); return true;
 
-                case (UInt64)SyscallCode.Read: return Sys_Read();
-                case (UInt64)SyscallCode.Write: return Sys_Write();
-                
-                case (UInt64)SyscallCode.Open: return Sys_Open();
-                case (UInt64)SyscallCode.Close: return Sys_Close();
+                case (UInt64)SyscallCode.sys_read: return Sys_Read();
+                case (UInt64)SyscallCode.sys_write: return Sys_Write();
+                case (UInt64)SyscallCode.sys_open: return Sys_Open();
+                case (UInt64)SyscallCode.sys_close: return Sys_Close();
+                case (UInt64)SyscallCode.sys_lseek: return Sys_Lseek();
 
-                case (UInt64)SyscallCode.Flush: return Sys_Flush();
+                case (UInt64)SyscallCode.sys_brk: return Sys_Brk();
 
-                case (UInt64)SyscallCode.Seek: return Sys_Seek();
-                case (UInt64)SyscallCode.Tell: return Sys_Tell();
-
-                case (UInt64)SyscallCode.Move: return Sys_Move();
-                case (UInt64)SyscallCode.Remove: return Sys_Remove();
-                case (UInt64)SyscallCode.Mkdir: return Sys_Mkdir();
-                case (UInt64)SyscallCode.Rmdir: return Sys_Rmdir();
-
-                case (UInt64)SyscallCode.Brk: return Sys_Brk();
+                case (UInt64)SyscallCode.sys_rename: return Sys_Rename();
+                case (UInt64)SyscallCode.sys_unlink: return Sys_Unlink();
+                case (UInt64)SyscallCode.sys_mkdir: return Sys_Mkdir();
+                case (UInt64)SyscallCode.sys_rmdir: return Sys_Rmdir();
 
                 // ----------------------------------
 

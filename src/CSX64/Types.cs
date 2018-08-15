@@ -79,18 +79,36 @@ namespace CSX64
     }
     public enum SyscallCode
     {
-        Exit,
+        sys_exit,
 
-        Read, Write,
-        Open, Close,
+        sys_read, sys_write,
+        sys_open, sys_close,
+        sys_lseek,
 
-        Flush,
-        Seek, Tell,
+        sys_brk,
 
-        Move, Remove,
-        Mkdir, Rmdir,
+        sys_rename, sys_unlink,
+        sys_mkdir, sys_rmdir,
+    }
+    enum OpenFlags
+    {
+        // access flags
+        read = 1,
+		write = 2,
+		read_write = 3,
 
-        Brk,
+		// creation flags
+		create = 4,
+		temp = 8,
+		trunc = 16,
+
+		// status flags
+		append = 32,
+		binary = 64, // this one's non-standard but we need it
+	}
+    enum SeekMode
+    {
+        set, cur, end
     }
 
     /// <summary>
@@ -146,22 +164,22 @@ namespace CSX64
     /// </summary>
     public unsafe struct ZMMRegister
     {
-        private fixed byte data[64];
+        private fixed UInt64 data[8];
 
         // -- index access utilities -- //
 
-        public ref UInt64 uint64(int index) { fixed (byte* ptr = data) return ref ((UInt64*)ptr)[index]; }
-        public ref UInt32 uint32(int index) { fixed (byte* ptr = data) return ref ((UInt32*)ptr)[index]; }
-        public ref UInt16 uint16(int index) { fixed (byte* ptr = data) return ref ((UInt16*)ptr)[index]; }
-        public ref byte uint8(int index) { fixed (byte* ptr = data) return ref ((byte*)ptr)[index]; }
+        public ref UInt64 uint64(int index) { fixed (UInt64* ptr = data) return ref ((UInt64*)ptr)[index]; }
+        public ref UInt32 uint32(int index) { fixed (UInt64* ptr = data) return ref ((UInt32*)ptr)[index]; }
+        public ref UInt16 uint16(int index) { fixed (UInt64* ptr = data) return ref ((UInt16*)ptr)[index]; }
+        public ref byte uint8(int index) { fixed (UInt64* ptr = data) return ref ((byte*)ptr)[index]; }
 
-        public ref Int64 int64(int index) { fixed (byte* ptr = data) return ref ((Int64*)ptr)[index]; }
-        public ref Int32 int32(int index) { fixed (byte* ptr = data) return ref ((Int32*)ptr)[index]; }
-        public ref Int16 int16(int index) { fixed (byte* ptr = data) return ref ((Int16*)ptr)[index]; }
-        public ref sbyte int8(int index) { fixed (byte* ptr = data) return ref ((sbyte*)ptr)[index]; }
+        public ref Int64 int64(int index) { fixed (UInt64* ptr = data) return ref ((Int64*)ptr)[index]; }
+        public ref Int32 int32(int index) { fixed (UInt64* ptr = data) return ref ((Int32*)ptr)[index]; }
+        public ref Int16 int16(int index) { fixed (UInt64* ptr = data) return ref ((Int16*)ptr)[index]; }
+        public ref sbyte int8(int index) { fixed (UInt64* ptr = data) return ref ((sbyte*)ptr)[index]; }
 
-        public ref double fp64(int index) { fixed (byte* ptr = data) return ref ((double*)ptr)[index]; }
-        public ref float fp32(int index) { fixed (byte* ptr = data) return ref ((float*)ptr)[index]; }
+        public ref double fp64(int index) { fixed (UInt64* ptr = data) return ref ((double*)ptr)[index]; }
+        public ref float fp32(int index) { fixed (UInt64* ptr = data) return ref ((float*)ptr)[index]; }
 
         // -- sizecode access utilities -- //
 
@@ -211,7 +229,7 @@ namespace CSX64
         /// The underlying stream associated with this file descriptor.
         /// If you close this, you should also null it, or - preferably - call <see cref="Close"/> instead of closing it yourself.
         /// </summary>
-        public Stream BaseStream = null;
+        public Stream BaseStream { get; private set; } = null;
 
         /// <summary>
         /// Returns true iff the file descriptor is currently in use
@@ -258,48 +276,6 @@ namespace CSX64
             }
 
             return true;
-        }
-
-        /// <summary>
-        /// Flushes the stream tied to this file descriptor. Throws <see cref="AccessViolationException"/> if already in use.
-        /// Returns true on success (no errors).
-        /// </summary>
-        /// <exception cref="AccessViolationException"></exception>
-        public bool Flush()
-        {
-            if (!InUse) throw new AccessViolationException("Attempt to flush a FileDescriptor that was not in use");
-
-            // flush the stream
-            try { BaseStream.Flush(); return true; }
-            catch (Exception) { return false; }
-        }
-
-        /// <summary>
-        /// Sets the current position in the file. Throws <see cref="AccessViolationException"/> if already in use.
-        /// Returns true on success (no errors).
-        /// </summary>
-        /// <exception cref="AccessViolationException"></exception>
-        public bool Seek(long offset, SeekOrigin origin)
-        {
-            if (!InUse) throw new AccessViolationException("Attempt to flush a FileDescriptor that was not in use");
-
-            // seek to new position
-            try { BaseStream.Seek(offset, origin); return true; }
-            catch (Exception) { return false; }
-        }
-        /// <summary>
-        /// Gets the current position in the file. Throws <see cref="AccessViolationException"/> if already in use.
-        /// Returns true on success (no errors).
-        /// </summary>
-        /// <param name="pos">the position in the file if successful</param>
-        /// <exception cref="AccessViolationException"></exception>
-        public bool Tell(out long pos)
-        {
-            if (!InUse) throw new AccessViolationException("Attempt to flush a FileDescriptor that was not in use");
-
-            // return position (the getter can throw)
-            try { pos = BaseStream.Position; return true; }
-            catch (Exception) { pos = -1; return false; }
         }
     }
 }
