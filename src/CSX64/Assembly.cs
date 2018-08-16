@@ -1724,7 +1724,7 @@ namespace CSX64
                 {
                     case AsmSegment.TEXT: file.Text.Pad(size); return true;
                     case AsmSegment.RODATA: file.Rodata.Pad(size); return true;
-                    case AsmSegment.DATA: file.Data.Pad(size); return false;
+                    case AsmSegment.DATA: file.Data.Pad(size); return true;
                     case AsmSegment.BSS: file.BssLen += (UInt32)size; return true;
 
                     default: res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to pad the {current_seg} segment"); return false;
