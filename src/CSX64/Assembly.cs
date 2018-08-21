@@ -3256,6 +3256,71 @@ namespace CSX64
                 return true;
             }
 
+            public bool __TryGetStringOpSize(out UInt64 sizecode)
+            {
+                sizecode = 0;
+
+                // must have 2 args
+                if (args.Length != 2) return false;
+
+                // args must both be memory
+                UInt64 a, b, sz_1, sz_2;
+                Expr expr;
+                bool expl_1, expl_2;
+                if (!TryParseAddress(args[0], out a, out b, out expr, out sz_1, out expl_1) || !TryParseAddress(args[1], out a, out b, out expr, out sz_2, out expl_2)) return false;
+
+                // need an explicit size (that is consistent)
+                if (expl_1 && expl_2) { if (sz_1 != sz_2) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size mismatch"); return false; } sizecode = sz_1; }
+                else if (expl_1) sizecode = sz_1;
+                else if (expl_2) sizecode = sz_2;
+                else { res =  new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce operand size"); return false; }
+
+                // make sure sizecode is in range
+                if (sizecode > 3) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified operand size is not supported"); return false; }
+
+                return true;
+            }
+            public bool TryProcessMOVS_string(OPCode op, bool rep)
+            {
+                if (!__TryGetStringOpSize(out UInt64 sizecode)) return false;
+
+                if (!TryAppendByte((byte)op)) return false;
+                if (!TryAppendByte((byte)((rep ? 4 : 0ul) | sizecode))) return false;
+
+                return true;
+            }
+
+            public bool TryProcessREP()
+            {
+                if (args.Length == 0) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: REP expected an instruction to augment"); return false; }
+
+                // first arg contains the instrucion to execute - find first white-space delimiter
+                int len;
+                for (len = 0; len < args[0].Length && !char.IsWhiteSpace(args[0][len]); ++len) ;
+
+                // extract that as the "actual" instruction to modify - convert to uppercase
+                string actual = args[0].Substring(0, len).ToUpper();
+
+                // if we got the whole arg, remove first arg entirely
+                if (len == args[0].Length)
+                {
+                    string[] new_args = new string[args.Length - 1];
+                    for (int i = 1; i < args.Length; ++i) new_args[i - 1] = args[i];
+                    args = new_args;
+                }
+                // otherwise, remove what we took and chop off leading white space
+                else args[0] = args[0].Substring(len).TrimStart();
+
+                // route to proper handlers
+                if (actual == "MOVS") return TryProcessMOVS_string(OPCode.string_ops, true);
+                else if (actual == "MOVSB") return TryProcessNoArgOp(OPCode.string_ops, true, 4 | 0);
+                else if (actual == "MOVSW") return TryProcessNoArgOp(OPCode.string_ops, true, 4 | 1);
+                else if (actual == "MOVSD") return TryProcessNoArgOp(OPCode.string_ops, true, 4 | 2);
+                else if (actual == "MOVSQ") return TryProcessNoArgOp(OPCode.string_ops, true, 4 | 3);
+                // otherwise this is illegal usage of REP
+                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: REP cannot be used with the specified instruction"); return false; }
+            }
+
             // -- x87 op formats -- //
 
             public bool TryProcessFPUBinaryOp(OPCode op, bool integral, bool pop)
@@ -4046,7 +4111,7 @@ namespace CSX64
 
                         case "MOVZ": case "MOVE": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 0)) return args.res; break;
                         case "MOVNZ": case "MOVNE": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 1)) return args.res; break;
-                        case "MOVS": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 2)) return args.res; break;
+                        // MOVS (mov) requires disambiguation
                         case "MOVNS": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 3)) return args.res; break;
                         case "MOVP": case "MOVPE": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 4)) return args.res; break;
                         case "MOVNP": case "MOVPO": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 5)) return args.res; break;
@@ -4185,6 +4250,15 @@ namespace CSX64
                         case "AAA": if (!args.TryProcessNoArgOp(OPCode.AAX, true, 0)) return args.res; break;
                         case "AAS": if (!args.TryProcessNoArgOp(OPCode.AAX, true, 1)) return args.res; break;
 
+                        // MOVS (string) requires disambiguation
+
+                        case "MOVSB": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, 0)) return args.res; break;
+                        case "MOVSW": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, 1)) return args.res; break;
+                        // MOVSD (string) requires disambiguation
+                        case "MOVSQ": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, 3)) return args.res; break;
+
+                        case "REP": if (!args.TryProcessREP()) return args.res; break;
+
                         // x87 instructions
 
                         case "FNOP": if (!args.TryProcessNoArgOp(OPCode.NOP)) return args.res; break; // no sense in wasting another opcode on no-op
@@ -4322,7 +4396,7 @@ namespace CSX64
                         case "MOVQ": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, false, false, true)) return args.res; break;
                         case "MOVD": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 2, false, false, true)) return args.res; break;
 
-                        case "MOVSD": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, false, false, true)) return args.res; break;
+                        // MOVSD (vec) requires disambiguation
                         case "MOVSS": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 2, false, false, true)) return args.res; break;
 
                         case "MOVDQA": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, false, true, false)) return args.res; break; // size codes for these 2 don't matter
@@ -4448,6 +4522,33 @@ namespace CSX64
                         case "DEBUG_CPU": if (!args.TryProcessNoArgOp(OPCode.DEBUG, true, 0)) return args.res; break;
                         case "DEBUG_VPU": if (!args.TryProcessNoArgOp(OPCode.DEBUG, true, 1)) return args.res; break;
                         case "DEBUG_FULL": if (!args.TryProcessNoArgOp(OPCode.DEBUG, true, 2)) return args.res; break;
+
+                        // disambiguation
+
+                        case "MOVS":
+                            // MOVS (string) has 2 memory operands
+                            if (args.args.Length == 2 && args.args[0].EndsWith(']') && args.args[1].EndsWith(']'))
+                            {
+                                if (!args.TryProcessMOVS_string(OPCode.string_ops, false)) return args.res;
+                            }
+                            // otherwise is MOVS (mov)
+                            else
+                            {
+                                if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 2)) return args.res;
+                            }
+                            break;
+                        case "MOVSD":
+                            // MOVSD (string) takes no operands
+                            if (args.args.Length == 0)
+                            {
+                                if (!args.TryProcessNoArgOp(OPCode.string_ops, true, 2)) return args.res;
+                            }
+                            // otherwise is MOVSD (vec)
+                            else
+                            {
+                                if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, false, false, true)) return args.res;
+                            }
+                            break;
 
                         default: return new AssembleResult(AssembleError.UnknownOp, $"line {args.line}: Unknown operation \"{args.op}\"");
                     }

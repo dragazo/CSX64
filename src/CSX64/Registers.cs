@@ -130,9 +130,13 @@ namespace CSX64
         public bool cc_ge { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => SF == OF; }
 
         /// <summary>
-        /// Indicates that we're allowed to run file system instructions
+        /// File System Flag - denotes if the client is allowed to perform potentially-dangerous file system syscalls (open, delete, mkdir, etc.)
         /// </summary>
         public bool FSF { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (RFLAGS & 0x000_0001_0000_0000ul) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => RFLAGS = (RFLAGS & ~0x000_0001_0000_0000ul) | (value ? 0x000_0001_0000_0000ul : 0); }
+        /// <summary>
+        /// One-Tick-REP Flag - denotes if REP instructions are performed in a single tick (more efficient, but could result in expensive ticks)
+        /// </summary>
+        public bool OTRF { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (RFLAGS & 0x000_0002_0000_0000ul) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => RFLAGS = (RFLAGS & ~0x000_0002_0000_0000ul) | (value ? 0x000_0002_0000_0000ul : 0); }
 
         // source : http://www.website.masmforum.com/tutorials/fptute/fpuchap1.htm
 

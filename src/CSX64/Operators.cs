@@ -1848,6 +1848,62 @@ namespace CSX64
             return true;
         }
 
+        // helper for MOVS - performs the actual move
+        bool __ProcessSTRING_MOVS(UInt64 sizecode)
+        {
+            UInt64 size = Size(sizecode);
+
+            if (!GetMemRaw(RSI, size, out UInt64 temp) || !SetMemRaw(RDI, size, temp)) return false;
+
+            if (DF) { RSI -= size; RDI -= size; }
+            else { RSI += size; RDI += size; }
+
+            return true;
+        }
+        /*
+		[6: mode][2: size]
+			mode = 0:     MOVS
+			mode = 1: REP MOVS
+			else UND
+		*/
+        bool ProcessSTRING()
+        {
+            if (!GetMemAdv(1, out UInt64 s)) return false;
+            UInt64 sizecode = s & 3;
+
+            // switch through mode
+            switch ((s >> 2) & 7)
+            {
+                case 0: // MOVS
+                    if (!__ProcessSTRING_MOVS(sizecode)) return false;
+                    break;
+
+                case 1: // REP MOVS
+
+                    // if we can do the whole thing in a single tick
+                    if (OTRF)
+                    {
+                        for (; RCX != 0; --RCX)
+                            if (!__ProcessSTRING_MOVS(sizecode)) return false;
+                    }
+                    // otherwise perform a single iteration (if count is nonzero)
+                    else if (RCX != 0)
+                    {
+                        if (!__ProcessSTRING_MOVS(sizecode)) return false;
+                        --RCX;
+
+                        // reset RIP to repeat instruction
+                        RIP -= 2;
+                    }
+                    break;
+
+                // otherwise unknown mode
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
+            }
+
+            return true;
+        }
+
         // -- floating point stuff -- //
 
         /// <summary>

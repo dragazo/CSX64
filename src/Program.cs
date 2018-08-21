@@ -651,6 +651,9 @@ report bugs to https://github.com/dragazo/CSX64/issues
                 // set private flags
                 computer.FSF = fsf;
 
+                // this usage is just going for raw speed, so enable OTRF
+                computer.OTRF = true;
+
                 // tie standard streams - stdin is non-interactive because we don't control it
                 computer.GetFD(0).Open(Console.OpenStandardInput(), false, false); 
                 computer.GetFD(1).Open(Console.OpenStandardOutput(), false, false);
@@ -693,6 +696,9 @@ report bugs to https://github.com/dragazo/CSX64/issues
 
                 // set private flags
                 computer.FSF = fsf;
+
+                // this usage is just going for raw speed, so enable OTRF
+                computer.OTRF = true;
 
                 // create the console client
                 using (GraphicalClient graphics = new GraphicalClient(computer))

@@ -42,6 +42,8 @@ namespace CSX64
         Cxy, MOVxX,
         ADXX, AAX,
 
+        string_ops,
+
         // x87 instructions
 
         FWAIT,

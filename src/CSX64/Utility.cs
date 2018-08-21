@@ -435,6 +435,14 @@ namespace CSX64
             return str.Length > 0 && str[0] == ch;
         }
         /// <summary>
+        /// Returns true if the string ends with the specified character. if str is null or empty, returns false
+        /// <param name="str">the string to test</param>
+        /// <param name="ch">the character to look for</param>
+        public static bool EndsWith(this string str, char ch)
+        {
+            return str != null && str.Length > 0 && str[str.Length - 1] == ch;
+        }
+        /// <summary>
         /// Returns true if the the string is equal to the specified value or begins with it and is followed by white space.
         /// </summary>
         /// <param name="str">the string to search in</param>
