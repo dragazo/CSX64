@@ -1849,6 +1849,7 @@ namespace CSX64
         }
 
         // helper for MOVS - performs the actual move
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         bool __ProcessSTRING_MOVS(UInt64 sizecode)
         {
             UInt64 size = Size(sizecode);
@@ -1860,19 +1861,43 @@ namespace CSX64
 
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        bool __ProcessSTRING_CMPS(UInt64 sizecode)
+        {
+            UInt64 size = Size(sizecode);
+
+            if (!GetMemRaw(RSI, size, out UInt64 a) || !GetMemRaw(RDI, size, out UInt64 b)) return false;
+
+            if (DF) { RSI -= size; RDI -= size; }
+            else { RSI += size; RDI += size; }
+
+            UInt64 res = Truncate(a - b, sizecode);
+
+            // update flags
+            UpdateFlagsZSP(res, sizecode);
+            CF = a < b; // if a < b, a borrow was taken from the highest bit
+            AF = (a & 0xf) < (b & 0xf); // AF is just like CF but only the low nibble
+            OF = Negative(a ^ b, sizecode) && Negative(a ^ res, sizecode); // overflow if sign(a)!=sign(b) and sign(a)!=sign(res)
+
+            return true;
+        }
         /*
 		[6: mode][2: size]
-			mode = 0:     MOVS
-			mode = 1: REP MOVS
+			mode = 0:       MOVS
+			mode = 1: REP   MOVS
+            mode = 2:       CMPS
+            mode = 3: REPE  CMPS
+            mode = 4: REPNE CMPS
 			else UND
 		*/
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         bool ProcessSTRING()
         {
             if (!GetMemAdv(1, out UInt64 s)) return false;
             UInt64 sizecode = s & 3;
 
             // switch through mode
-            switch ((s >> 2) & 7)
+            switch (s >> 2)
             {
                 case 0: // MOVS
                     if (!__ProcessSTRING_MOVS(sizecode)) return false;
@@ -1883,8 +1908,11 @@ namespace CSX64
                     // if we can do the whole thing in a single tick
                     if (OTRF)
                     {
-                        for (; RCX != 0; --RCX)
+                        while (RCX != 0)
+                        {
                             if (!__ProcessSTRING_MOVS(sizecode)) return false;
+                            --RCX;
+                        }
                     }
                     // otherwise perform a single iteration (if count is nonzero)
                     else if (RCX != 0)
@@ -1894,6 +1922,48 @@ namespace CSX64
 
                         // reset RIP to repeat instruction
                         RIP -= 2;
+                    }
+                    break;
+
+                case 2: // CMPS
+                    if (!__ProcessSTRING_CMPS(sizecode)) return false;
+                    break;
+
+                case 3: // REPE CMPS
+
+                    if (OTRF)
+                    {
+                        while (RCX != 0)
+                        {
+                            if (!__ProcessSTRING_CMPS(sizecode)) return false;
+                            --RCX;
+                            if (!ZF) break;
+                        }
+                    }
+                    else if (RCX != 0)
+                    {
+                        if (!__ProcessSTRING_CMPS(sizecode)) return false;
+                        --RCX;
+                        if (ZF) RIP -= 2; // if condition met, reset RIP to repeat instruction
+                    }
+                    break;
+
+                case 4: // REPNE CMPS
+
+                    if (OTRF)
+                    {
+                        while (RCX != 0)
+                        {
+                            if (!__ProcessSTRING_CMPS(sizecode)) return false;
+                            --RCX;
+                            if (ZF) break;
+                        }
+                    }
+                    else if (RCX != 0)
+                    {
+                        if (!__ProcessSTRING_CMPS(sizecode)) return false;
+                        --RCX;
+                        if (!ZF) RIP -= 2; // if condition met, reset RIP to repeat instruction
                     }
                     break;
 

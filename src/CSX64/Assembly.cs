@@ -3261,7 +3261,7 @@ namespace CSX64
                 sizecode = 0;
 
                 // must have 2 args
-                if (args.Length != 2) return false;
+                if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 2 operands"); return false; }
 
                 // args must both be memory
                 UInt64 a, b, sz_1, sz_2;
@@ -3280,26 +3280,36 @@ namespace CSX64
 
                 return true;
             }
+
             public bool TryProcessMOVS_string(OPCode op, bool rep)
             {
                 if (!__TryGetStringOpSize(out UInt64 sizecode)) return false;
 
                 if (!TryAppendByte((byte)op)) return false;
-                if (!TryAppendByte((byte)((rep ? 4 : 0ul) | sizecode))) return false;
+                if (!TryAppendByte((byte)(((rep ? 1 : 0ul) << 2) | sizecode))) return false;
+
+                return true;
+            }
+            public bool TryProcessCMPS_string(OPCode op, bool repe, bool repne)
+            {
+                if (!__TryGetStringOpSize(out UInt64 sizecode)) return false;
+
+                if (!TryAppendByte((byte)op)) return false;
+                if (!TryAppendByte((byte)(((repne ? 4 : repe ? 3 : 2ul) << 2) | sizecode))) return false;
 
                 return true;
             }
 
-            public bool TryProcessREP()
+            private bool __TryProcessREP_init(out string actual)
             {
-                if (args.Length == 0) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: REP expected an instruction to augment"); return false; }
+                if (args.Length == 0) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: REP expected an instruction to augment"); actual = ""; return false; }
 
                 // first arg contains the instrucion to execute - find first white-space delimiter
                 int len;
                 for (len = 0; len < args[0].Length && !char.IsWhiteSpace(args[0][len]); ++len) ;
 
                 // extract that as the "actual" instruction to modify - convert to uppercase
-                string actual = args[0].Substring(0, len).ToUpper();
+                actual = args[0].Substring(0, len).ToUpper();
 
                 // if we got the whole arg, remove first arg entirely
                 if (len == args[0].Length)
@@ -3311,14 +3321,46 @@ namespace CSX64
                 // otherwise, remove what we took and chop off leading white space
                 else args[0] = args[0].Substring(len).TrimStart();
 
+                return true;
+            }
+            public bool TryProcessREP()
+            {
+                if (!__TryProcessREP_init(out string actual)) return false;
+
                 // route to proper handlers
                 if (actual == "MOVS") return TryProcessMOVS_string(OPCode.string_ops, true);
-                else if (actual == "MOVSB") return TryProcessNoArgOp(OPCode.string_ops, true, 4 | 0);
-                else if (actual == "MOVSW") return TryProcessNoArgOp(OPCode.string_ops, true, 4 | 1);
-                else if (actual == "MOVSD") return TryProcessNoArgOp(OPCode.string_ops, true, 4 | 2);
-                else if (actual == "MOVSQ") return TryProcessNoArgOp(OPCode.string_ops, true, 4 | 3);
+                else if (actual == "MOVSB") return TryProcessNoArgOp(OPCode.string_ops, true, (1 << 2) | 0);
+                else if (actual == "MOVSW") return TryProcessNoArgOp(OPCode.string_ops, true, (1 << 2) | 1);
+                else if (actual == "MOVSD") return TryProcessNoArgOp(OPCode.string_ops, true, (1 << 2) | 2);
+                else if (actual == "MOVSQ") return TryProcessNoArgOp(OPCode.string_ops, true, (1 << 2) | 3);
                 // otherwise this is illegal usage of REP
                 else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: REP cannot be used with the specified instruction"); return false; }
+            }
+            public bool TryProcessREPE()
+            {
+                if (!__TryProcessREP_init(out string actual)) return false;
+
+                // route to proper handlers
+                if (actual == "CMPS") return TryProcessCMPS_string(OPCode.string_ops, true, false);
+                else if (actual == "CMPSB") return TryProcessNoArgOp(OPCode.string_ops, true, (3 << 2) | 0);
+                else if (actual == "CMPSW") return TryProcessNoArgOp(OPCode.string_ops, true, (3 << 2) | 1);
+                else if (actual == "CMPSD") return TryProcessNoArgOp(OPCode.string_ops, true, (3 << 2) | 2);
+                else if (actual == "CMPSQ") return TryProcessNoArgOp(OPCode.string_ops, true, (3 << 2) | 3);
+                // otherwise this is illegal usage of REP
+                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: REPE cannot be used with the specified instruction"); return false; }
+            }
+            public bool TryProcessREPNE()
+            {
+                if (!__TryProcessREP_init(out string actual)) return false;
+
+                // route to proper handlers
+                if (actual == "CMPS") return TryProcessCMPS_string(OPCode.string_ops, false, true);
+                else if (actual == "CMPSB") return TryProcessNoArgOp(OPCode.string_ops, true, (4 << 2) | 0);
+                else if (actual == "CMPSW") return TryProcessNoArgOp(OPCode.string_ops, true, (4 << 2) | 1);
+                else if (actual == "CMPSD") return TryProcessNoArgOp(OPCode.string_ops, true, (4 << 2) | 2);
+                else if (actual == "CMPSQ") return TryProcessNoArgOp(OPCode.string_ops, true, (4 << 2) | 3);
+                // otherwise this is illegal usage of REP
+                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: REPNE cannot be used with the specified instruction"); return false; }
             }
 
             // -- x87 op formats -- //
@@ -4257,7 +4299,16 @@ namespace CSX64
                         // MOVSD (string) requires disambiguation
                         case "MOVSQ": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, 3)) return args.res; break;
 
+                        case "CMPS": if (!args.TryProcessCMPS_string(OPCode.string_ops, false, false)) return args.res; break;
+
+                        case "CMPSB": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (2 << 2) | 0)) return args.res; break;
+                        case "CMPSW": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (2 << 2) | 1)) return args.res; break;
+                        case "CMPSD": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (2 << 2) | 2)) return args.res; break;
+                        case "CMPSQ": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (2 << 2) | 3)) return args.res; break;
+
                         case "REP": if (!args.TryProcessREP()) return args.res; break;
+                        case "REPE": case "REPZ": if (!args.TryProcessREPE()) return args.res; break;
+                        case "REPNE": case "REPNZ": if (!args.TryProcessREPNE()) return args.res; break;
 
                         // x87 instructions
 
