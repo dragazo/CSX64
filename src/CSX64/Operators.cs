@@ -1881,6 +1881,32 @@ namespace CSX64
 
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        bool __ProcessSTRING_LODS(UInt64 sizecode)
+        {
+            UInt64 size = Size(sizecode);
+
+            if (!GetMemRaw(RSI, size, out UInt64 temp)) return false;
+
+            if (DF) RSI -= size;
+            else RSI += size;
+
+            CPURegisters[0][sizecode] = temp;
+
+            return true;
+        }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        bool __ProcessSTRING_STOS(UInt64 sizecode)
+        {
+            UInt64 size = Size(sizecode);
+
+            if (!SetMemRaw(RDI, size, CPURegisters[0][sizecode])) return false;
+
+            if (DF) RDI -= size;
+            else RDI += size;
+
+            return true;
+        }
         /*
 		[6: mode][2: size]
 			mode = 0:       MOVS
@@ -1888,6 +1914,10 @@ namespace CSX64
             mode = 2:       CMPS
             mode = 3: REPE  CMPS
             mode = 4: REPNE CMPS
+            mode = 5:       LODS
+			mode = 6: REP   LODS
+			mode = 7:       STOS
+			mode = 8: REP   STOS
 			else UND
 		*/
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1964,6 +1994,49 @@ namespace CSX64
                         if (!__ProcessSTRING_CMPS(sizecode)) return false;
                         --RCX;
                         if (!ZF) RIP -= 2; // if condition met, reset RIP to repeat instruction
+                    }
+                    break;
+
+                case 5: // LODS
+                    if (!__ProcessSTRING_LODS(sizecode)) return false;
+                    break;
+
+                case 6: // REP LODS
+                    if (OTRF)
+                    {
+                        while (RCX != 0)
+                        {
+                            if (!__ProcessSTRING_LODS(sizecode)) return false;
+                            --RCX;
+                        }
+                    }
+                    else if (RCX != 0)
+                    {
+                        if (!__ProcessSTRING_LODS(sizecode)) return false;
+                        --RCX;
+                        RIP -= 2; // reset RIP to repeat instruction
+                    }
+                    break;
+
+                case 7: // STOS
+                    if (!__ProcessSTRING_STOS(sizecode)) return false;
+                    break;
+
+                case 8: // REP STOS
+
+                    if (OTRF)
+                    {
+                        while (RCX != 0)
+                        {
+                            if (!__ProcessSTRING_STOS(sizecode)) return false;
+                            --RCX;
+                        }
+                    }
+                    else if (RCX != 0)
+                    {
+                        if (!__ProcessSTRING_STOS(sizecode)) return false;
+                        --RCX;
+                        RIP -= 2; // reset RIP to repeat instruction
                     }
                     break;
 

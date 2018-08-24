@@ -3299,6 +3299,24 @@ namespace CSX64
 
                 return true;
             }
+            public bool TryProcessLODS_string(OPCode op, bool rep)
+            {
+                if (!__TryGetStringOpSize(out UInt64 sizecode)) return false;
+
+                if (!TryAppendByte((byte)op)) return false;
+                if (!TryAppendByte((byte)(((rep ? 6 : 5ul) << 2) | sizecode))) return false;
+
+                return true;
+            }
+            public bool TryProcessSTOS_string(OPCode op, bool rep)
+            {
+                if (!__TryGetStringOpSize(out UInt64 sizecode)) return false;
+
+                if (!TryAppendByte((byte)op)) return false;
+                if (!TryAppendByte((byte)(((rep ? 8 : 7ul) << 2) | sizecode))) return false;
+
+                return true;
+            }
 
             private bool __TryProcessREP_init(out string actual)
             {
@@ -3333,6 +3351,19 @@ namespace CSX64
                 else if (actual == "MOVSW") return TryProcessNoArgOp(OPCode.string_ops, true, (1 << 2) | 1);
                 else if (actual == "MOVSD") return TryProcessNoArgOp(OPCode.string_ops, true, (1 << 2) | 2);
                 else if (actual == "MOVSQ") return TryProcessNoArgOp(OPCode.string_ops, true, (1 << 2) | 3);
+
+                else if (actual == "LODS") return TryProcessLODS_string(OPCode.string_ops, true);
+                else if (actual == "LODSB") return TryProcessNoArgOp(OPCode.string_ops, true, (6 << 2) | 0);
+                else if (actual == "LODSW") return TryProcessNoArgOp(OPCode.string_ops, true, (6 << 2) | 1);
+                else if (actual == "LODSD") return TryProcessNoArgOp(OPCode.string_ops, true, (6 << 2) | 2);
+                else if (actual == "LODSQ") return TryProcessNoArgOp(OPCode.string_ops, true, (6 << 2) | 3);
+
+                else if (actual == "STOS") return TryProcessSTOS_string(OPCode.string_ops, true);
+                else if (actual == "STOSB") return TryProcessNoArgOp(OPCode.string_ops, true, (8 << 2) | 0);
+                else if (actual == "STOSW") return TryProcessNoArgOp(OPCode.string_ops, true, (8 << 2) | 1);
+                else if (actual == "STOSD") return TryProcessNoArgOp(OPCode.string_ops, true, (8 << 2) | 2);
+                else if (actual == "STOSQ") return TryProcessNoArgOp(OPCode.string_ops, true, (8 << 2) | 3);
+
                 // otherwise this is illegal usage of REP
                 else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: REP cannot be used with the specified instruction"); return false; }
             }
@@ -4293,18 +4324,28 @@ namespace CSX64
                         case "AAS": if (!args.TryProcessNoArgOp(OPCode.AAX, true, 1)) return args.res; break;
 
                         // MOVS (string) requires disambiguation
-
                         case "MOVSB": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, 0)) return args.res; break;
                         case "MOVSW": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, 1)) return args.res; break;
                         // MOVSD (string) requires disambiguation
                         case "MOVSQ": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, 3)) return args.res; break;
 
                         case "CMPS": if (!args.TryProcessCMPS_string(OPCode.string_ops, false, false)) return args.res; break;
-
                         case "CMPSB": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (2 << 2) | 0)) return args.res; break;
                         case "CMPSW": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (2 << 2) | 1)) return args.res; break;
                         case "CMPSD": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (2 << 2) | 2)) return args.res; break;
                         case "CMPSQ": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (2 << 2) | 3)) return args.res; break;
+
+                        case "LODS": if (!args.TryProcessLODS_string(OPCode.string_ops, false)) return args.res; break;
+                        case "LODSB": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (5 << 2) | 0)) return args.res; break;
+                        case "LODSW": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (5 << 2) | 1)) return args.res; break;
+                        case "LODSD": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (5 << 2) | 2)) return args.res; break;
+                        case "LODSQ": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (5 << 2) | 3)) return args.res; break;
+
+                        case "STOS": if (!args.TryProcessSTOS_string(OPCode.string_ops, false)) return args.res; break;
+                        case "STOSB": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (7 << 2) | 0)) return args.res; break;
+                        case "STOSW": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (7 << 2) | 1)) return args.res; break;
+                        case "STOSD": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (7 << 2) | 2)) return args.res; break;
+                        case "STOSQ": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (7 << 2) | 3)) return args.res; break;
 
                         case "REP": if (!args.TryProcessREP()) return args.res; break;
                         case "REPE": case "REPZ": if (!args.TryProcessREPE()) return args.res; break;
