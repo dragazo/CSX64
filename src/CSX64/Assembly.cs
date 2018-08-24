@@ -3256,7 +3256,7 @@ namespace CSX64
                 return true;
             }
 
-            public bool __TryGetStringOpSize(out UInt64 sizecode)
+            public bool __TryGetBinaryStringOpSize(out UInt64 sizecode)
             {
                 sizecode = 0;
 
@@ -3283,7 +3283,7 @@ namespace CSX64
 
             public bool TryProcessMOVS_string(OPCode op, bool rep)
             {
-                if (!__TryGetStringOpSize(out UInt64 sizecode)) return false;
+                if (!__TryGetBinaryStringOpSize(out UInt64 sizecode)) return false;
 
                 if (!TryAppendByte((byte)op)) return false;
                 if (!TryAppendByte((byte)(((rep ? 1 : 0ul) << 2) | sizecode))) return false;
@@ -3292,7 +3292,7 @@ namespace CSX64
             }
             public bool TryProcessCMPS_string(OPCode op, bool repe, bool repne)
             {
-                if (!__TryGetStringOpSize(out UInt64 sizecode)) return false;
+                if (!__TryGetBinaryStringOpSize(out UInt64 sizecode)) return false;
 
                 if (!TryAppendByte((byte)op)) return false;
                 if (!TryAppendByte((byte)(((repne ? 4 : repe ? 3 : 2ul) << 2) | sizecode))) return false;
@@ -3301,7 +3301,12 @@ namespace CSX64
             }
             public bool TryProcessLODS_string(OPCode op, bool rep)
             {
-                if (!__TryGetStringOpSize(out UInt64 sizecode)) return false;
+                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 1 operand"); return false; }
+
+                // takes one cpu register that is a partition of RAX (may not be AH)
+                if (!TryParseCPURegister(args[0], out UInt64 reg, out UInt64 sizecode, out bool high)) return false;
+                if (reg != 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand must be a partition of RAX"); return false; }
+                if (high) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand may not be AH"); return false; }
 
                 if (!TryAppendByte((byte)op)) return false;
                 if (!TryAppendByte((byte)(((rep ? 6 : 5ul) << 2) | sizecode))) return false;
@@ -3310,7 +3315,12 @@ namespace CSX64
             }
             public bool TryProcessSTOS_string(OPCode op, bool rep)
             {
-                if (!__TryGetStringOpSize(out UInt64 sizecode)) return false;
+                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 1 operand"); return false; }
+
+                // takes one memory operand of a standard size
+                if (!TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out UInt64  sizecode, out bool explicit_size)) return false;
+                if (!explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce operand size"); return false; }
+                if (sizecode > 3) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified operand size is not supported"); return false; }
 
                 if (!TryAppendByte((byte)op)) return false;
                 if (!TryAppendByte((byte)(((rep ? 8 : 7ul) << 2) | sizecode))) return false;
