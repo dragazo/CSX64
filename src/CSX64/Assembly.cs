@@ -3327,6 +3327,20 @@ namespace CSX64
 
                 return true;
             }
+            public bool TryProcessSCAS_string(OPCode op, bool repe, bool repne)
+            {
+                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 1 operand"); return false; }
+
+                // takes one memory operand of a standard size
+                if (!TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out UInt64 sizecode, out bool explicit_size)) return false;
+                if (!explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce operand size"); return false; }
+                if (sizecode > 3) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified operand size is not supported"); return false; }
+
+                if (!TryAppendByte((byte)op)) return false;
+                if (!TryAppendByte((byte)(((repne ? 11 : repe ? 10 : 9ul) << 2) | sizecode))) return false;
+
+                return true;
+            }
 
             private bool __TryProcessREP_init(out string actual)
             {
@@ -3387,6 +3401,13 @@ namespace CSX64
                 else if (actual == "CMPSW") return TryProcessNoArgOp(OPCode.string_ops, true, (3 << 2) | 1);
                 else if (actual == "CMPSD") return TryProcessNoArgOp(OPCode.string_ops, true, (3 << 2) | 2);
                 else if (actual == "CMPSQ") return TryProcessNoArgOp(OPCode.string_ops, true, (3 << 2) | 3);
+
+                else if (actual == "SCAS") return TryProcessSCAS_string(OPCode.string_ops, true, false);
+                else if (actual == "SCASB") return TryProcessNoArgOp(OPCode.string_ops, true, (10 << 2) | 0);
+                else if (actual == "SCASW") return TryProcessNoArgOp(OPCode.string_ops, true, (10 << 2) | 1);
+                else if (actual == "SCASD") return TryProcessNoArgOp(OPCode.string_ops, true, (10 << 2) | 2);
+                else if (actual == "SCASQ") return TryProcessNoArgOp(OPCode.string_ops, true, (10 << 2) | 3);
+
                 // otherwise this is illegal usage of REP
                 else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: REPE cannot be used with the specified instruction"); return false; }
             }
@@ -3400,6 +3421,13 @@ namespace CSX64
                 else if (actual == "CMPSW") return TryProcessNoArgOp(OPCode.string_ops, true, (4 << 2) | 1);
                 else if (actual == "CMPSD") return TryProcessNoArgOp(OPCode.string_ops, true, (4 << 2) | 2);
                 else if (actual == "CMPSQ") return TryProcessNoArgOp(OPCode.string_ops, true, (4 << 2) | 3);
+
+                else if (actual == "SCAS") return TryProcessSCAS_string(OPCode.string_ops, false, true);
+                else if (actual == "SCASB") return TryProcessNoArgOp(OPCode.string_ops, true, (11 << 2) | 0);
+                else if (actual == "SCASW") return TryProcessNoArgOp(OPCode.string_ops, true, (11 << 2) | 1);
+                else if (actual == "SCASD") return TryProcessNoArgOp(OPCode.string_ops, true, (11 << 2) | 2);
+                else if (actual == "SCASQ") return TryProcessNoArgOp(OPCode.string_ops, true, (11 << 2) | 3);
+
                 // otherwise this is illegal usage of REP
                 else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: REPNE cannot be used with the specified instruction"); return false; }
             }
@@ -4356,6 +4384,12 @@ namespace CSX64
                         case "STOSW": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (7 << 2) | 1)) return args.res; break;
                         case "STOSD": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (7 << 2) | 2)) return args.res; break;
                         case "STOSQ": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (7 << 2) | 3)) return args.res; break;
+
+                        case "SCAS": if (!args.TryProcessSCAS_string(OPCode.string_ops, false, false)) return args.res; break;
+                        case "SCASB": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (9 << 2) | 0)) return args.res; break;
+                        case "SCASW": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (9 << 2) | 1)) return args.res; break;
+                        case "SCASD": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (9 << 2) | 2)) return args.res; break;
+                        case "SCASQ": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (9 << 2) | 3)) return args.res; break;
 
                         case "REP": if (!args.TryProcessREP()) return args.res; break;
                         case "REPE": case "REPZ": if (!args.TryProcessREPE()) return args.res; break;

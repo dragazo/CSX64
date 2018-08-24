@@ -1907,17 +1907,41 @@ namespace CSX64
 
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        bool __ProcessSTRING_SCAS(UInt64 sizecode)
+        {
+            UInt64 size = Size(sizecode);
+            UInt64 a = CPURegisters[0][sizecode];
+
+            if (!GetMemRaw(RDI, size, out UInt64 b)) return false;
+
+            UInt64 res = Truncate(a - b, sizecode);
+
+            // update flags
+            UpdateFlagsZSP(res, sizecode);
+            CF = a < b; // if a < b, a borrow was taken from the highest bit
+            AF = (a & 0xf) < (b & 0xf); // AF is just like CF but only the low nibble
+            OF = Negative(a ^ b, sizecode) && Negative(a ^ res, sizecode); // overflow if sign(a)!=sign(b) and sign(a)!=sign(res)
+
+            if (DF) RDI -= size;
+            else RDI += size;
+
+            return true;
+        }
         /*
 		[6: mode][2: size]
-			mode = 0:       MOVS
-			mode = 1: REP   MOVS
-            mode = 2:       CMPS
-            mode = 3: REPE  CMPS
-            mode = 4: REPNE CMPS
-            mode = 5:       LODS
-			mode = 6: REP   LODS
-			mode = 7:       STOS
-			mode = 8: REP   STOS
+			mode = 0:        MOVS
+			mode = 1:  REP   MOVS
+			mode = 2:        CMPS
+			mode = 3:  REPE  CMPS
+			mode = 4:  REPNE CMPS
+			mode = 5:        LODS
+			mode = 6:  REP   LODS
+			mode = 7:        STOS
+			mode = 8:  REP   STOS
+			mode = 9:        SCAS
+			mode = 10: REPE  SCAS
+			mode = 11: REPNE SCAS
 			else UND
 		*/
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -2037,6 +2061,50 @@ namespace CSX64
                         if (!__ProcessSTRING_STOS(sizecode)) return false;
                         --RCX;
                         RIP -= 2; // reset RIP to repeat instruction
+                    }
+                    break;
+
+                case 9: // SCAS
+                    if (!__ProcessSTRING_SCAS(sizecode)) return false;
+                    break;
+
+                case 10: // REPE CMPS
+                         // if we can do the whole thing in a single tick
+                    if (OTRF)
+                    {
+                        while (RCX != 0)
+                        {
+                            if (!__ProcessSTRING_SCAS(sizecode)) return false;
+                            --RCX;
+                            if (!ZF) break;
+                        }
+                    }
+                    // otherwise perform a single iteration (if count is nonzero)
+                    else if (RCX != 0)
+                    {
+                        if (!__ProcessSTRING_SCAS(sizecode)) return false;
+                        --RCX;
+                        if (ZF) RIP -= 2; // if condition met, reset RIP to repeat instruction
+                    }
+                    break;
+
+                case 11: // REPNE CMPS
+                         // if we can do the whole thing in a single tick
+                    if (OTRF)
+                    {
+                        while (RCX != 0)
+                        {
+                            if (!__ProcessSTRING_SCAS(sizecode)) return false;
+                            --RCX;
+                            if (ZF) break;
+                        }
+                    }
+                    // otherwise perform a single iteration (if count is nonzero)
+                    else if (RCX != 0)
+                    {
+                        if (!__ProcessSTRING_SCAS(sizecode)) return false;
+                        --RCX;
+                        if (!ZF) RIP -= 2; // if condition met, reset RIP to repeat instruction
                     }
                     break;
 
