@@ -75,6 +75,8 @@ namespace CSX64
         VPU_FADDSUB,
         VPU_AVG,
 
+        VPU_FCMP,
+
         // misc instructions
 
         DEBUG = 255

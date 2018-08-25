@@ -471,6 +471,8 @@ namespace CSX64
                     case OPCode.VPU_FADDSUB: TryProcessVEC_FADDSUB(); break;
                     case OPCode.VPU_AVG: TryProcessVEC_AVG(); break;
 
+                    case OPCode.VPU_FCMP: TryProcessVEC_FCMP(); break;
+
                     // misc instructions
 
                     case OPCode.DEBUG: // all debugging features

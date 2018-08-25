@@ -3852,12 +3852,13 @@ namespace CSX64
 
                 return true;
             }
-            public bool TryProcessVPUBinary(OPCode op, UInt64 elem_sizecode, bool maskable, bool aligned, bool scalar)
+            public bool TryProcessVPUBinary(OPCode op, UInt64 elem_sizecode, bool maskable, bool aligned, bool scalar, bool has_ext_op = false, byte ext_op = 0)
             {
                 if (args.Length != 2 && args.Length != 3) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected 2 or 3 operands"); return false; }
 
                 // write the op code
                 if (!TryAppendByte((byte)op)) return false;
+                if (has_ext_op) { if (!TryAppendByte(ext_op)) return false; }
 
                 // extract the mask
                 if (!TryExtractVPUMask(ref args[0], out Expr mask, out bool zmask)) return false;
@@ -3941,6 +3942,25 @@ namespace CSX64
                 else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected a vpu register as first operand"); return false; }
 
                 return true;
+            }
+
+            public bool TryProcessVPU_FCMP(OPCode op, UInt64 elem_sizecode, bool maskable, bool aligned, bool scalar)
+            {
+                // has the 2-3 args + 1 for the comparison predicate
+                if (args.Length != 3 && args.Length != 4) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected 3 or 4 operands"); return false; }
+
+                // last arg must be the comarison predicate imm - instant integral imm [0-31]
+                if (!TryParseInstantImm(args[args.Length - 1], out UInt64 pred, out bool floating, out UInt64 sizecode, out bool explicit_sizecode)) return false;
+                if (floating) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Comparison predicate must be an integer"); return false; }
+                if (pred >= 32) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Comparison predicate out of range"); return false; }
+
+                // remove the comparison predicate arg
+                string[] new_args = new string[args.Length - 1];
+                for (int i = 0; i < new_args.Length; ++i) new_args[i] = args[i];
+                args = new_args;
+
+                // now refer to binary vpu formatter
+                return TryProcessVPUBinary(op, elem_sizecode, maskable, aligned, scalar, true, (byte)pred);
             }
         }
 
@@ -4370,7 +4390,7 @@ namespace CSX64
                         case "CMPS": if (!args.TryProcessCMPS_string(OPCode.string_ops, false, false)) return args.res; break;
                         case "CMPSB": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (2 << 2) | 0)) return args.res; break;
                         case "CMPSW": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (2 << 2) | 1)) return args.res; break;
-                        case "CMPSD": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (2 << 2) | 2)) return args.res; break;
+                        // CMPSD (string) requires disambiguation
                         case "CMPSQ": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (2 << 2) | 3)) return args.res; break;
 
                         case "LODS": if (!args.TryProcessLODS_string(OPCode.string_ops, false)) return args.res; break;
@@ -4653,6 +4673,148 @@ namespace CSX64
                         case "PAVGW": if (!args.TryProcessVPUBinary(OPCode.VPU_AVG, 1, true, true, false)) return args.res; break;
                         case "PAVGB": if (!args.TryProcessVPUBinary(OPCode.VPU_AVG, 0, true, true, false)) return args.res; break;
 
+                        case "CMPPD": if (!args.TryProcessVPU_FCMP(OPCode.VPU_FCMP, 3, true, true, false)) return args.res; break;
+                        case "CMPPS": if (!args.TryProcessVPU_FCMP(OPCode.VPU_FCMP, 2, true, true, false)) return args.res; break;
+
+                        // CMPSD (vec) requires disambiguation
+                        case "CMPSS": if (!args.TryProcessVPU_FCMP(OPCode.VPU_FCMP, 2, false, false, true)) return args.res; break;
+
+                        // packed double comparisons
+                        case "CMPEQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 0)) return args.res; break;
+                        case "CMPLTPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 1)) return args.res; break;
+                        case "CMPLEPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 2)) return args.res; break;
+                        case "CMPUNORDPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 3)) return args.res; break;
+                        case "CMPNEQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 4)) return args.res; break;
+                        case "CMPNLTPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 5)) return args.res; break;
+                        case "CMPNLEPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 6)) return args.res; break;
+                        case "CMPORDPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 7)) return args.res; break;
+                        case "CMPEQ_UQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 8)) return args.res; break;
+                        case "CMPNGEPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 9)) return args.res; break;
+                        case "CMPNGTPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 10)) return args.res; break;
+                        case "CMPFALSEPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 11)) return args.res; break;
+                        case "CMPNEQ_OQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 12)) return args.res; break;
+                        case "CMPGEPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 13)) return args.res; break;
+                        case "CMPGTPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 14)) return args.res; break;
+                        case "CMPTRUEPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 15)) return args.res; break;
+                        case "CMPEQ_OSPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 16)) return args.res; break;
+                        case "CMPLT_OQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 17)) return args.res; break;
+                        case "CMPLE_OQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 18)) return args.res; break;
+                        case "CMPUNORD_SPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 19)) return args.res; break;
+                        case "CMPNEQ_USPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 20)) return args.res; break;
+                        case "CMPNLT_UQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 21)) return args.res; break;
+                        case "CMPNLE_UQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 22)) return args.res; break;
+                        case "CMPORD_SPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 23)) return args.res; break;
+                        case "CMPEQ_USPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 24)) return args.res; break;
+                        case "CMPNGE_UQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 25)) return args.res; break;
+                        case "CMPNGT_UQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 26)) return args.res; break;
+                        case "CMPFALSE_OSPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 27)) return args.res; break;
+                        case "CMPNEQ_OSPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 28)) return args.res; break;
+                        case "CMPGE_OQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 29)) return args.res; break;
+                        case "CMPGT_OQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 30)) return args.res; break;
+                        case "CMPTRUE_USPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 31)) return args.res; break;
+
+                        // packed single comparisons
+                        case "CMPEQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 0)) return args.res; break;
+                        case "CMPLTPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 1)) return args.res; break;
+                        case "CMPLEPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 2)) return args.res; break;
+                        case "CMPUNORDPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 3)) return args.res; break;
+                        case "CMPNEQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 4)) return args.res; break;
+                        case "CMPNLTPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 5)) return args.res; break;
+                        case "CMPNLEPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 6)) return args.res; break;
+                        case "CMPORDPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 7)) return args.res; break;
+                        case "CMPEQ_UQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 8)) return args.res; break;
+                        case "CMPNGEPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 9)) return args.res; break;
+                        case "CMPNGTPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 10)) return args.res; break;
+                        case "CMPFALSEPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 11)) return args.res; break;
+                        case "CMPNEQ_OQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 12)) return args.res; break;
+                        case "CMPGEPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 13)) return args.res; break;
+                        case "CMPGTPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 14)) return args.res; break;
+                        case "CMPTRUEPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 15)) return args.res; break;
+                        case "CMPEQ_OSPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 16)) return args.res; break;
+                        case "CMPLT_OQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 17)) return args.res; break;
+                        case "CMPLE_OQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 18)) return args.res; break;
+                        case "CMPUNORD_SPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 19)) return args.res; break;
+                        case "CMPNEQ_USPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 20)) return args.res; break;
+                        case "CMPNLT_UQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 21)) return args.res; break;
+                        case "CMPNLE_UQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 22)) return args.res; break;
+                        case "CMPORD_SPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 23)) return args.res; break;
+                        case "CMPEQ_USPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 24)) return args.res; break;
+                        case "CMPNGE_UQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 25)) return args.res; break;
+                        case "CMPNGT_UQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 26)) return args.res; break;
+                        case "CMPFALSE_OSPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 27)) return args.res; break;
+                        case "CMPNEQ_OSPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 28)) return args.res; break;
+                        case "CMPGE_OQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 29)) return args.res; break;
+                        case "CMPGT_OQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 30)) return args.res; break;
+                        case "CMPTRUE_USPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 31)) return args.res; break;
+
+                        // scalar double comparisons
+                        case "CMPEQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 0)) return args.res; break;
+                        case "CMPLTSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 1)) return args.res; break;
+                        case "CMPLESD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 2)) return args.res; break;
+                        case "CMPUNORDSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 3)) return args.res; break;
+                        case "CMPNEQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 4)) return args.res; break;
+                        case "CMPNLTSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 5)) return args.res; break;
+                        case "CMPNLESD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 6)) return args.res; break;
+                        case "CMPORDSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 7)) return args.res; break;
+                        case "CMPEQ_UQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 8)) return args.res; break;
+                        case "CMPNGESD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 9)) return args.res; break;
+                        case "CMPNGTSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 10)) return args.res; break;
+                        case "CMPFALSESD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 11)) return args.res; break;
+                        case "CMPNEQ_OQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 12)) return args.res; break;
+                        case "CMPGESD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 13)) return args.res; break;
+                        case "CMPGTSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 14)) return args.res; break;
+                        case "CMPTRUESD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 15)) return args.res; break;
+                        case "CMPEQ_OSSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 16)) return args.res; break;
+                        case "CMPLT_OQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 17)) return args.res; break;
+                        case "CMPLE_OQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 18)) return args.res; break;
+                        case "CMPUNORD_SSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 19)) return args.res; break;
+                        case "CMPNEQ_USSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 20)) return args.res; break;
+                        case "CMPNLT_UQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 21)) return args.res; break;
+                        case "CMPNLE_UQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 22)) return args.res; break;
+                        case "CMPORD_SSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 23)) return args.res; break;
+                        case "CMPEQ_USSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 24)) return args.res; break;
+                        case "CMPNGE_UQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 25)) return args.res; break;
+                        case "CMPNGT_UQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 26)) return args.res; break;
+                        case "CMPFALSE_OSSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 27)) return args.res; break;
+                        case "CMPNEQ_OSSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 28)) return args.res; break;
+                        case "CMPGE_OQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 29)) return args.res; break;
+                        case "CMPGT_OQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 30)) return args.res; break;
+                        case "CMPTRUE_USSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 31)) return args.res; break;
+
+                        // scalar single comparisons
+                        case "CMPEQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 0)) return args.res; break;
+                        case "CMPLTSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 1)) return args.res; break;
+                        case "CMPLESS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 2)) return args.res; break;
+                        case "CMPUNORDSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 3)) return args.res; break;
+                        case "CMPNEQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 4)) return args.res; break;
+                        case "CMPNLTSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 5)) return args.res; break;
+                        case "CMPNLESS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 6)) return args.res; break;
+                        case "CMPORDSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 7)) return args.res; break;
+                        case "CMPEQ_UQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 8)) return args.res; break;
+                        case "CMPNGESS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 9)) return args.res; break;
+                        case "CMPNGTSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 10)) return args.res; break;
+                        case "CMPFALSESS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 11)) return args.res; break;
+                        case "CMPNEQ_OQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 12)) return args.res; break;
+                        case "CMPGESS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 13)) return args.res; break;
+                        case "CMPGTSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 14)) return args.res; break;
+                        case "CMPTRUESS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 15)) return args.res; break;
+                        case "CMPEQ_OSSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 16)) return args.res; break;
+                        case "CMPLT_OQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 17)) return args.res; break;
+                        case "CMPLE_OQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 18)) return args.res; break;
+                        case "CMPUNORD_SSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 19)) return args.res; break;
+                        case "CMPNEQ_USSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 20)) return args.res; break;
+                        case "CMPNLT_UQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 21)) return args.res; break;
+                        case "CMPNLE_UQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 22)) return args.res; break;
+                        case "CMPORD_SSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 23)) return args.res; break;
+                        case "CMPEQ_USSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 24)) return args.res; break;
+                        case "CMPNGE_UQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 25)) return args.res; break;
+                        case "CMPNGT_UQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 26)) return args.res; break;
+                        case "CMPFALSE_OSSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 27)) return args.res; break;
+                        case "CMPNEQ_OSSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 28)) return args.res; break;
+                        case "CMPGE_OQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 29)) return args.res; break;
+                        case "CMPGT_OQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 30)) return args.res; break;
+                        case "CMPTRUE_USSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 31)) return args.res; break;
+
                         // misc instructions
 
                         case "DEBUG_CPU": if (!args.TryProcessNoArgOp(OPCode.DEBUG, true, 0)) return args.res; break;
@@ -4683,6 +4845,18 @@ namespace CSX64
                             else
                             {
                                 if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, false, false, true)) return args.res;
+                            }
+                            break;
+                        case "CMPSD":
+                            // CMPSD (string) takes no operands
+                            if (args.args.Length == 0)
+                            {
+                                if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (2 << 2) | 2)) return args.res;
+                            }
+                            // otherwise is CMPSD(vec)
+                            else
+                            {
+                                if (!args.TryProcessVPU_FCMP(OPCode.VPU_FCMP, 3, false, false, true)) return args.res;
                             }
                             break;
 

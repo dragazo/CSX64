@@ -3397,5 +3397,126 @@ namespace CSX64
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool TryProcessVEC_AVG() => ProcessVPUBinary(3, __TryPerformVEC_AVG);
+
+        // constants used to represent the result of a "true" simd floatint-point comparison
+        private const UInt64 __fp64_simd_cmp_true = 0xffffffffffffffff;
+        private const UInt64 __fp32_simd_cmp_true = 0xffffffff;
+
+        // helper for FCMP comparators
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool __TryProcesVEC_FCMP_helper(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index,
+            bool great, bool less, bool equal, bool unord, bool signal)
+        {
+            if (elem_sizecode == 3)
+            {
+                double fa = AsDouble(a), fb = AsDouble(b);
+                bool cmp;
+                if (double.IsNaN(fa) || double.IsNaN(fb))
+                {
+                    cmp = unord;
+                    if (signal) { Terminate(ErrorCode.ArithmeticError); res = 0; return false; }
+                }
+                else if (fa > fb) cmp = great;
+                else if (fa < fb) cmp = less;
+                else if (fa == fb) cmp = equal;
+                else cmp = false; /* if something weird happens, catch as false */
+                res = cmp ? __fp64_simd_cmp_true : 0;
+            }
+            else
+            {
+                float fa = AsFloat((UInt32)a), fb = AsFloat((UInt32)b);
+                bool cmp;
+                if (float.IsNaN(fa) || float.IsNaN(fb))
+                {
+                    cmp = unord;
+                    if (signal) { Terminate(ErrorCode.ArithmeticError); res = 0; return false; }
+                }
+                else if (fa > fb) cmp = great;
+                else if (fa < fb) cmp = less;
+                else if (fa == fb) cmp = equal;
+                else cmp = false; /* if something weird happens, catch as false */
+                res = cmp ? __fp32_simd_cmp_true : 0;
+            }
+            return true;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_EQ_OQ(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, false, false, true, false, false);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_LT_OS(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, false, true, false, false, true);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_LE_OS(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, false, true, true, false, true);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_UNORD_Q(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, false, false, false, true, false);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_NEQ_UQ(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, true, true, false, true, false);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_NLT_US(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, true, false, true, true, true);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_NLE_US(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, true, false, false, true, true);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_ORD_Q(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, true, true, true, false, false);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_EQ_UQ(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, false, false, true, true, false);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_NGE_US(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, false, true, false, true, true);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_NGT_US(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, false, true, true, true, true);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_FALSE_OQ(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, false, false, false, false, false);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_NEQ_OQ(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, true, true, false, false, false);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_GE_OS(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, true, false, true, false, true);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_GT_OS(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, true, false, false, false, true);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_TRUE_UQ(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, true, true, true, true, false);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_EQ_OS(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, false, false, true, false, true);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_LT_OQ(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, false, true, false, false, false);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_LE_OQ(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, false, true, true, false, false);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_UNORD_S(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, false, false, false, true, true);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_NEQ_US(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, true, true, false, true, true);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_NLT_UQ(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, true, false, true, true, false);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_NLE_UQ(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, true, false, false, true, false);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_ORD_S(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, true, true, true, false, true);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_EQ_US(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, false, false, true, true, true);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_NGE_UQ(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, false, true, false, true, false);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_NGT_UQ(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, false, true, true, true, false);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_FALSE_OS(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, false, false, false, false, true);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_NEQ_OS(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, true, true, false, false, true);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_GE_OQ(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, true, false, true, false, false);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_GT_OQ(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, true, false, false, false, false);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] private bool __TryProcesVEC_FCMP_TRUE_US(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index) => __TryProcesVEC_FCMP_helper(elem_sizecode, out res, a, b, index, true, true, true, true, true);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool TryProcessVEC_FCMP()
+        {
+            // read condition byte
+            if (!GetMemAdv(1, out UInt64 cond)) return false;
+            
+            // perform the instruction
+            switch (cond)
+            {
+                case 00: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_EQ_OQ);
+                case 01: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_LT_OS);
+                case 02: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_LE_OS);
+                case 03: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_UNORD_Q);
+                case 04: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_NEQ_UQ);
+                case 05: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_NLT_US);
+                case 06: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_NLE_US);
+                case 07: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_ORD_Q);
+                case 08: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_EQ_UQ);
+                case 09: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_NGE_US);
+                case 10: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_NGT_US);
+                case 11: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_FALSE_OQ);
+                case 12: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_NEQ_OQ);
+                case 13: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_GE_OS);
+                case 14: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_GT_OS);
+                case 15: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_TRUE_UQ);
+                case 16: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_EQ_OS);
+                case 17: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_LT_OQ);
+                case 18: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_LE_OQ);
+                case 19: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_UNORD_S);
+                case 20: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_NEQ_US);
+                case 21: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_NLT_UQ);
+                case 22: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_NLE_UQ);
+                case 23: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_ORD_S);
+                case 24: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_EQ_US);
+                case 25: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_NGE_UQ);
+                case 26: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_NGT_UQ);
+                case 27: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_FALSE_OS);
+                case 28: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_NEQ_OS);
+                case 29: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_GE_OQ);
+                case 30: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_GT_OQ);
+                case 31: return ProcessVPUBinary(12, __TryProcesVEC_FCMP_TRUE_US);
+
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
+            }
+        }
     }
 }
