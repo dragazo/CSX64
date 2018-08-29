@@ -388,6 +388,8 @@ namespace CSX64
 
                     case OPCode.string_ops: ProcessSTRING(); break;
 
+                    case OPCode.BSx: ProcessBSx(); break;
+
                     // x87 instructions
 
                     case OPCode.FWAIT: break; // thus far fpu ops are synchronous with cpu ops

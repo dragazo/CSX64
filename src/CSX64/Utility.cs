@@ -543,6 +543,18 @@ namespace CSX64
 
         // -- CSX64 encoding utilities -- //
 
+        // isolates the highest set bit. if val is zero, returns zero.
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static UInt64 IsolateHighBit(UInt64 val)
+        {
+            // while there are multiple set bits, clear the low one
+            while ((val & (val - 1)) != 0) val = val & (val - 1);
+            return val;
+        }
+        // isolates the lowest set bit. if val is zero, returns zero.
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static UInt64 IsolateLowBit(UInt64 val) { return val & (~val + 1); }
+
         /// <summary>
         /// Gets the bitmask for the sign bit of an integer with the specified sizecode
         /// </summary>

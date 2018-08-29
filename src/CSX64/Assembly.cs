@@ -3432,6 +3432,42 @@ namespace CSX64
                 else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: REPNE cannot be used with the specified instruction"); return false; }
             }
 
+            public bool TryProcessBSx(OPCode op, bool forward)
+            {
+                if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 2 operands"); return false; }
+
+                // write the op code
+                if (!TryAppendByte((byte)op)) return false;
+
+                // first arg must be reg
+                if (!TryParseCPURegister(args[0], out UInt64 dest, out UInt64 dest_sz, out bool high)) return false;
+                // 8-bit mode is not allowed
+                if (dest_sz == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: 8-bit mode is not supported"); return false; }
+
+                // reg, reg
+                if (TryParseCPURegister(args[1], out UInt64 src, out UInt64 src_sz, out high))
+                {
+                    // make sure sizes match
+                    if (dest_sz != src_sz) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size mismatch"); return false; }
+                    if (!TryAppendByte((byte)((forward ? 128 : 0ul) | (dest_sz << 4) | dest))) return false;
+                    if (!TryAppendByte((byte)src)) return false;
+                }
+                // reg, mem
+                else if (args[1][args[1].Length - 1] == ']')
+                {
+                    if (!TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out src_sz, out bool src_explicit)) return false;
+
+                    // make sure sizes match
+                    if (src_explicit && dest_sz != src_sz) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size mismatch"); return false; }
+
+                    if (!TryAppendByte((byte)((forward ? 128 : 0ul) | 64 | (dest_sz << 4) | dest))) return false;
+                    if (!TryAppendAddress(a, b, ptr_base)) return false;
+                }
+                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Second operand must be a cpu register or memory value"); return false; }
+
+                return true;
+            }
+
             // -- x87 op formats -- //
 
             public bool TryProcessFPUBinaryOp(OPCode op, bool integral, bool pop)
@@ -4414,6 +4450,9 @@ namespace CSX64
                         case "REP": if (!args.TryProcessREP()) return args.res; break;
                         case "REPE": case "REPZ": if (!args.TryProcessREPE()) return args.res; break;
                         case "REPNE": case "REPNZ": if (!args.TryProcessREPNE()) return args.res; break;
+
+                        case "BSF": if (!args.TryProcessBSx(OPCode.BSx, true)) return args.res; break;
+                        case "BSR": if (!args.TryProcessBSx(OPCode.BSx, false)) return args.res; break;
 
                         // x87 instructions
 

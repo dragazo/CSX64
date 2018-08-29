@@ -2115,6 +2115,53 @@ namespace CSX64
             return true;
         }
 
+        /*
+        [1: forward][1: mem][2: size][4: dest]
+            mem = 0: [4:][4: src]
+            mem = 1: [address]
+        */
+        bool ProcessBSx()
+        {
+            UInt64 src, res;
+            if (!GetMemAdv(1, out UInt64 s)) return false;
+            UInt64 sizecode = (s >> 4) & 3;
+
+            // if src is mem
+            if ((s & 64) != 0)
+            {
+                if (!GetAddressAdv(out src) || !GetMemRaw(src, Size(sizecode), out src)) return false;
+            }
+            // otherwise src is reg
+            else
+            {
+                if (!GetMemAdv(1, out src)) return false;
+                src = CPURegisters[src & 15][sizecode];
+            }
+
+            // if src is zero
+            if (src == 0)
+            {
+                ZF = true;
+                res = Rand.NextUInt64(); // result is undefined in this case
+            }
+            // otherwise perform the search
+            else
+            {
+                ZF = false;
+                res = Sizecode((s & 128) != 0 ? IsolateLowBit(src) : IsolateHighBit(src));
+            }
+
+            // update dest and flags
+            CPURegisters[s & 15][sizecode] = res;
+            CF = Rand.NextBool();
+            OF = Rand.NextBool();
+            SF = Rand.NextBool();
+            AF = Rand.NextBool();
+            PF = Rand.NextBool();
+
+            return true;
+        }
+
         // -- floating point stuff -- //
 
         /// <summary>

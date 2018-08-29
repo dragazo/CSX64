@@ -44,6 +44,8 @@ namespace CSX64
 
         string_ops,
 
+        BSx,
+
         // x87 instructions
 
         FWAIT,
