@@ -46,6 +46,8 @@ namespace CSX64
 
         BSx,
 
+        UD,
+
         // x87 instructions
 
         FWAIT,

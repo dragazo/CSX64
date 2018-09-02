@@ -3033,6 +3033,12 @@ namespace CSX64
 
                 return true;
             }
+            public bool TryProcessNoArgOp_no_write()
+            {
+                // only check to make sure there were no operands
+                if (args.Length != 0) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected no operands"); return false; }
+                return true;
+            }
 
             public bool TryProcessXCHG(OPCode op)
             {
@@ -4225,6 +4231,14 @@ namespace CSX64
                     // -- instruction routing -- //
                     switch (args.op.ToUpper())
                     {
+                        // unmapped
+
+                        case "LFENCE": if (!args.TryProcessNoArgOp_no_write()) return args.res; break;
+                        case "SFENCE": if (!args.TryProcessNoArgOp_no_write()) return args.res; break;
+                        case "MFENCE": if (!args.TryProcessNoArgOp_no_write()) return args.res; break;
+
+                        case "PAUSE": if (!args.TryProcessNoArgOp_no_write()) return args.res; break;
+
                         // x86 instructions
 
                         case "NOP": if (!args.TryProcessNoArgOp(OPCode.NOP)) return args.res; break;
@@ -4453,6 +4467,8 @@ namespace CSX64
 
                         case "BSF": if (!args.TryProcessBSx(OPCode.BSx, true)) return args.res; break;
                         case "BSR": if (!args.TryProcessBSx(OPCode.BSx, false)) return args.res; break;
+
+                        case "UD": if (!args.TryProcessNoArgOp(OPCode.UD)) return args.res; break;
 
                         // x87 instructions
 

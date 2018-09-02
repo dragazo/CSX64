@@ -1850,7 +1850,7 @@ namespace CSX64
 
         // helper for MOVS - performs the actual move
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        bool __ProcessSTRING_MOVS(UInt64 sizecode)
+        private bool __ProcessSTRING_MOVS(UInt64 sizecode)
         {
             UInt64 size = Size(sizecode);
 
@@ -1862,7 +1862,7 @@ namespace CSX64
             return true;
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        bool __ProcessSTRING_CMPS(UInt64 sizecode)
+        private bool __ProcessSTRING_CMPS(UInt64 sizecode)
         {
             UInt64 size = Size(sizecode);
 
@@ -1882,7 +1882,7 @@ namespace CSX64
             return true;
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        bool __ProcessSTRING_LODS(UInt64 sizecode)
+        private bool __ProcessSTRING_LODS(UInt64 sizecode)
         {
             UInt64 size = Size(sizecode);
 
@@ -1896,7 +1896,7 @@ namespace CSX64
             return true;
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        bool __ProcessSTRING_STOS(UInt64 sizecode)
+        private bool __ProcessSTRING_STOS(UInt64 sizecode)
         {
             UInt64 size = Size(sizecode);
 
@@ -1908,7 +1908,7 @@ namespace CSX64
             return true;
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        bool __ProcessSTRING_SCAS(UInt64 sizecode)
+        private bool __ProcessSTRING_SCAS(UInt64 sizecode)
         {
             UInt64 size = Size(sizecode);
             UInt64 a = CPURegisters[0][sizecode];
@@ -1945,7 +1945,7 @@ namespace CSX64
 			else UND
 		*/
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        bool ProcessSTRING()
+        private bool ProcessSTRING()
         {
             if (!GetMemAdv(1, out UInt64 s)) return false;
             UInt64 sizecode = s & 3;
@@ -2120,7 +2120,7 @@ namespace CSX64
             mem = 0: [4:][4: src]
             mem = 1: [address]
         */
-        bool ProcessBSx()
+        private bool ProcessBSx()
         {
             UInt64 src, res;
             if (!GetMemAdv(1, out UInt64 s)) return false;
@@ -2160,6 +2160,14 @@ namespace CSX64
             PF = Rand.NextBool();
 
             return true;
+        }
+
+        // identical to ProcessUNKNOWN() - added for clarity for UD instruction
+        private bool ProcessUD()
+        {
+            // ud explicitly triggers an unknown opcode error
+            Terminate(ErrorCode.UnknownOp);
+            return false;
         }
 
         // -- floating point stuff -- //
