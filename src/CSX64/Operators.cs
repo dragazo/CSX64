@@ -2120,11 +2120,11 @@ namespace CSX64
             mem = 0: [4:][4: src]
             mem = 1: [address]
         */
-        private bool ProcessBSx()
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool __Process_BSx_common(out UInt64 s, out UInt64 src, out UInt64 sizecode)
         {
-            UInt64 src, res;
-            if (!GetMemAdv(1, out UInt64 s)) return false;
-            UInt64 sizecode = (s >> 4) & 3;
+            if (!GetMemAdv(1, out s)) { src = sizecode = 0; return false; }
+            sizecode = (s >> 4) & 3;
 
             // if src is mem
             if ((s & 64) != 0)
@@ -2137,6 +2137,14 @@ namespace CSX64
                 if (!GetMemAdv(1, out src)) return false;
                 src = CPURegisters[src & 15][sizecode];
             }
+
+            return true;
+        }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool ProcessBSx()
+        {
+            if (!__Process_BSx_common(out UInt64 s, out UInt64 src, out UInt64 sizecode)) return false;
+            UInt64 res;
 
             // if src is zero
             if (src == 0)
@@ -2161,8 +2169,39 @@ namespace CSX64
 
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        bool ProcessTZCNT()
+        {
+            if (!__Process_BSx_common(out UInt64 s, out UInt64 src, out UInt64 sizecode)) return false;
+            UInt64 res;
+
+            // if src is zero
+            if (src == 0)
+            {
+                CF = true;
+                res = SizeBits(sizecode); // result is operand size (in bits) in this case
+            }
+            // otherwise perform the search
+            else
+            {
+                CF = false;
+                res = Sizecode(IsolateLowBit(src));
+            }
+
+            // update dest and flags
+            CPURegisters[s & 15][sizecode] = res;
+            ZF = res == 0;
+            OF = Rand.NextBool();
+            SF = Rand.NextBool();
+            AF = Rand.NextBool();
+            PF = Rand.NextBool();
+
+            return true;
+        }
+
 
         // identical to ProcessUNKNOWN() - added for clarity for UD instruction
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessUD()
         {
             // ud explicitly triggers an unknown opcode error

@@ -4468,6 +4468,8 @@ namespace CSX64
                         case "BSF": if (!args.TryProcessBSx(OPCode.BSx, true)) return args.res; break;
                         case "BSR": if (!args.TryProcessBSx(OPCode.BSx, false)) return args.res; break;
 
+                        case "TZCNT": if (!args.TryProcessBSx(OPCode.TZCNT, true)) return args.res; break; // forward flag doesn't matter
+
                         case "UD": if (!args.TryProcessNoArgOp(OPCode.UD)) return args.res; break;
 
                         // x87 instructions

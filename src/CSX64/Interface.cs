@@ -389,6 +389,7 @@ namespace CSX64
                     case OPCode.string_ops: ProcessSTRING(); break;
 
                     case OPCode.BSx: ProcessBSx(); break;
+                    case OPCode.TZCNT: ProcessTZCNT(); break;
 
                     case OPCode.UD: ProcessUD(); break;
 

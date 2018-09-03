@@ -44,7 +44,7 @@ namespace CSX64
 
         string_ops,
 
-        BSx,
+        BSx, TZCNT,
 
         UD,
 
