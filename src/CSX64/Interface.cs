@@ -478,6 +478,9 @@ namespace CSX64
 
                     case OPCode.VPU_FCMP: TryProcessVEC_FCMP(); break;
 
+                    case OPCode.VPU_FSQRT: TryProcessVEC_FSQRT(); break;
+                    case OPCode.VPU_FRSQRT: TryProcessVEC_FRSQRT(); break;
+
                     // misc instructions
 
                     case OPCode.DEBUG: // all debugging features

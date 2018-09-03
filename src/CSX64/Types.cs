@@ -81,6 +81,8 @@ namespace CSX64
 
         VPU_FCMP,
 
+        VPU_FSQRT, VPU_FRSQRT,
+
         // misc instructions
 
         DEBUG = 255

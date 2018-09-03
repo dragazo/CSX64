@@ -2199,7 +2199,6 @@ namespace CSX64
             return true;
         }
 
-
         // identical to ProcessUNKNOWN() - added for clarity for UD instruction
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessUD()
@@ -3115,7 +3114,9 @@ namespace CSX64
 
         // -- vpu stuff -- //
 
+        // types used for simd computation handlers
         private delegate bool VPUBinaryDelegate(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index);
+        private delegate bool VPUUnaryDelegate(UInt64 elem_sizecode, out UInt64 res, UInt64 a, int index);
 
         /*
         [5: reg][1: aligned][2: reg_size]   [1: has_mask][1: zmask][1: scalar][1:][2: elem_size][2: mode]   ([count: mask])
@@ -3262,6 +3263,69 @@ namespace CSX64
                     else if (zmask) ZMMRegisters[dest]._uint(elem_sizecode, i, 0);
             }
 
+            return true;
+        }
+        /*
+		[5: dest][1: aligned][2: dest_size]   [1: has_mask][1: zmask][1: scalar][1:][2: elem_size][1:][1: mem]   ([count: mask])
+		mem = 0: [3:][5: src]   dest <- f(src)
+		mem = 1: [address]      dest <- f(M[address])
+		*/
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        bool ProcessVPUUnary(UInt64 elem_size_mask, VPUUnaryDelegate func)
+        {
+            // read settings bytes
+            if (!GetMemAdv(1, out UInt64 s1) || !GetMemAdv(1, out UInt64 s2)) return false;
+            UInt64 dest_sizecode = s1 & 3;
+            UInt64 elem_sizecode = (s2 >> 2) & 3;
+
+            // make sure this element size is allowed
+            if ((Size(elem_sizecode) & elem_size_mask) == 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+            // get the register to work with
+            if (dest_sizecode == 3) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+            if (dest_sizecode != 2 && (s1 & 0x80) != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+            int dest = (int)(s1 >> 3);
+            // get number of elements to process (accounting for scalar flag)
+            int elem_count = (s2 & 0x20) != 0 ? 1 : (int)(Size(dest_sizecode + 4) >> (UInt16)elem_sizecode);
+
+            // get the mask (default of all 1's)
+            UInt64 mask = ~(UInt64)0;
+            if ((s2 & 0x80) != 0 && !GetMemAdv(BitsToBytes((UInt64)elem_count), out mask)) return false;
+            // get the zmask flag
+            bool zmask = (s2 & 0x40) != 0;
+
+            // if src is a register
+            if ((s2 & 1) == 0)
+            {
+                if (!GetMemAdv(1, out UInt64 _src)) return false;
+                if (dest_sizecode != 2 && (_src & 0x10) != 0) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+                int src = (int)(_src & 0x1f);
+
+                for (int i = 0; i < elem_count; ++i, mask >>= 1)
+                    if ((mask & 1) != 0)
+                    {
+                        // hand over to the delegate for processing
+                        if (!func(elem_sizecode, out UInt64 res, ZMMRegisters[src]._uint(elem_sizecode, i), i)) return false;
+                        ZMMRegisters[dest]._uint(elem_sizecode, i, res);
+                    }
+                    else if (zmask) ZMMRegisters[dest]._uint(elem_sizecode, i, 0);
+            }
+            // otherwise src is memory
+            else
+            {
+                if (!GetAddressAdv(out UInt64 m)) return false;
+                // if we're in vector mode and aligned flag is set, make sure address is aligned
+                if (elem_count > 1 && (s1 & 4) != 0 && m % Size(dest_sizecode + 4) != 0) { Terminate(ErrorCode.AlignmentViolation); return false; }
+                for (int i = 0; i < elem_count; ++i, mask >>= 1, m += Size(elem_sizecode))
+                    if ((mask & 1) != 0)
+                    {
+                        if (!GetMemRaw(m, Size(elem_sizecode), out UInt64 res)) return false;
+
+                        // hand over to the delegate for processing
+                        if (!func(elem_sizecode, out res, res, i)) return false;
+                        ZMMRegisters[dest]._uint(elem_sizecode, i, res);
+                    }
+                    else if (zmask) ZMMRegisters[dest]._uint(elem_sizecode, i, 0);
+            }
             return true;
         }
 
@@ -3612,5 +3676,42 @@ namespace CSX64
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
+
+        // these trigger ArithmeticError on negative sqrt - spec doesn't specify explicitly what to do
+        bool __TryProcessVEC_FSQRT(UInt64 elem_sizecode, out UInt64 res, UInt64 a, int index)
+        {
+            if (elem_sizecode == 3)
+            {
+                double f = AsDouble(a);
+                if (f < 0) { Terminate(ErrorCode.ArithmeticError); res = 0; return false; }
+                res = DoubleAsUInt64(Math.Sqrt(f));
+            }
+            else
+            {
+                float f = AsFloat((UInt32)a);
+                if (f < 0) { Terminate(ErrorCode.ArithmeticError); res = 0; return false; }
+                res = FloatAsUInt64((float)Math.Sqrt(f));
+            }
+            return true;
+        }
+        bool __TryProcessVEC_FRSQRT(UInt64 elem_sizecode, out UInt64 res, UInt64 a, int index)
+        {
+            if (elem_sizecode == 3)
+            {
+                double f = AsDouble(a);
+                if (f < 0) { Terminate(ErrorCode.ArithmeticError); res = 0; return false; }
+                res = DoubleAsUInt64(1.0 / Math.Sqrt(f));
+            }
+            else
+            {
+                float f = AsFloat((UInt32)a);
+                if (f < 0) { Terminate(ErrorCode.ArithmeticError); res = 0; return false; }
+                res = FloatAsUInt64(1.0f / (float)Math.Sqrt(f));
+            }
+            return true;
+        }
+
+        bool TryProcessVEC_FSQRT() { return ProcessVPUUnary(12, __TryProcessVEC_FSQRT); }
+        bool TryProcessVEC_FRSQRT() { return ProcessVPUUnary(12, __TryProcessVEC_FRSQRT); }
     }
 }

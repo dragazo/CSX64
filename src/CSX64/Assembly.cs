@@ -3985,6 +3985,52 @@ namespace CSX64
 
                 return true;
             }
+            public bool TryProcessVPUUnary(OPCode op, UInt64 elem_sizecode, bool maskable, bool aligned, bool scalar, bool has_ext_op = false, byte ext_op = 0)
+            {
+                if (args.Length!= 2) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected 2 operands"); return false; }
+
+                // write the op code
+                if (!TryAppendByte((byte)op)) return false;
+                if (has_ext_op) { if (!TryAppendByte(ext_op)) return false; }
+
+                // extract the mask
+                if (!TryExtractVPUMask(ref args[0], out Expr mask, out bool zmask)) return false;
+                // if it had an explicit mask and we were told not to allow that, it's an error
+                if (mask != null && !maskable) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Instruction does not support masking"); return false; }
+
+                // vreg, *
+                if (TryParseVPURegister(args[0], out UInt64 dest, out UInt64 dest_sizecode))
+                {
+                    UInt64 elem_count = scalar ? 1 : Size(dest_sizecode) >> (UInt16)elem_sizecode;
+                    bool mask_present = VPUMaskPresent(mask, elem_count);
+
+                    // vreg, vreg
+                    if (TryParseVPURegister(args[1], out UInt64 src, out UInt64 src_sizecode))
+                    {
+                        if (dest_sizecode != src_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size mismatch"); return false; }
+                        if (!TryAppendVal(1, (dest << 3) | (aligned ? 4 : 0ul) | (dest_sizecode - 4))) return false;
+                        if (!TryAppendVal(1, (mask_present ? 128 : 0ul) | (zmask ? 64 : 0ul) | (scalar ? 32 : 0ul) | (elem_sizecode << 2) | 0)) return false;
+                        if (mask_present && !TryAppendExpr(BitsToBytes(elem_count), mask)) return false;
+                        if (!TryAppendVal(1, src)) return false;
+                    }
+                    // vreg, mem
+                    else if (args[1][args[1].Length - 1] == ']')
+                    {
+                        if (!TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out src_sizecode, out bool src_explicit)) return false;
+                        if (src_explicit && src_sizecode != (scalar ? elem_sizecode : dest_sizecode)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size mismatch"); return false; }
+                        if (!TryAppendVal(1, (dest << 3) | (aligned ? 4 : 0ul) | (dest_sizecode - 4))) return false;
+                        if (!TryAppendVal(1, (mask_present ? 128 : 0ul) | (zmask ? 64 : 0ul) | (scalar ? 32 : 0ul) | (elem_sizecode << 2) | 1)) return false;
+                        if (mask_present && !TryAppendExpr(BitsToBytes(elem_count), mask)) return false;
+                        if (!TryAppendAddress(a, b, ptr_base)) return false;
+                    }
+                    // vreg, imm
+                    else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected vpu register or memory value as second operand"); return false; }
+                }
+                // mem/imm, *
+                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected a vpu register as first operand"); return false; }
+
+                return true;
+            }
 
             public bool TryProcessVPU_FCMP(OPCode op, UInt64 elem_sizecode, bool maskable, bool aligned, bool scalar)
             {
@@ -4871,6 +4917,18 @@ namespace CSX64
                         case "CMPGE_OQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 29)) return args.res; break;
                         case "CMPGT_OQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 30)) return args.res; break;
                         case "CMPTRUE_USSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 31)) return args.res; break;
+
+                        case "SQRTPD": if (!args.TryProcessVPUUnary(OPCode.VPU_FSQRT, 3, true, true, false)) return args.res; break;
+                        case "SQRTPS": if (!args.TryProcessVPUUnary(OPCode.VPU_FSQRT, 2, true, true, false)) return args.res; break;
+
+                        case "SQRTSD": if (!args.TryProcessVPUUnary(OPCode.VPU_FSQRT, 3, false, false, true)) return args.res; break;
+                        case "SQRTSS": if (!args.TryProcessVPUUnary(OPCode.VPU_FSQRT, 2, false, false, true)) return args.res; break;
+
+                        case "RSQRTPD": if (!args.TryProcessVPUUnary(OPCode.VPU_FRSQRT, 3, true, true, false)) return args.res; break;
+                        case "RSQRTPS": if (!args.TryProcessVPUUnary(OPCode.VPU_FRSQRT, 2, true, true, false)) return args.res; break;
+
+                        case "RSQRTSD": if (!args.TryProcessVPUUnary(OPCode.VPU_FRSQRT, 3, false, false, true)) return args.res; break;
+                        case "RSQRTSS": if (!args.TryProcessVPUUnary(OPCode.VPU_FRSQRT, 2, false, false, true)) return args.res; break;
 
                         // misc instructions
 
