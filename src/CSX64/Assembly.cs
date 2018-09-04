@@ -509,15 +509,36 @@ namespace CSX64
                     if (ret == false) return false;
 
                     if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : (Int64)L) / (RF ? AsDouble(R) : (Int64)R)); floating = true; }
-                    else res = (UInt64)((Int64)L / (Int64)R);
+                    else
+                    {
+                        // catch division by zero in integral case (floating-point is ok (inf))
+                        if (R == 0) { err = "divide by zero"; return false; }
+
+                        res = (UInt64)((Int64)L / (Int64)R);
+                    }
                     break;
                 case OPs.Mod:
                     if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
                     if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
                     if (ret == false) return false;
 
-                    if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : (Int64)L) % (RF ? AsDouble(R) : (Int64)R)); floating = true; }
-                    else res = (UInt64)((Int64)L % (Int64)R);
+                    if (LF || RF)
+                    {
+                        double _num = LF ? AsDouble(L) : (Int64)L, _denom = RF ? AsDouble(R) : (Int64)R;
+
+                        // catch division by zero in floating case
+                        if (_denom == 0) { err = "divide by zero"; return false; }
+
+                        res = DoubleAsUInt64(_num % _denom);
+                        floating = true;
+                    }
+                    else
+                    {
+                        // catch division by zero in integral case
+                        if (R == 0) { err = "divide by zero"; return false; }
+
+                        res = (UInt64)((Int64)L % (Int64)R);
+                    }
                     break;
                 case OPs.Add:
                     if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
@@ -4032,6 +4053,17 @@ namespace CSX64
                 return true;
             }
 
+            /// <summary>
+            /// same as TryProcessVPUBinary() except that it forces the 2 arg pathway
+            /// </summary>
+            public bool TryProcessVPUBinary_2arg(OPCode op, UInt64 elem_sizecode, bool maskable, bool aligned, bool scalar, bool has_ext_op = false, byte ext_op = 0)
+            {
+                // ensure we select the 2 arg pathway
+                if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 2 operands"); return false; }
+                // then refer to VPUBinary
+                return TryProcessVPUBinary(op, elem_sizecode, maskable, aligned, scalar, has_ext_op, ext_op);
+            }
+
             public bool TryProcessVPU_FCMP(OPCode op, UInt64 elem_sizecode, bool maskable, bool aligned, bool scalar)
             {
                 // has the 2-3 args + 1 for the comparison predicate
@@ -4917,6 +4949,9 @@ namespace CSX64
                         case "CMPGE_OQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 29)) return args.res; break;
                         case "CMPGT_OQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 30)) return args.res; break;
                         case "CMPTRUE_USSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 31)) return args.res; break;
+
+                        case "COMISD": if (!args.TryProcessVPUBinary_2arg(OPCode.VPU_FCOMI, 3, false, false, true)) return args.res; break;
+                        case "COMISS": if (!args.TryProcessVPUBinary_2arg(OPCode.VPU_FCOMI, 2, false, false, true)) return args.res; break;
 
                         case "SQRTPD": if (!args.TryProcessVPUUnary(OPCode.VPU_FSQRT, 3, true, true, false)) return args.res; break;
                         case "SQRTPS": if (!args.TryProcessVPUUnary(OPCode.VPU_FSQRT, 2, true, true, false)) return args.res; break;

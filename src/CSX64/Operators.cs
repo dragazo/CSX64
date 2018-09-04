@@ -3677,6 +3677,54 @@ namespace CSX64
             }
         }
 
+        // in order to avoid creating another format just for this, will use VPUBinary.
+        // the result will be src1, thus creating the desired no-modification behavior so long as dest == src1.
+        // each pair of elements will update the flags in turn, thus the total comparison is on the last pair processed - standard behavior requires it be scalar operation.
+        // the assembler will ensure all of this is the case.
+        bool __TryProcessVEC_FCOMI(UInt64 elem_sizecode, out UInt64 res, UInt64 _a, UInt64 _b, int index)
+        {
+            // temporaries for cmp results
+            bool x, y, z;
+
+            if (elem_sizecode == 3)
+            {
+                double a = AsDouble(_a), b = AsDouble(_b);
+
+                if (a > b) { x = false; y = false; z = false; }
+                else if (a < b) { x = false; y = false; z = true; }
+                else if (a == b) { x = true; y = false; z = false; }
+                // otherwise is unordered
+                else { x = true; y = true; z = true; }
+            }
+            else
+            {
+                double a = AsFloat((UInt32)_a), b = AsFloat((UInt32)_b);
+
+                if (a > b) { x = false; y = false; z = false; }
+                else if (a < b) { x = false; y = false; z = true; }
+                else if (a == b) { x = true; y = false; z = false; }
+                // otherwise is unordered
+                else { x = true; y = true; z = true; }
+            }
+
+            // update comparison flags
+            ZF = x;
+            PF = y;
+            CF = z;
+
+            // clear OF, AF, and SF
+            OF = false;
+            AF = false;
+            SF = false;
+
+            // result is src1 (see explanation above)
+            res = _a;
+
+            return true;
+        }
+
+        bool TryProcessVEC_FCOMI() { return ProcessVPUBinary(12, __TryProcessVEC_FCOMI); }
+
         // these trigger ArithmeticError on negative sqrt - spec doesn't specify explicitly what to do
         bool __TryProcessVEC_FSQRT(UInt64 elem_sizecode, out UInt64 res, UInt64 a, int index)
         {

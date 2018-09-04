@@ -477,6 +477,7 @@ namespace CSX64
                     case OPCode.VPU_AVG: TryProcessVEC_AVG(); break;
 
                     case OPCode.VPU_FCMP: TryProcessVEC_FCMP(); break;
+                    case OPCode.VPU_FCOMI: TryProcessVEC_FCOMI(); break;
 
                     case OPCode.VPU_FSQRT: TryProcessVEC_FSQRT(); break;
                     case OPCode.VPU_FRSQRT: TryProcessVEC_FRSQRT(); break;

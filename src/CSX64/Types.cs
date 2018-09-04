@@ -79,7 +79,7 @@ namespace CSX64
         VPU_FADDSUB,
         VPU_AVG,
 
-        VPU_FCMP,
+        VPU_FCMP, VPU_FCOMI,
 
         VPU_FSQRT, VPU_FRSQRT,
 
