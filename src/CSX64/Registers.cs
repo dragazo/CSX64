@@ -13,6 +13,7 @@ namespace CSX64
         protected UInt16 FPU_control, FPU_status, FPU_tag;
 
         protected ZMMRegister[] ZMMRegisters = new ZMMRegister[32];
+        public UInt32 _MXCSR;
 
         // ------------------------------------
 
@@ -281,5 +282,23 @@ namespace CSX64
         public ZMMRegister ZMM29 { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => ZMMRegisters[29]; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => ZMMRegisters[29] = value; }
         public ZMMRegister ZMM30 { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => ZMMRegisters[30]; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => ZMMRegisters[30] = value; }
         public ZMMRegister ZMM31 { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => ZMMRegisters[31]; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => ZMMRegisters[31] = value; }
+
+        public UInt32 MXCSR { get => _MXCSR; set => _MXCSR = value; }
+
+        public bool MXCSR_IE { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (_MXCSR & 0x0001u) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => _MXCSR = (_MXCSR & ~0x0001u) | (value ? 0x0001u : 0); }
+        public bool MXCSR_DE { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (_MXCSR & 0x0002u) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => _MXCSR = (_MXCSR & ~0x0002u) | (value ? 0x0002u : 0); }
+        public bool MXCSR_ZE { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (_MXCSR & 0x0004u) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => _MXCSR = (_MXCSR & ~0x0004u) | (value ? 0x0004u : 0); }
+        public bool MXCSR_OE { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (_MXCSR & 0x0008u) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => _MXCSR = (_MXCSR & ~0x0008u) | (value ? 0x0008u : 0); }
+        public bool MXCSR_UE { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (_MXCSR & 0x0010u) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => _MXCSR = (_MXCSR & ~0x0010u) | (value ? 0x0010u : 0); }
+        public bool MXCSR_PE { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (_MXCSR & 0x0020u) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => _MXCSR = (_MXCSR & ~0x0020u) | (value ? 0x0020u : 0); }
+        public bool MXCSR_DAZ { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (_MXCSR & 0x0040u) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => _MXCSR = (_MXCSR & ~0x0040u) | (value ? 0x0040u : 0); }
+        public bool MXCSR_IM { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (_MXCSR & 0x0080u) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => _MXCSR = (_MXCSR & ~0x0080u) | (value ? 0x0080u : 0); }
+        public bool MXCSR_DM { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (_MXCSR & 0x0100u) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => _MXCSR = (_MXCSR & ~0x0100u) | (value ? 0x0100u : 0); }
+        public bool MXCSR_ZM { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (_MXCSR & 0x0200u) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => _MXCSR = (_MXCSR & ~0x0200u) | (value ? 0x0200u : 0); }
+        public bool MXCSR_OM { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (_MXCSR & 0x0400u) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => _MXCSR = (_MXCSR & ~0x0400u) | (value ? 0x0400u : 0); }
+        public bool MXCSR_UM { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (_MXCSR & 0x0800u) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => _MXCSR = (_MXCSR & ~0x0800u) | (value ? 0x0800u : 0); }
+        public bool MXCSR_PM { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (_MXCSR & 0x1000u) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => _MXCSR = (_MXCSR & ~0x1000u) | (value ? 0x1000u : 0); }
+        public byte MXCSR_RC { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (byte)((_MXCSR >> 13) & 3u); [MethodImpl(MethodImplOptions.AggressiveInlining)] set => _MXCSR = (_MXCSR & ~0x6000u) | ((value & 3u) << 13); }
+        public bool MXCSR_FTZ { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => (_MXCSR & 0x8000u) != 0; [MethodImpl(MethodImplOptions.AggressiveInlining)] set => _MXCSR = (_MXCSR & ~0x8000u) | (value ? 0x8000u : 0); }
     }
 }

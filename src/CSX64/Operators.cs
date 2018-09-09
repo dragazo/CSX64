@@ -2234,11 +2234,11 @@ namespace CSX64
         }
 
         /// <summary>
-        /// Performs a round trip on the value based on the current state of the <see cref="FPU_RC"/> flag
+        /// Performs a round trip on the value based on the specified rounding mode (as per Intel x87)
         /// </summary>
         /// <param name="val">the value to round</param>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private double PerformRoundTrip(double val)
+        private double PerformRoundTrip(double val, UInt32 rc)
         {
             switch (FPU_RC)
             {
@@ -2248,7 +2248,7 @@ namespace CSX64
                 case 3: return Math.Truncate(val);
 
                 // because compiler is stupid
-                default: throw new ArgumentException("this is physically impossible");
+                default: throw new ArgumentException("RC out of range");
             }
         }
 
@@ -2483,9 +2483,9 @@ namespace CSX64
                     {
                         case 2: case 3: if (!SetMemRaw(m, 4, FloatAsUInt64((float)ST(0)))) return false; break;
                         case 4: case 5: if (!SetMemRaw(m, 8, DoubleAsUInt64(ST(0)))) return false; break;
-                        case 6: case 7: if (!SetMemRaw(m, 2, (UInt64)(Int64)PerformRoundTrip(ST(0)))) return false; break;
-                        case 8: case 9: if (!SetMemRaw(m, 4, (UInt64)(Int64)PerformRoundTrip(ST(0)))) return false; break;
-                        case 10: if (!SetMemRaw(m, 8, (UInt64)(Int64)PerformRoundTrip(ST(0)))) return false; break;
+                        case 6: case 7: if (!SetMemRaw(m, 2, (UInt64)(Int64)PerformRoundTrip(ST(0), FPU_RC))) return false; break;
+                        case 8: case 9: if (!SetMemRaw(m, 4, (UInt64)(Int64)PerformRoundTrip(ST(0), FPU_RC))) return false; break;
+                        case 10: if (!SetMemRaw(m, 8, (UInt64)(Int64)PerformRoundTrip(ST(0), FPU_RC))) return false; break;
                         case 11: if (!SetMemRaw(m, 2, (UInt64)(Int64)ST(0))) return false; break;
                         case 12: if (!SetMemRaw(m, 4, (UInt64)(Int64)ST(0))) return false; break;
                         case 13: if (!SetMemRaw(m, 8, (UInt64)(Int64)ST(0))) return false; break;
@@ -2754,7 +2754,7 @@ namespace CSX64
             if (ST_Tag(0) == FPU_Tag_empty) { Terminate(ErrorCode.FPUAccessViolation); return false; }
 
             double val = ST(0);
-            double res = PerformRoundTrip(val);
+            double res = PerformRoundTrip(val, FPU_RC);
 
             ST(0, res);
 
@@ -3117,6 +3117,7 @@ namespace CSX64
         // types used for simd computation handlers
         private delegate bool VPUBinaryDelegate(UInt64 elem_sizecode, out UInt64 res, UInt64 a, UInt64 b, int index);
         private delegate bool VPUUnaryDelegate(UInt64 elem_sizecode, out UInt64 res, UInt64 a, int index);
+        private delegate bool VPUCVTDelegate(out UInt64 res, UInt64 a);
 
         /*
         [5: reg][1: aligned][2: reg_size]   [1: has_mask][1: zmask][1: scalar][1:][2: elem_size][2: mode]   ([count: mask])
@@ -3326,6 +3327,164 @@ namespace CSX64
                     }
                     else if (zmask) ZMMRegisters[dest]._uint(elem_sizecode, i, 0);
             }
+            return true;
+        }
+
+        // PACKED CVT FORMAT NOT YET COMPLETED - DO NOT USE
+        /*
+		[5: dest][1: mem][1: has_mask][1: zmask]   ([count: mask])
+		mem = 0: [3:][5: src]   dest <- f(src)
+		mem = 1: [address]      dest <- f(M[address])
+		*/
+        bool ProcessVPUCVT_packed(UInt64 elem_count, UInt64 to_elem_sizecode, UInt64 from_elem_sizecode, VPUCVTDelegate func)
+        {
+            // read settings byte
+            if (!GetMemAdv(1, out UInt64 s)) return false;
+            UInt64 dest = s >> 3;
+
+            // get the mask (default of all 1's)
+            UInt64 mask = 0xffffffffffffffff;
+            if ((s & 2) != 0 && !GetMemAdv(BitsToBytes(elem_count), out mask)) return false;
+            // get the zmask flag
+            bool zmask = (s & 1) != 0;
+
+            // because we may be changing sizes, and writing to the source register, we need to do our work in a temporary buffer
+            ZMMRegister temp_dest;
+
+            // if src is a register
+            if ((s & 4) == 0)
+            {
+                UInt64 src, res;
+                if (!GetMemAdv(1, out src)) return false;
+                src &= 0x1f;
+
+                for (UInt64 i = 0; i < elem_count; ++i, mask >>= 1)
+                {
+                    if ((mask & 1) != 0)
+                    {
+                        // hand over to the delegate for processing
+                        if (!func(out res, ZMMRegisters[src]._uint(from_elem_sizecode, (int)i))) return false;
+                        temp_dest._uint(to_elem_sizecode, (int)i, res);
+                    }
+                    else if (zmask) temp_dest._uint(to_elem_sizecode, (int)i, 0);
+                }
+            }
+            // otherwise src is memory
+            else
+            {
+                UInt64 m, res;
+                if (!GetAddressAdv(out m)) return false;
+                // if we're in vector mode, make sure address is aligned
+                if (m % (elem_count << (ushort)from_elem_sizecode) != 0) { Terminate(ErrorCode.AlignmentViolation); return false; }
+
+                for (UInt64 i = 0; i < elem_count; ++i, mask >>= 1, m += Size(from_elem_sizecode))
+                {
+                    if ((mask & 1) != 0)
+                    {
+                        if (!GetMemRaw(m, Size(from_elem_sizecode), out res)) return false;
+
+                        // hand over to the delegate for processing
+                        if (!func(out res, res)) return false;
+                        temp_dest._uint(to_elem_sizecode, (int)i, res);
+                    }
+                    else if (zmask) temp_dest._uint(to_elem_sizecode, (int)i, 0);
+                }
+            }
+
+            // store resulting temporary back to the correct register
+            ZMMRegisters[dest] = temp_dest;
+
+            return true;
+        }
+        /*
+		[4: dest][4: src]
+		*/
+        bool ProcessVPUCVT_scalar_xmm_xmm(UInt64 to_elem_sizecode, UInt64 from_elem_sizecode, VPUCVTDelegate func)
+        {
+            // read the settings byte
+            UInt64 s, temp;
+            if (!GetMemAdv(1, out s)) return false;
+
+            // perform the conversion
+            if (!func(out temp, ZMMRegisters[s & 15]._uint(from_elem_sizecode, 0))) return false;
+
+            // store the result
+            ZMMRegisters[s >> 4]._uint(to_elem_sizecode, 0, temp);
+
+            return true;
+        }
+        /*
+		[4: dest][4: src]
+		*/
+        bool ProcessVPUCVT_scalar_xmm_reg(UInt64 to_elem_sizecode, UInt64 from_elem_sizecode, VPUCVTDelegate func)
+        {
+            // read the settings byte
+            UInt64 s, temp;
+            if (!GetMemAdv(1, out s)) return false;
+
+            // perform the conversion
+            if (!func(out temp, CPURegisters[s & 15][from_elem_sizecode])) return false;
+
+            // store the result
+            ZMMRegisters[s >> 4]._uint(to_elem_sizecode, 0, temp);
+
+            return true;
+        }
+        /*
+		[4: dest][4:]   [address]
+		*/
+        bool ProcessVPUCVT_scalar_xmm_mem(UInt64 to_elem_sizecode, UInt64 from_elem_sizecode, VPUCVTDelegate func)
+        {
+            // read the settings byte
+            UInt64 s, temp;
+            if (!GetMemAdv(1, out s)) return false;
+
+            // get value to convert in temp
+            if (!GetAddressAdv(out temp) || !GetMemRaw(temp, Size(from_elem_sizecode), out temp)) return false;
+
+            // perform the conversion
+            if (!func(out temp, temp)) return false;
+
+            // store the result
+            ZMMRegisters[s >> 4]._uint(to_elem_sizecode, 0, temp);
+
+            return true;
+        }
+        /*
+		[4: dest][4: src]
+		*/
+        bool ProcessVPUCVT_scalar_reg_xmm(UInt64 to_elem_sizecode, UInt64 from_elem_sizecode, VPUCVTDelegate func)
+        {
+            // read the settings byte
+            UInt64 s, temp;
+            if (!GetMemAdv(1, out s)) return false;
+
+            // perform the conversion
+            if (!func(out temp, ZMMRegisters[s & 15]._uint(from_elem_sizecode, 0))) return false;
+
+            // store the result
+            CPURegisters[s >> 4][to_elem_sizecode] = temp;
+
+            return true;
+        }
+        /*
+		[4: dest][4:]   [address]
+		*/
+        bool ProcessVPUCVT_scalar_reg_mem(UInt64 to_elem_sizecode, UInt64 from_elem_sizecode, VPUCVTDelegate func)
+        {
+            // read the settings byte
+            UInt64 s, temp;
+            if (!GetMemAdv(1, out s)) return false;
+
+            // get value to convert in temp
+            if (!GetAddressAdv(out temp) || !GetMemRaw(temp, Size(from_elem_sizecode), out temp)) return false;
+
+            // perform the conversion
+            if (!func(out temp, temp)) return false;
+
+            // store the result
+            CPURegisters[s >> 4][to_elem_sizecode] = temp;
+
             return true;
         }
 
@@ -3761,5 +3920,170 @@ namespace CSX64
 
         bool TryProcessVEC_FSQRT() { return ProcessVPUUnary(12, __TryProcessVEC_FSQRT); }
         bool TryProcessVEC_FRSQRT() { return ProcessVPUUnary(12, __TryProcessVEC_FRSQRT); }
+
+        // VPUCVTDelegates for conversions
+        bool __double_to_i32(out UInt64 res, UInt64 val)
+        {
+            res = (UInt32)(Int32)PerformRoundTrip(AsDouble(val), MXCSR_RC);
+            return true;
+        }
+        bool __single_to_i32(out UInt64 res, UInt64 val)
+        {
+            res = (UInt32)(Int32)PerformRoundTrip(AsFloat((UInt32)val), MXCSR_RC);
+            return true;
+        }
+        bool __double_to_i64(out UInt64 res, UInt64 val)
+        {
+            res = (UInt64)(Int64)PerformRoundTrip(AsDouble(val), MXCSR_RC);
+            return true;
+        }
+        bool __single_to_i64(out UInt64 res, UInt64 val)
+        {
+            res = (UInt64)(Int64)PerformRoundTrip(AsFloat((UInt32)val), MXCSR_RC);
+            return true;
+        }
+
+        bool __double_to_ti32(out UInt64 res, UInt64 val)
+        {
+            res = (UInt32)(Int32)AsDouble(val);
+            return true;
+        }
+        bool __single_to_ti32(out UInt64 res, UInt64 val)
+        {
+            res = (UInt32)(Int32)AsFloat((UInt32)val);
+            return true;
+        }
+        bool __double_to_ti64(out UInt64 res, UInt64 val)
+        {
+            res = (UInt64)(Int64)AsDouble(val);
+            return true;
+        }
+        bool __single_to_ti64(out UInt64 res, UInt64 val)
+        {
+            res = (UInt64)(Int64)AsFloat((UInt32)val);
+            return true;
+        }
+
+        bool __i32_to_double(out UInt64 res, UInt64 val)
+        {
+            res = DoubleAsUInt64((double)(Int32)val);
+            return true;
+        }
+        bool __i32_to_single(out UInt64 res, UInt64 val)
+        {
+            res = FloatAsUInt64((float)(Int32)val);
+            return true;
+        }
+
+        bool __i64_to_double(out UInt64 res, UInt64 val)
+        {
+            res = DoubleAsUInt64((double)(Int64)val);
+            return true;
+        }
+        bool __i64_to_single(out UInt64 res, UInt64 val)
+        {
+            res = FloatAsUInt64((float)(Int64)val);
+            return true;
+        }
+
+        bool __double_to_single(out UInt64 res, UInt64 val)
+        {
+            res = FloatAsUInt64((float)AsDouble(val));
+            return true;
+        }
+        bool __single_to_double(out UInt64 res, UInt64 val)
+        {
+            res = DoubleAsUInt64((double)AsFloat((UInt32)val));
+            return true;
+        }
+
+        /*
+		[8: mode]
+		mode =  0: CVTSD2SI r32, xmm
+		mode =  1: CVTSD2SI r32, m32
+		mode =  2: CVTSD2SI r64, xmm
+		mode =  3: CVTSD2SI r64, m64
+
+		mode =  4: CVTSS2SI r32, xmm
+		mode =  5: CVTSS2SI r32, m32
+		mode =  6: CVTSS2SI r64, xmm
+		mode =  7: CVTSS2SI r64, m64
+
+		mode =  8: CVTTSD2SI r32, xmm
+		mode =  9: CVTTSD2SI r32, m32
+		mode = 10: CVTTSD2SI r64, xmm
+		mode = 11: CVTTSD2SI r64, m64
+
+		mode = 12: CVTTSS2SI r32, xmm
+		mode = 13: CVTTSS2SI r32, m32
+		mode = 14: CVTTSS2SI r64, xmm
+		mode = 15: CVTTSS2SI r64, m64
+
+		mode = 16: CVTSI2SD xmm, r32
+		mode = 17: CVTSI2SD xmm, m32
+		mode = 18: CVTSI2SD xmm, r64
+		mode = 19: CVTSI2SD xmm, m64
+
+		mode = 20: CVTSI2SS xmm, r32
+		mode = 21: CVTSI2SS xmm, m32
+		mode = 22: CVTSI2SS xmm, r64
+		mode = 23: CVTSI2SS xmm, m64
+
+		mode = 24: CVTSD2SS xmm, xmm
+		mode = 25: CVTSD2SS xmm, m64
+
+		mode = 26: CVTSS2SD xmm, xmm
+		mode = 27: CVTSS2SD xmm, m32
+
+		else UND
+		*/
+        bool TryProcessVEC_CVT()
+        {
+            // read mode byte
+            UInt64 mode;
+            if (!GetMemAdv(1, out mode)) return false;
+
+            // route to handlers
+            switch (mode)
+            {
+                case 0: return ProcessVPUCVT_scalar_reg_xmm(2, 3, __double_to_i32);
+                case 1: return ProcessVPUCVT_scalar_reg_mem(2, 3, __double_to_i32);
+                case 2: return ProcessVPUCVT_scalar_reg_xmm(3, 3, __double_to_i64);
+                case 3: return ProcessVPUCVT_scalar_reg_mem(3, 3, __double_to_i64);
+
+                case 4: return ProcessVPUCVT_scalar_reg_xmm(2, 2, __single_to_i32);
+                case 5: return ProcessVPUCVT_scalar_reg_mem(2, 2, __single_to_i32);
+                case 6: return ProcessVPUCVT_scalar_reg_xmm(3, 2, __single_to_i64);
+                case 7: return ProcessVPUCVT_scalar_reg_mem(3, 2, __single_to_i64);
+
+                case 8: return ProcessVPUCVT_scalar_reg_xmm(2, 3, __double_to_ti32);
+                case 9: return ProcessVPUCVT_scalar_reg_mem(2, 3, __double_to_ti32);
+                case 10: return ProcessVPUCVT_scalar_reg_xmm(3, 3, __double_to_ti64);
+                case 11: return ProcessVPUCVT_scalar_reg_mem(3, 3, __double_to_ti64);
+
+                case 12: return ProcessVPUCVT_scalar_reg_xmm(2, 2, __single_to_ti32);
+                case 13: return ProcessVPUCVT_scalar_reg_mem(2, 2, __single_to_ti32);
+                case 14: return ProcessVPUCVT_scalar_reg_xmm(3, 2, __single_to_ti64);
+                case 15: return ProcessVPUCVT_scalar_reg_mem(3, 2, __single_to_ti64);
+
+                case 16: return ProcessVPUCVT_scalar_xmm_reg(3, 2, __i32_to_double);
+                case 17: return ProcessVPUCVT_scalar_xmm_mem(3, 2, __i32_to_double);
+                case 18: return ProcessVPUCVT_scalar_xmm_reg(3, 3, __i64_to_double);
+                case 19: return ProcessVPUCVT_scalar_xmm_mem(3, 3, __i64_to_double);
+
+                case 20: return ProcessVPUCVT_scalar_xmm_reg(2, 2, __i32_to_single);
+                case 21: return ProcessVPUCVT_scalar_xmm_mem(2, 2, __i32_to_single);
+                case 22: return ProcessVPUCVT_scalar_xmm_reg(2, 3, __i64_to_single);
+                case 23: return ProcessVPUCVT_scalar_xmm_mem(2, 3, __i64_to_single);
+
+                case 24: return ProcessVPUCVT_scalar_xmm_xmm(2, 3, __double_to_single);
+                case 25: return ProcessVPUCVT_scalar_xmm_mem(2, 3, __double_to_single);
+
+                case 26: return ProcessVPUCVT_scalar_xmm_xmm(3, 2, __single_to_double);
+                case 27: return ProcessVPUCVT_scalar_xmm_mem(3, 2, __single_to_double);
+
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
+            }
+        }
     }
 }
