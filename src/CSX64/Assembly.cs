@@ -4965,6 +4965,9 @@ namespace CSX64
                         case "RSQRTSD": if (!args.TryProcessVPUUnary(OPCode.VPU_FRSQRT, 3, false, false, true)) return args.res; break;
                         case "RSQRTSS": if (!args.TryProcessVPUUnary(OPCode.VPU_FRSQRT, 2, false, false, true)) return args.res; break;
 
+                        case "STMXCSR": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 4, 2)) return args.res; break;
+                        case "LDMXCSR": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 5, 2)) return args.res; break;
+
                         // misc instructions
 
                         case "DEBUG_CPU": if (!args.TryProcessNoArgOp(OPCode.DEBUG, true, 0)) return args.res; break;

@@ -2343,6 +2343,8 @@ namespace CSX64
             mode = 1: FSTSW
             mode = 2: FSTCW
             mode = 3: FLDCW
+            mode = 4: STMXCSR
+		    mode = 5: LDMXCSR
             else UND
         */
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -2367,6 +2369,11 @@ namespace CSX64
                 case 3:
                     if (!GetMemRaw(m, 2, out m)) return false;
                     FPU_control = (UInt16)m;
+                    return true;
+                case 4: return SetMemRaw(4, m, _MXCSR);
+                case 5:
+                    if (!GetMemRaw(4, m, out m)) return false;
+                    _MXCSR = (_MXCSR & 0xffff0000) | (UInt16)m; // make sure user can't modify the upper 16 reserved bits
                     return true;
 
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
