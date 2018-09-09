@@ -178,6 +178,10 @@ namespace CSX64
     {
         private fixed UInt64 data[8];
 
+        // -- fill utilities -- //
+
+        public void Clear() { fixed (UInt64* ptr = data) ptr[0] = ptr[1] = ptr[2] = ptr[3] = ptr[4] = ptr[5] = ptr[6] = ptr[7] = 0; }
+
         // -- index access utilities -- //
 
         public ref UInt64 uint64(int index) { fixed (UInt64* ptr = data) return ref ((UInt64*)ptr)[index]; }

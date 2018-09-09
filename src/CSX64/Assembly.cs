@@ -4227,6 +4227,218 @@ namespace CSX64
                 else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected xmm register or memory value as second operand"); return false; }
                 return true;
             }
+
+            private bool __TryProcessVPUCVT_packed_formatter_reg(OPCode op, byte mode, UInt64 elem_count, UInt64 dest, Expr mask, bool zmask, UInt64 src)
+            {
+                bool mask_present = VPUMaskPresent(mask, elem_count);
+
+                if (!TryAppendByte((byte)op)) return false;
+                if (!TryAppendByte(mode)) return false;
+                if (!TryAppendByte((byte)((dest << 3) | (0ul) | (mask_present ? 2 : 0ul) | (zmask ? 1 : 0ul)))) return false;
+                if (mask_present && !TryAppendExpr(BitsToBytes(elem_count), mask)) return false;
+                if (!TryAppendByte((byte)src)) return false;
+
+                return true;
+            }
+            private bool __TryProcessVPUCVT_packed_formatter_mem(OPCode op, byte mode, UInt64 elem_count, UInt64 dest, Expr mask, bool zmask, UInt64 a, UInt64 b, Expr ptr_base)
+            {
+                bool mask_present = VPUMaskPresent(mask, elem_count);
+                if (!TryAppendByte((byte)op)) return false;
+                if (!TryAppendByte(mode)) return false;
+                if (!TryAppendByte((byte)((dest << 3) | (4ul) | (mask_present ? 2 : 0ul) | (zmask ? 1 : 0ul)))) return false;
+                if (mask_present && !TryAppendExpr(BitsToBytes(elem_count), mask)) return false;
+                if (!TryAppendAddress(a, b, ptr_base)) return false;
+
+                return true;
+            }
+
+            public bool TryProcessVPUCVT_packed_f2i(OPCode op, bool trunc, bool single)
+            {
+                if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 2 operands"); return false; }
+
+                byte mode = (byte)(trunc ? 34 : 28); // decoded vpucvt mode
+                if (single) mode += 3;
+
+                // extract the mask
+                if (!TryExtractVPUMask(ref args[0], out Expr mask, out bool zmask)) return false;
+
+                // dest must be vpu register
+                if (!TryParseVPURegister(args[0], out UInt64 dest, out UInt64 dest_sizecode)) return false;
+
+                // if src is a vpu register
+                if (TryParseVPURegister(args[1], out UInt64 src, out UInt64 src_sizecode))
+                {
+                    // validate operand sizes
+                    if (dest_sizecode != (single ? src_sizecode : src_sizecode == 4 ? 4 : src_sizecode - 1)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified operand size combination not supported"); return false; }
+                    
+                    // decode size and get number of elements
+                    mode += (byte)(src_sizecode - 4);
+                    UInt64 elem_count = (single ? 4 : 2ul) << (ushort)(src_sizecode - 4);
+
+                    // write the data
+                    if (!__TryProcessVPUCVT_packed_formatter_reg(op, mode, elem_count, dest, mask, zmask, src)) return false;
+                }
+                // if src is mem
+                else if (args[1][args[1].Length - 1] == ']')
+                {
+                    if (!TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out src_sizecode, out bool src_explicit)) return false;
+
+                    // validate operand sizes
+                    if (src_explicit && dest_sizecode != (single ? src_sizecode : src_sizecode - 1)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified operand size combination not supported"); return false; }
+                    
+                    // decode size and get number of elements
+                    UInt64 elem_count;
+                    // single is converting to same size, so we can use dest_sz instead
+                    if (single)
+                    {
+                        mode += (byte)(dest_sizecode - 4);
+                        elem_count = 4ul << (ushort)(dest_sizecode - 4);
+                    }
+                    // otherwise we can't tell 2 vs 4 doubles since they both use xmm dest - we need explicit source size
+                    else if (src_explicit)
+                    {
+                        mode += (byte)(src_sizecode - 4);
+                        elem_count = 2ul << (ushort)(src_sizecode - 4);
+                    }
+                    // however, if dest is ymm, we know source is zmm
+                    else if (dest_sizecode == 5)
+                    {
+                        mode += 2;
+                        elem_count = 8;
+                    }
+                    else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce operand size"); return false; }
+
+                    // write the data
+                    if (!__TryProcessVPUCVT_packed_formatter_mem(op, mode, elem_count, dest, mask, zmask, a, b, ptr_base)) return false;
+                }
+                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected a VPU register or memory value as second operand"); return false; }
+
+                return true;
+            }
+            public bool TryProcessVPUCVT_packed_i2f(OPCode op, bool single)
+            {
+                if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 2 operands"); return false; }
+
+                byte mode = (byte)(single ? 43 : 40); // decoded vpucvt mode
+
+                // extract the mask
+                if (!TryExtractVPUMask(ref args[0], out Expr mask, out bool zmask)) return false;
+
+                // dest must be vpu register
+                if (!TryParseVPURegister(args[0], out UInt64 dest, out UInt64 dest_sizecode)) return false;
+
+                // if src is a vpu register
+                if (TryParseVPURegister(args[1], out UInt64 src, out UInt64 src_sizecode))
+                {
+                    // validate operand sizes
+                    if (src_sizecode != (single ? dest_sizecode : dest_sizecode == 4 ? 4 : dest_sizecode - 1)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified operand size combination not supported"); return false; }
+                    
+                    // decode size and get number of elements
+                    mode += (byte)(dest_sizecode - 4);
+                    UInt64 elem_count = (single ? 4 : 2ul) << (ushort)(dest_sizecode - 4);
+
+                    // write the data
+                    if (!__TryProcessVPUCVT_packed_formatter_reg(op, mode, elem_count, dest, mask, zmask, src)) return false;
+                }
+                // if src is mem
+                else if (args[1][args[1].Length - 1] == ']')
+                {
+                    if (!TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out src_sizecode, out bool src_explicit)) return false;
+
+                    // validate operand sizes
+                    if (src_explicit && src_sizecode != (single ? dest_sizecode : dest_sizecode - 1)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified operand size combination not supported"); return false; }
+                    
+                    // decode size and get number of elements
+                    mode += (byte)(dest_sizecode - 4);
+                    UInt64 elem_count = (single ? 4 : 2ul) << (ushort)(dest_sizecode - 4);
+                    
+                    // write the data
+                    if (!__TryProcessVPUCVT_packed_formatter_mem(op, mode, elem_count, dest, mask, zmask, a, b, ptr_base)) return false;
+                }
+                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected a VPU register or memory value as second operand"); return false; }
+
+                return true;
+            }
+            public bool TryProcessVPUCVT_packed_f2f(OPCode op, bool extend)
+            {
+                if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 2 operands"); return false; }
+
+                byte mode = (byte)(extend ? 49 : 46); // decoded vpucvt mode
+
+                // extract the mask
+                if (!TryExtractVPUMask(ref args[0], out Expr mask, out bool zmask)) return false;
+
+                // dest must be vpu register
+                if (!TryParseVPURegister(args[0], out UInt64 dest, out UInt64 dest_sizecode)) return false;
+
+                // if src is a vpu register
+                if (TryParseVPURegister(args[1], out UInt64 src, out UInt64 src_sizecode))
+                {
+                    UInt64 elem_count;
+                    if (extend)
+                    {
+                        // validate operand sizes
+                        if (src_sizecode != (dest_sizecode == 4 ? 4 : dest_sizecode - 1)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified operand size combination not supported"); return false; }
+                        
+                        // decode size and get number of elements
+                        mode += (byte)(dest_sizecode - 4);
+                        elem_count = 2ul << (ushort)(dest_sizecode - 4);
+                    }
+                    else
+                    {
+                        // validate operand sizes
+                        if (dest_sizecode != (src_sizecode == 4 ? 4 : src_sizecode - 1)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified operand size combination not supported"); return false; }
+                        
+                        // decode size and get number of elements
+                        mode += (byte)(src_sizecode - 4);
+                        elem_count = 2ul << (ushort)(src_sizecode - 4);
+                    }
+
+                    // write the data
+                    if (!__TryProcessVPUCVT_packed_formatter_reg(op, mode, elem_count, dest, mask, zmask, src)) return false;
+                }
+                // if src is mem
+                else if (args[1][args[1].Length - 1] == ']')
+                {
+                    if (!TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out src_sizecode, out bool src_explicit)) return false;
+
+                    UInt64 elem_count;
+                    if (extend)
+                    {
+                        // validate operand sizes
+                        if (src_explicit && src_sizecode != dest_sizecode - 1) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified operand size combination not supported"); return false; }
+                        
+                        // decode size and get number of elements
+                        mode += (byte)(dest_sizecode - 4);
+                        elem_count = 2ul << (ushort)(dest_sizecode - 4);
+                    }
+                    else
+                    {
+                        // validate operand sizes
+                        if (src_explicit && dest_sizecode != src_sizecode - 1) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified operand size combination not supported"); return false; }
+                        
+                        // we can't tell 2 vs 4 elements since they both use xmm dest - we need explicit source size
+                        if (src_explicit)
+                        {
+                            mode += (byte)(src_sizecode - 4);
+                            elem_count = 2ul << (ushort)(src_sizecode - 4);
+                        }
+                        // however, if dest is ymm, we know source is zmm
+                        else if (dest_sizecode == 5)
+                        {
+                            mode += 2;
+                            elem_count = 8;
+                        }
+                        else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce operand size"); return false; }
+                    }
+
+                    // write the data
+                    if (!__TryProcessVPUCVT_packed_formatter_mem(op, mode, elem_count, dest, mask, zmask, a, b, ptr_base)) return false;
+                }
+                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected a VPU register or memory value as second operand"); return false; }
+
+                return true;
+            }
         }
 
         /// <summary>
@@ -5123,6 +5335,18 @@ namespace CSX64
 
                         case "CVTSD2SS": if (!args.TryProcessVPUCVT_scalar_f2f(OPCode.VPU_CVT, false)) return args.res; break;
                         case "CVTSS2SD": if (!args.TryProcessVPUCVT_scalar_f2f(OPCode.VPU_CVT, true)) return args.res; break;
+
+                        case "CVTPD2DQ": if (!args.TryProcessVPUCVT_packed_f2i(OPCode.VPU_CVT, false, false)) return args.res; break;
+                        case "CVTPS2DQ": if (!args.TryProcessVPUCVT_packed_f2i(OPCode.VPU_CVT, false, true)) return args.res; break;
+                        case "CVTTPD2DQ": if (!args.TryProcessVPUCVT_packed_f2i(OPCode.VPU_CVT, true, false)) return args.res; break;
+                        case "CVTTPS2DQ": if (!args.TryProcessVPUCVT_packed_f2i(OPCode.VPU_CVT, true, true)) return args.res; break;
+
+                        case "CVTDQ2PD": if (!args.TryProcessVPUCVT_packed_i2f(OPCode.VPU_CVT, false)) return args.res; break;
+                        case "CVTDQ2PS": if (!args.TryProcessVPUCVT_packed_i2f(OPCode.VPU_CVT, true)) return args.res; break;
+
+                        case "CVTPD2PS": if (!args.TryProcessVPUCVT_packed_f2f(OPCode.VPU_CVT, false)) return args.res; break;
+                        case "CVTPS2PD": if (!args.TryProcessVPUCVT_packed_f2f(OPCode.VPU_CVT, true)) return args.res; break;
+
 
                         // misc instructions
 
