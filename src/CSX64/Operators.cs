@@ -4007,24 +4007,24 @@ namespace CSX64
         /*
 		[8: mode]
 		mode =  0: CVTSD2SI r32, xmm
-		mode =  1: CVTSD2SI r32, m32
+		mode =  1: CVTSD2SI r32, m64
 		mode =  2: CVTSD2SI r64, xmm
 		mode =  3: CVTSD2SI r64, m64
 
 		mode =  4: CVTSS2SI r32, xmm
 		mode =  5: CVTSS2SI r32, m32
 		mode =  6: CVTSS2SI r64, xmm
-		mode =  7: CVTSS2SI r64, m64
+		mode =  7: CVTSS2SI r64, m32
 
 		mode =  8: CVTTSD2SI r32, xmm
-		mode =  9: CVTTSD2SI r32, m32
+		mode =  9: CVTTSD2SI r32, m64
 		mode = 10: CVTTSD2SI r64, xmm
 		mode = 11: CVTTSD2SI r64, m64
 
 		mode = 12: CVTTSS2SI r32, xmm
 		mode = 13: CVTTSS2SI r32, m32
 		mode = 14: CVTTSS2SI r64, xmm
-		mode = 15: CVTTSS2SI r64, m64
+		mode = 15: CVTTSS2SI r64, m32
 
 		mode = 16: CVTSI2SD xmm, r32
 		mode = 17: CVTSI2SD xmm, m32

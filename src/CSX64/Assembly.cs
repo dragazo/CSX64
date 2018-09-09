@@ -4082,6 +4082,151 @@ namespace CSX64
                 // now refer to binary vpu formatter
                 return TryProcessVPUBinary(op, elem_sizecode, maskable, aligned, scalar, true, (byte)pred);
             }
+
+            public bool TryProcessVPUCVT_scalar_f2i(OPCode op, bool trunc, bool single)
+            {
+                if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 2 operands"); return false; }
+
+                // write the opcode
+                if (!TryAppendByte((byte)op)) return false;
+
+                byte mode = (byte)(trunc ? 8 : 0); // decoded vpucvt mode
+                if (single) mode += 4;
+
+                // dest must be cpu register
+                if (!TryParseCPURegister(args[0], out UInt64 dest, out UInt64 dest_sizecode, out bool dest_high)) return false;
+
+                // account for dest size
+                if (dest_sizecode == 3) mode += 2;
+                else if (dest_sizecode != 2) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified destination size not supported"); return false; }
+
+                // if source is xmm register
+                if (TryParseVPURegister(args[1], out UInt64 src, out UInt64 src_sizecode))
+                {
+                    // only xmm registers are supported
+                    if (src_sizecode != 4) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified source size not supported"); return false; }
+                    // this check /should/ be redundant, but better safe than sorry
+                    if (src > 15) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Source register must be xmm0-15"); return false; }
+
+                    // write the data
+                    if (!TryAppendByte(mode)) return false;
+                    if (!TryAppendByte((byte)((dest << 4) | src))) return false;
+                }
+                // if source is memory
+                else if (args[1][args[1].Length - 1] == ']')
+                {
+                    if (!TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out src_sizecode, out bool src_explicit)) return false;
+
+                    // make sure the size matches what we're expecting
+                    if (src_explicit && src_sizecode != (single ? 2 : 3ul)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified source size not supported"); return false; }
+
+                    ++mode; // account for the memory mode case
+
+                    // write the data
+                    if (!TryAppendByte(mode)) return false;
+                    if (!TryAppendByte((byte)(dest << 4))) return false;
+                    if (!TryAppendAddress(a, b, ptr_base)) return false;
+                }
+                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected xmm register or memory value as second operand"); return false; }
+
+                return true;
+            }
+            public bool TryProcessVPUCVT_scalar_i2f(OPCode op, bool single)
+            {
+                if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 2 operands"); return false; }
+
+                // write the opcode
+                if (!TryAppendByte((byte)op)) return false;
+                byte mode = (byte)(single ? 20 : 16); // decoded vpucvt mode
+
+                // dest must be xmm register
+                if (!TryParseVPURegister(args[0], out UInt64 dest, out UInt64 dest_sizecode)) return false;
+
+                // only xmm registers are supported
+                if (dest_sizecode != 4) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified destination size not supported"); return false; }
+                // this check /should/ be redundant, but better safe than sorry
+                if (dest > 15) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Destination register must be xmm0-15"); return false; }
+
+                // if source is reg
+                if (TryParseCPURegister(args[1], out UInt64 src, out UInt64 src_sizecode, out bool src_high))
+                {
+                    // account for size case
+                    if (src_sizecode == 3) mode += 2;
+                    else if (src_sizecode != 2) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified source size not supported"); return false; }
+
+                    // write the data
+                    if (!TryAppendByte(mode)) return false;
+                    if (!TryAppendByte((byte)((dest << 4) | src))) return false;
+                }
+                // if source is mem
+                else if (args[1][args[1].Length - 1] == ']')
+                {
+                    if (!TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out src_sizecode, out bool src_explicit)) return false;
+
+                    // we need to know what format we're converting from
+                    if (!src_explicit) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Could not deduce operand size"); return false; }
+
+                    // account for size case
+                    if (src_sizecode == 3) mode += 2;
+                    else if (src_sizecode != 2) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified source size not supported"); return false; }
+
+                    ++mode; // account for memory mode case
+
+                    // write the data
+                    if (!TryAppendByte(mode)) return false;
+                    if (!TryAppendByte((byte)(dest << 4))) return false;
+                    if (!TryAppendAddress(a, b, ptr_base)) return false;
+                }
+                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected cpu register or memory value as second operand"); return false; }
+
+                return true;
+            }
+            public bool TryProcessVPUCVT_scalar_f2f(OPCode op, bool extend)
+            {
+                if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 2 operands"); return false; }
+
+                // write the opcode
+                if (!TryAppendByte((byte)op)) return false;
+                byte mode = (byte)(extend ? 26 : 24); // decoded vpucvt mode
+
+                // dest must be xmm register
+                if (!TryParseVPURegister(args[0], out UInt64 dest, out UInt64 dest_sizecode)) return false;
+
+                // only xmm registers are supported
+                if (dest_sizecode != 4) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified destination size not supported"); return false; }
+                // this check /should/ be redundant, but better safe than sorry
+                if (dest > 15) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Destination register must be xmm0-15"); return false; }
+
+                // if source is xmm register
+                if (TryParseVPURegister(args[1], out UInt64 src, out UInt64 src_sizecode))
+                {
+                    // only xmm registers are supported
+                    if (src_sizecode != 4) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified source size not supported"); return false; }
+                    // this check /should/ be redundant, but better safe than sorry
+                    if (src > 15) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Source register must be xmm0-15"); return false; }
+
+                    // write the data
+                    if (!TryAppendByte(mode)) return false;
+                    if (!TryAppendByte((byte)((dest << 4) | src))) return false;
+                }
+                // if source is memory
+                else if (args[1][args[1].Length - 1] == ']')
+                {
+                    if (!TryParseAddress(args[1], out UInt64 a, out UInt64 b, out Expr ptr_base, out src_sizecode, out bool src_explicit)) return false;
+                    
+                    // make sure the size matches what we're expecting
+                    if (src_explicit && src_sizecode != (extend ? 2 : 3ul)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified source size not supported"); return false; }
+
+                    ++mode; // account for the memory mode case
+                    
+                    // write the data
+                    if (!TryAppendByte(mode)) return false;
+                    if (!TryAppendByte((byte)(dest << 4))) return false;
+                    if (!TryAppendAddress(a, b, ptr_base)) return false;
+                }
+                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected xmm register or memory value as second operand"); return false; }
+                return true;
+            }
         }
 
         /// <summary>
@@ -4967,6 +5112,17 @@ namespace CSX64
 
                         case "STMXCSR": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 4, 2)) return args.res; break;
                         case "LDMXCSR": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 5, 2)) return args.res; break;
+
+                        case "CVTSD2SI": if (!args.TryProcessVPUCVT_scalar_f2i(OPCode.VPU_CVT, false, false)) return args.res; break;
+                        case "CVTSS2SI": if (!args.TryProcessVPUCVT_scalar_f2i(OPCode.VPU_CVT, false, true)) return args.res; break;
+                        case "CVTTSD2SI": if (!args.TryProcessVPUCVT_scalar_f2i(OPCode.VPU_CVT, true, false)) return args.res; break;
+                        case "CVTTSS2SI": if (!args.TryProcessVPUCVT_scalar_f2i(OPCode.VPU_CVT, true, true)) return args.res; break;
+
+                        case "CVTSI2SD": if (!args.TryProcessVPUCVT_scalar_i2f(OPCode.VPU_CVT, false)) return args.res; break;
+                        case "CVTSI2SS": if (!args.TryProcessVPUCVT_scalar_i2f(OPCode.VPU_CVT, true)) return args.res; break;
+
+                        case "CVTSD2SS": if (!args.TryProcessVPUCVT_scalar_f2f(OPCode.VPU_CVT, false)) return args.res; break;
+                        case "CVTSS2SD": if (!args.TryProcessVPUCVT_scalar_f2f(OPCode.VPU_CVT, true)) return args.res; break;
 
                         // misc instructions
 
