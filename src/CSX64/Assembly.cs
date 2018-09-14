@@ -1166,6 +1166,14 @@ namespace CSX64
             [AsmSegment.BSS] = "#B",
         };
 
+        private static readonly HashSet<string> PtrdiffIDs = new HashSet<string>()
+        {
+            "#t", "#r", "#d", "#b",
+            "#T", "#R", "#D", "#B",
+
+            "__heap__",
+        };
+
         private static readonly HashSet<string> VerifyLegalExpressionIgnores = new HashSet<string>()
         {
             "__heap__"
@@ -2095,7 +2103,7 @@ namespace CSX64
                 expr.PopulateAddSub(add, sub);
 
                 // perform ptrdiff reduction on anything defined by the linker
-                foreach (string seg_name in VerifyLegalExpressionIgnores)
+                foreach (string seg_name in PtrdiffIDs)
                 {
                     for (int i = 0, j = 0; ; ++i, ++j)
                     {
