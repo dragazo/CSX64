@@ -1813,37 +1813,119 @@ namespace CSX64
         [8: ext]
             ext = 0: AAA
             ext = 1: AAS
+            ext = 2: DAA
+		    ext = 3: DAS
             else UND
         */
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessAAX()
         {
+            byte temp_u8;
+            bool temp_b;
             if (!GetMemAdv(1, out UInt64 ext)) return false;
-            if (ext > 1) { Terminate(ErrorCode.UndefinedBehavior); return false; }
 
-            if ((AL & 0xf) > 9 || AF)
+            switch (ext)
             {
-                // handle ext cases here
-                if (ext == 0) AX += 0x106;
-                else
-                {
-                    AX -= 6;
-                    --AH;
-                }
-                AF = true;
-                CF = true;
-            }
-            else
-            {
-                AF = false;
-                CF = false;
-            }
-            AL &= 0xf;
+                case 0:
+                    if ((AL & 0x0f) > 9 || AF)
+                    {
+                        AX += 0x106;
+                        AF = true;
+                        CF = true;
+                    }
+                    else
+                    {
+                        AF = false;
+                        CF = false;
+                    }
+                    AL &= 0x0f;
 
-            OF = Rand.NextBool();
-            SF = Rand.NextBool();
-            ZF = Rand.NextBool();
-            PF = Rand.NextBool();
+                    OF = Rand.NextBool();
+                    SF = Rand.NextBool();
+                    ZF = Rand.NextBool();
+                    PF = Rand.NextBool();
+
+                    return true;
+
+                case 1:
+                    if ((AL & 0x0f) > 9 || AF)
+                    {
+                        AX -= 6;
+                        --AH;
+                        AF = true;
+                        CF = true;
+                    }
+                    else
+                    {
+                        AF = false;
+                        CF = false;
+                    }
+                    AL &= 0x0f;
+
+                    OF = Rand.NextBool();
+                    SF = Rand.NextBool();
+                    ZF = Rand.NextBool();
+                    PF = Rand.NextBool();
+
+                    return true;
+
+                case 2:
+                    // Intel's reference has this instruction modify CF unnecessarily - leaving those lines in but commenting them out
+
+                    temp_u8 = AL;
+                    temp_b = CF;
+
+                    //CF() = false;
+
+                    if ((AL & 0x0f) > 9 || AF)
+                    {
+                        AL += 6;
+                        //CF() = temp_b || AL() < 6; // AL() < 6 gets the carry flag we need from the above addition
+                        AF = true;
+                    }
+                    else AF = false;
+
+                    if (temp_u8 > 0x99 || temp_b)
+                    {
+                        AL += 0x60;
+                        CF = true;
+                    }
+                    else CF = false;
+
+                    // update flags
+                    UpdateFlagsZSP(AL, 0);
+                    OF = Rand.NextBool();
+
+                    return true;
+
+                case 3:
+                    temp_u8 = AL;
+                    temp_b = CF;
+
+                    CF = false;
+
+                    if ((AL & 0x0f) > 9 || AF)
+                    {
+                        CF = temp_b || AL < 6; // AL() < 6 gets the borrow flag we need from the next subtraction:
+                        AL -= 6;
+                        AF = true;
+                    }
+                    else AF = false;
+
+                    if (temp_u8 > 0x99 || temp_b)
+                    {
+                        AL -= 0x60;
+                        CF = true;
+                    }
+
+                    // update flags
+                    UpdateFlagsZSP(AL, 0);
+                    OF = Rand.NextBool();
+
+                    return true;
+
+                default: Terminate(ErrorCode.UndefinedBehavior); return false;
+            }
 
             return true;
         }

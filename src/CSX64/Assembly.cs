@@ -4876,6 +4876,8 @@ namespace CSX64
 
                         case "AAA": if (!args.TryProcessNoArgOp(OPCode.AAX, true, 0)) return args.res; break;
                         case "AAS": if (!args.TryProcessNoArgOp(OPCode.AAX, true, 1)) return args.res; break;
+                        case "DAA": if (!args.TryProcessNoArgOp(OPCode.AAX, true, 2)) return args.res; break;
+                        case "DAS": if (!args.TryProcessNoArgOp(OPCode.AAX, true, 3)) return args.res; break;
 
                         // MOVS (string) requires disambiguation
                         case "MOVSB": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, 0)) return args.res; break;
@@ -4922,7 +4924,7 @@ namespace CSX64
 
                         case "FNOP": if (!args.TryProcessNoArgOp(OPCode.NOP)) return args.res; break; // no sense in wasting another opcode on no-op
 
-                        case "FWAIT": if (!args.TryProcessNoArgOp(OPCode.FWAIT)) return args.res; break;
+                        case "FWAIT": case "WAIT": if (!args.TryProcessNoArgOp(OPCode.FWAIT)) return args.res; break;
 
                         case "FINIT":
                             if (!args.TryAppendByte((byte)OPCode.FWAIT)) return args.res;
