@@ -2214,11 +2214,13 @@ namespace CSX64
         /// Initializes the FPU as if by FINIT
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void FINIT()
+        private bool FINIT()
         {
             FPU_control = 0x3bf;
             FPU_status = 0;
             FPU_tag = 0xffff;
+
+            return true;
         }
 
         /// <summary>
@@ -2345,13 +2347,17 @@ namespace CSX64
             mode = 3: FLDCW
             mode = 4: STMXCSR
 		    mode = 5: LDMXCSR
+            mode = 6: FSAVE
+	        mode = 7: FRSTOR
+	        mode = 8: FSTENV
+	        mode = 9: FLDENV
             else UND
         */
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessFSTLD_WORD()
         {
-            UInt64 m;
-            if (!GetMemAdv(1, out UInt64 s)) return false;
+            UInt64 m, s, temp;
+            if (!GetMemAdv(1, out s)) return false;
 
             // handle FSTSW AX case specially (doesn't have an address)
             if (s == 0)
@@ -2370,10 +2376,71 @@ namespace CSX64
                     if (!GetMemRaw(m, 2, out m)) return false;
                     FPU_control = (UInt16)m;
                     return true;
+
                 case 4: return SetMemRaw(4, m, _MXCSR);
                 case 5:
                     if (!GetMemRaw(4, m, out m)) return false;
                     _MXCSR = (_MXCSR & 0xffff0000) | (UInt16)m; // make sure user can't modify the upper 16 reserved bits
+                    return true;
+
+                case 6:
+                    if (!SetMemRaw(m + 0, 2, FPU_control)) return false;
+                    if (!SetMemRaw(m + 4, 2, FPU_status)) return false;
+                    if (!SetMemRaw(m + 8, 2, FPU_tag)) return false;
+
+                    if (!SetMemRaw(m + 12, 4, EIP)) return false;
+                    if (!SetMemRaw(m + 16, 2, 0)) return false;
+
+                    if (!SetMemRaw(m + 20, 4, (UInt32)m)) return false;
+                    if (!SetMemRaw(m + 24, 2, 0)) return false;
+
+                    // for cross-platformability/speed, writes native double instead of some tword hacks
+                    if (!SetMemRaw(m + 28, 8, DoubleAsUInt64(ST(0)))) return false;
+                    if (!SetMemRaw(m + 38, 8, DoubleAsUInt64(ST(1)))) return false;
+                    if (!SetMemRaw(m + 48, 8, DoubleAsUInt64(ST(2)))) return false;
+                    if (!SetMemRaw(m + 58, 8, DoubleAsUInt64(ST(3)))) return false;
+                    if (!SetMemRaw(m + 68, 8, DoubleAsUInt64(ST(4)))) return false;
+                    if (!SetMemRaw(m + 78, 8, DoubleAsUInt64(ST(5)))) return false;
+                    if (!SetMemRaw(m + 88, 8, DoubleAsUInt64(ST(6)))) return false;
+                    if (!SetMemRaw(m + 98, 8, DoubleAsUInt64(ST(7)))) return false;
+
+                    // after storing fpu state, re-initializes
+                    return FINIT();
+                case 7:
+                    if (!GetMemRaw(m + 0, 2, out temp)) return false; FPU_control = (UInt16)temp;
+                    if (!GetMemRaw(m + 4, 2, out temp)) return false; FPU_status = (UInt16)temp;
+                    if (!GetMemRaw(m + 8, 2, out temp)) return false; FPU_tag = (UInt16)temp;
+
+                    // for cross-platformability/speed, writes native double instead of some tword hacks
+                    if (!GetMemRaw(m + 28, 8, out temp)) return false; ST(0, AsDouble(temp));
+                    if (!GetMemRaw(m + 38, 8, out temp)) return false; ST(1, AsDouble(temp));
+                    if (!GetMemRaw(m + 48, 8, out temp)) return false; ST(2, AsDouble(temp));
+                    if (!GetMemRaw(m + 58, 8, out temp)) return false; ST(3, AsDouble(temp));
+                    if (!GetMemRaw(m + 68, 8, out temp)) return false; ST(4, AsDouble(temp));
+                    if (!GetMemRaw(m + 78, 8, out temp)) return false; ST(5, AsDouble(temp));
+                    if (!GetMemRaw(m + 88, 8, out temp)) return false; ST(6, AsDouble(temp));
+                    if (!GetMemRaw(m + 98, 8, out temp)) return false; ST(7, AsDouble(temp));
+
+                    return true;
+
+                case 8:
+                    if (!SetMemRaw(m + 0, 2, FPU_control)) return false;
+                    if (!SetMemRaw(m + 4, 2, FPU_status)) return false;
+                    if (!SetMemRaw(m + 8, 2, FPU_tag)) return false;
+
+                    if (!SetMemRaw(m + 12, 4, EIP)) return false;
+                    if (!SetMemRaw(m + 16, 2, 0)) return false;
+
+                    if (!SetMemRaw(m + 20, 4, (UInt32)m)) return false;
+                    if (!SetMemRaw(m + 24, 2, 0)) return false;
+
+                    return true;
+
+                case 9:
+                    if (!GetMemRaw(m + 0, 2, out temp)) return false; FPU_control = (UInt16)temp;
+                    if (!GetMemRaw(m + 4, 2, out temp)) return false; FPU_status = (UInt16)temp;
+                    if (!GetMemRaw(m + 8, 2, out temp)) return false; FPU_tag = (UInt16)temp;
+
                     return true;
 
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
@@ -3336,12 +3403,13 @@ namespace CSX64
             }
             return true;
         }
-        
+
         /*
 		[5: dest][1: mem][1: has_mask][1: zmask]   ([count: mask])
 		mem = 0: [3:][5: src]   dest <- f(src)
 		mem = 1: [address]      dest <- f(M[address])
 		*/
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         bool ProcessVPUCVT_packed(UInt64 elem_count, UInt64 to_elem_sizecode, UInt64 from_elem_sizecode, VPUCVTDelegate func)
         {
             // read settings byte
@@ -3407,6 +3475,7 @@ namespace CSX64
         /*
 		[4: dest][4: src]
 		*/
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         bool ProcessVPUCVT_scalar_xmm_xmm(UInt64 to_elem_sizecode, UInt64 from_elem_sizecode, VPUCVTDelegate func)
         {
             // read the settings byte
@@ -3424,6 +3493,7 @@ namespace CSX64
         /*
 		[4: dest][4: src]
 		*/
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         bool ProcessVPUCVT_scalar_xmm_reg(UInt64 to_elem_sizecode, UInt64 from_elem_sizecode, VPUCVTDelegate func)
         {
             // read the settings byte
@@ -3441,6 +3511,7 @@ namespace CSX64
         /*
 		[4: dest][4:]   [address]
 		*/
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         bool ProcessVPUCVT_scalar_xmm_mem(UInt64 to_elem_sizecode, UInt64 from_elem_sizecode, VPUCVTDelegate func)
         {
             // read the settings byte
@@ -3461,6 +3532,7 @@ namespace CSX64
         /*
 		[4: dest][4: src]
 		*/
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         bool ProcessVPUCVT_scalar_reg_xmm(UInt64 to_elem_sizecode, UInt64 from_elem_sizecode, VPUCVTDelegate func)
         {
             // read the settings byte
@@ -3478,6 +3550,7 @@ namespace CSX64
         /*
 		[4: dest][4:]   [address]
 		*/
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         bool ProcessVPUCVT_scalar_reg_mem(UInt64 to_elem_sizecode, UInt64 from_elem_sizecode, VPUCVTDelegate func)
         {
             // read the settings byte
@@ -3848,6 +3921,7 @@ namespace CSX64
         // the result will be src1, thus creating the desired no-modification behavior so long as dest == src1.
         // each pair of elements will update the flags in turn, thus the total comparison is on the last pair processed - standard behavior requires it be scalar operation.
         // the assembler will ensure all of this is the case.
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         bool __TryProcessVEC_FCOMI(UInt64 elem_sizecode, out UInt64 res, UInt64 _a, UInt64 _b, int index)
         {
             // temporaries for cmp results
@@ -3890,9 +3964,11 @@ namespace CSX64
             return true;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         bool TryProcessVEC_FCOMI() { return ProcessVPUBinary(12, __TryProcessVEC_FCOMI); }
 
         // these trigger ArithmeticError on negative sqrt - spec doesn't specify explicitly what to do
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         bool __TryProcessVEC_FSQRT(UInt64 elem_sizecode, out UInt64 res, UInt64 a, int index)
         {
             if (elem_sizecode == 3)
@@ -3909,6 +3985,7 @@ namespace CSX64
             }
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         bool __TryProcessVEC_FRSQRT(UInt64 elem_sizecode, out UInt64 res, UInt64 a, int index)
         {
             if (elem_sizecode == 3)
@@ -3926,79 +4003,95 @@ namespace CSX64
             return true;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         bool TryProcessVEC_FSQRT() { return ProcessVPUUnary(12, __TryProcessVEC_FSQRT); }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         bool TryProcessVEC_FRSQRT() { return ProcessVPUUnary(12, __TryProcessVEC_FRSQRT); }
 
         // VPUCVTDelegates for conversions
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         bool __double_to_i32(out UInt64 res, UInt64 val)
         {
             res = (UInt32)(Int32)PerformRoundTrip(AsDouble(val), MXCSR_RC);
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         bool __single_to_i32(out UInt64 res, UInt64 val)
         {
             res = (UInt32)(Int32)PerformRoundTrip(AsFloat((UInt32)val), MXCSR_RC);
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         bool __double_to_i64(out UInt64 res, UInt64 val)
         {
             res = (UInt64)(Int64)PerformRoundTrip(AsDouble(val), MXCSR_RC);
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         bool __single_to_i64(out UInt64 res, UInt64 val)
         {
             res = (UInt64)(Int64)PerformRoundTrip(AsFloat((UInt32)val), MXCSR_RC);
             return true;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         bool __double_to_ti32(out UInt64 res, UInt64 val)
         {
             res = (UInt32)(Int32)AsDouble(val);
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         bool __single_to_ti32(out UInt64 res, UInt64 val)
         {
             res = (UInt32)(Int32)AsFloat((UInt32)val);
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         bool __double_to_ti64(out UInt64 res, UInt64 val)
         {
             res = (UInt64)(Int64)AsDouble(val);
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         bool __single_to_ti64(out UInt64 res, UInt64 val)
         {
             res = (UInt64)(Int64)AsFloat((UInt32)val);
             return true;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         bool __i32_to_double(out UInt64 res, UInt64 val)
         {
             res = DoubleAsUInt64((double)(Int32)val);
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         bool __i32_to_single(out UInt64 res, UInt64 val)
         {
             res = FloatAsUInt64((float)(Int32)val);
             return true;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         bool __i64_to_double(out UInt64 res, UInt64 val)
         {
             res = DoubleAsUInt64((double)(Int64)val);
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         bool __i64_to_single(out UInt64 res, UInt64 val)
         {
             res = FloatAsUInt64((float)(Int64)val);
             return true;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         bool __double_to_single(out UInt64 res, UInt64 val)
         {
             res = FloatAsUInt64((float)AsDouble(val));
             return true;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         bool __single_to_double(out UInt64 res, UInt64 val)
         {
             res = DoubleAsUInt64((double)AsFloat((UInt32)val));
@@ -4079,6 +4172,7 @@ namespace CSX64
 
 		else UND
 		*/
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         bool TryProcessVEC_CVT()
         {
             // read mode byte

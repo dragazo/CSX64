@@ -3585,6 +3585,9 @@ namespace CSX64
                 return true;
             }
 
+            /// <summary>
+            /// _sizecode is only used for validating explicit memory operand sizes
+            /// </summary>
             public bool TryProcessFSTLD_WORD(OPCode op, byte mode, UInt64 _sizecode)
             {
                 if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 1 operand"); return false; }
@@ -3593,7 +3596,7 @@ namespace CSX64
                 if (!TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out UInt64 sizecode, out bool explicit_size)) return false;
 
                 // must be the dictated size
-                if (explicit_size && sizecode != _sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size mismatch"); return false; }
+                if (explicit_size && sizecode != _sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified operand size is not supported"); return false; }
 
                 // write data
                 if (!TryAppendByte((byte)op)) return false;
@@ -5046,6 +5049,16 @@ namespace CSX64
                         case "FDECSTP": if (!args.TryProcessNoArgOp(OPCode.FINCDECSTP, true, 1)) return args.res; break;
                         
                         case "FFREE": if (!args.TryProcessFPURegisterOp(OPCode.FFREE)) return args.res; break;
+
+                        case "FNSAVE": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 6, ~(UInt64)0)) return args.res; break; // sizecode = 0xff.ff to ensure user can't use explicit size (since it's not a standard size)
+                        case "FSAVE": if (!args.TryAppendByte((byte)OPCode.FWAIT)) return args.res; goto case "FNSAVE";
+
+                        case "FRSTOR": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 7, ~(UInt64)0)) return args.res; break; // sizecode = 0xff.ff to ensure user can't use explicit size (since it's not a standard size)
+
+                        case "FNSTENV": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 8, ~(UInt64)0)) return args.res; break; // sizecode = 0xff.ff to ensure user can't use explicit size (since it's not a standard size)
+                        case "FSTENV": if (!args.TryAppendByte((byte)OPCode.FWAIT)) return args.res; goto case "FNSTENV";
+
+                        case "FLDENV": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 9, ~(UInt64)0)) return args.res; break; // sizecode = 0xff.ff to ensure user can't use explicit size (since it's not a standard size)
 
                         // vpu instructions
 
