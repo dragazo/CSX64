@@ -116,7 +116,6 @@ namespace CSX64
 
 		// status flags
 		append = 32,
-		binary = 64, // this one's non-standard but we need it
 	}
     enum SeekMode
     {

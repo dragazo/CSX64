@@ -1926,8 +1926,6 @@ namespace CSX64
 
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
-
-            return true;
         }
 
         // helper for MOVS - performs the actual move

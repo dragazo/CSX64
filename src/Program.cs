@@ -250,7 +250,6 @@ report bugs to https://github.com/dragazo/CSX64/issues
             Assembly.DefineSymbol("O_TRUNC", (UInt64)OpenFlags.trunc);
 
             Assembly.DefineSymbol("O_APPEND", (UInt64)OpenFlags.append);
-            Assembly.DefineSymbol("O_BINARY", (UInt64)OpenFlags.binary);
 
             // -- file seek modes -- //
 

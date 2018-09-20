@@ -83,7 +83,7 @@ namespace CSX64
             int raw_flags = (int)RCX; // flags provided by user
             FileAccess file_access = 0; // file access for c#
             FileMode file_mode = 0;     // file mode for c#
-
+            
             // process raw flags
             if ((raw_flags & (int)OpenFlags.read) != 0) file_access |= FileAccess.Read;
             if ((raw_flags & (int)OpenFlags.write) != 0) file_access |= FileAccess.Write;
@@ -91,9 +91,6 @@ namespace CSX64
             if ((raw_flags & (int)OpenFlags.trunc) != 0) file_mode |= FileMode.Truncate;
 
             if ((raw_flags & (int)OpenFlags.append) != 0) file_mode |= FileMode.Append;
-
-            // here's where a binary check would happen if c# offered it
-            //if ((raw_flags & (int)OpenFlags.binary) != 0) cpp_flags |= std::ios::binary;
 
             // handle creation mode flags
             if ((raw_flags & (int)OpenFlags.temp) != 0)
@@ -113,15 +110,8 @@ namespace CSX64
                 path = tmp_path;
                 using (FileStream _f = File.Create(path)) { }
             }
-            else if ((raw_flags & (int)OpenFlags.create) != 0)
-            {
-                // if file does not exist, create it
-                if (!File.Exists(path))
-                {
-                    using (FileStream _f = File.Create(path)) { }
-                }
-            }
-
+            else if ((raw_flags & (int)OpenFlags.create) != 0) file_mode |= FileMode.OpenOrCreate;
+            
             // open the file - held by smart pointer for convenience
             FileStream f = null;
             try { f = new FileStream(path, file_mode, file_access); }
