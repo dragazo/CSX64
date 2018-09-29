@@ -445,13 +445,34 @@ namespace CSX64
                     if (char.IsDigit(Token[0]))
                     {
                         // remove underscores (e.g. 0b_0011_1101_1101_1111)
-                        string token = Token.Replace("_", "");
+                        string token = Token.Replace("_", "").ToLower();
 
-                        // try several integral radicies
-                        if (token.StartsWith("0x")) { if (Token.Substring(2).TryParseUInt64(out res, 16)) break; }
-                        else if (token.StartsWith("0b")) { if (Token.Substring(2).TryParseUInt64(out res, 2)) break; }
-                        else if (token[0] == '0' && Token.Length > 1) { if (Token.Substring(1).TryParseUInt64(out res, 8)) break; }
+                        // -- try parsing as int -- //
+                        
+                        // hex prefixes
+                        if (token.StartsWith("0x") || token.StartsWith("0h")) { if (token.Substring(2).TryParseUInt64(out res, 16)) break; }
+                        // hex suffixes
+                        else if (token[token.Length - 1] == 'x' || token[token.Length - 1] == 'h') { if (token.Substring(0, token.Length - 1).TryParseUInt64(out res, 16)) break; }
+
+                        // dec prefixes
+                        else if (token.StartsWith("0d") || token.StartsWith("0t")) { if (token.Substring(2).TryParseUInt64(out res, 10)) break; }
+                        // dec suffixes
+                        else if (token[token.Length - 1] == 'd' || token[token.Length - 1] == 't') { if (token.Substring(0, token.Length - 1).TryParseUInt64(out res, 10)) break; }
+
+                        // oct prefixes
+                        else if (token.StartsWith("0o") || token.StartsWith("0q")) { if (token.Substring(2).TryParseUInt64(out res, 8)) break; }
+                        // oct suffixes
+                        else if (token[token.Length - 1] == 'o' || token[token.Length - 1] == 'q') { if (token.Substring(0, token.Length - 1).TryParseUInt64(out res, 8)) break; }
+
+                        // bin prefixes
+                        else if (token.StartsWith("0b") || token.StartsWith("0y")) { if (token.Substring(2).TryParseUInt64(out res, 2)) break; }
+                        // bin suffixes
+                        else if (token[token.Length - 1] == 'b' || token[token.Length - 1] == 'y') { if (token.Substring(0, token.Length - 1).TryParseUInt64(out res, 2)) break; }
+
+                        // otherwise is dec
                         else { if (token.TryParseUInt64(out res, 10)) break; }
+
+                        // -- try parsing as float -- //
 
                         // try floating-point
                         if (double.TryParse(token, out double f)) { res = DoubleAsUInt64(f); floating = true; break; }
