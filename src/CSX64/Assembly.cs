@@ -321,7 +321,9 @@ namespace CSX64
 
             // binary ops
 
-            Mul, Div, Mod,
+            Mul,
+            UDiv, UMod,
+            SDiv, SMod,
             Add, Sub,
 
             SL, SR,
@@ -503,7 +505,46 @@ namespace CSX64
                     if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : (Int64)L) * (RF ? AsDouble(R) : (Int64)R)); floating = true; }
                     else res = L * R;
                     break;
-                case OPs.Div:
+
+                case OPs.UDiv:
+                    if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
+                    if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
+                    if (ret == false) return false;
+
+                    if (LF || RF) { res = DoubleAsUInt64((LF ? AsDouble(L) : L) / (RF ? AsDouble(R) : R)); floating = true; }
+                    else
+                    {
+                        // catch division by zero in integral case (floating-point is ok (inf))
+                        if (R == 0) { err = "divide by zero"; return false; }
+                        res = L / R;
+                    }
+                    break;
+                case OPs.UMod:
+                    if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
+                    if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
+                    if (ret == false) return false;
+
+                    // catch division by zero in both float/int cases (floaing zero is integral zero)
+                    if (R == 0) { err = "divide by zero"; return false; }
+                    if (LF || RF)
+                    {
+                        double _num = LF ? AsDouble(L) : L, _denom = RF ? AsDouble(R) : R;
+
+                        // catch division by zero in floating case
+                        if (_denom == 0) { err = "divide by zero"; return false; }
+
+                        res = DoubleAsUInt64(_num % _denom);
+                        floating = true;
+                    }
+                    else
+                    {
+                        // catch division by zero in integral case
+                        if (R == 0) { err = "divide by zero"; return false; }
+                        res = L % R;
+                    }
+                    break;
+
+                case OPs.SDiv:
                     if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
                     if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
                     if (ret == false) return false;
@@ -513,11 +554,10 @@ namespace CSX64
                     {
                         // catch division by zero in integral case (floating-point is ok (inf))
                         if (R == 0) { err = "divide by zero"; return false; }
-
                         res = (UInt64)((Int64)L / (Int64)R);
                     }
                     break;
-                case OPs.Mod:
+                case OPs.SMod:
                     if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
                     if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
                     if (ret == false) return false;
@@ -1122,8 +1162,12 @@ namespace CSX64
         private static readonly Dictionary<Expr.OPs, int> Precedence = new Dictionary<Expr.OPs, int>()
         {
             { Expr.OPs.Mul, 5 },
-            { Expr.OPs.Div, 5 },
-            { Expr.OPs.Mod, 5 },
+
+            { Expr.OPs.UDiv, 5 },
+            { Expr.OPs.UMod, 5 },
+
+            { Expr.OPs.SDiv, 5 },
+            { Expr.OPs.SMod, 5 },
 
             { Expr.OPs.Add, 6 },
             { Expr.OPs.Sub, 6 },
@@ -1772,6 +1816,9 @@ namespace CSX64
                     oplen = 2; // record oplen
                     switch (token.Substring(pos, 2))
                     {
+                        case "//": op = Expr.OPs.SDiv; return true;
+                        case "%%": op = Expr.OPs.SMod; return true;
+
                         case "<<": op = Expr.OPs.SL; return true;
                         case ">>": op = Expr.OPs.SR; return true;
 
@@ -1793,8 +1840,9 @@ namespace CSX64
                     switch (token[pos])
                     {
                         case '*': op = Expr.OPs.Mul; return true;
-                        case '/': op = Expr.OPs.Div; return true;
-                        case '%': op = Expr.OPs.Mod; return true;
+
+                        case '/': op = Expr.OPs.UDiv; return true;
+                        case '%': op = Expr.OPs.UMod; return true;
 
                         case '+': op = Expr.OPs.Add; return true;
                         case '-': op = Expr.OPs.Sub; return true;
