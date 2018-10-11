@@ -191,7 +191,8 @@ namespace CSX64
         public void ST(int num, double value)
         {
             num = (FPU_TOP + num) & 7;
-            FPURegisters[num] = FPU_PC == 0 ? (float)value : value; // store value, accounting for precision control flag
+            value = FPU_PC == 0 ? (float)value : value; // account for precision control flag (do this in value to propagate to tag value)
+            FPURegisters[num] = value; // store value
             FPU_tag = (UInt16)((FPU_tag & ~(3 << (num * 2))) | (ComputeFPUTag(value) << (num * 2)));
         }
         /// <summary>
