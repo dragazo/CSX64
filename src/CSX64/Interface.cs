@@ -237,9 +237,8 @@ namespace CSX64
             if (fd >= 0) FileDescriptors[fd] = f;
             return fd;
         }
-
         /// <summary>
-        /// Links the provided file descriptor to the file.
+        /// Links the provided file descriptor to the file (no bounds checking - see FDCount).
         /// If the file descriptor is already in use, it is first closed.
         /// </summary>
         public void OpenFileWrapper(int fd, IFileWrapper f)
@@ -247,6 +246,7 @@ namespace CSX64
             FileDescriptors[fd]?.Close();
             FileDescriptors[fd] = f;
         }
+        
         /// <summary>
         /// Closes the file wrapper with specified file descriptor. (no bounds checking)
         /// If the file descriptor was not in use, does nothing.
@@ -255,6 +255,17 @@ namespace CSX64
         {
             FileDescriptors[fd]?.Close();
             FileDescriptors[fd] = null;
+        }
+        /// <summary>
+        /// Closes all the managed file descriptors and severs ties to unmanaged file descriptors.
+        /// </summary>
+        public void CloseFiles()
+        {
+            for (int i = 0; i < FileDescriptors.Length; ++i)
+            {
+                FileDescriptors[i]?.Close();
+                FileDescriptors[i] = null;
+            }
         }
 
         /// <summary>
@@ -272,18 +283,6 @@ namespace CSX64
                 if (FileDescriptors[i] == null) return i;
 
             return -1;
-        }
-
-        /// <summary>
-        /// Closes all the managed file descriptors and severs ties to unmanaged file descriptors.
-        /// </summary>
-        public void CloseFiles()
-        {
-            for (int i = 0; i < FileDescriptors.Length; ++i)
-            {
-                FileDescriptors[i]?.Close();
-                FileDescriptors[i] = null;
-            }
         }
 
         /// <summary>
