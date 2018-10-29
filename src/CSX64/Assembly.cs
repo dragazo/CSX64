@@ -2320,9 +2320,9 @@ namespace CSX64
                 }
             }
 
-            private bool TryParseAddressReg(string label, ref Expr hole, out bool present, out UInt64 m)
+            private bool TryGetRegMult(string label, ref Expr hole, out UInt64 mult_res)
             {
-                m = 0; present = false; // initialize out params
+                mult_res = 0; // mult_res starts at zero (for logic below)
 
                 Stack<Expr> path = new Stack<Expr>();
                 List<Expr> list = new List<Expr>();
@@ -2453,25 +2453,8 @@ namespace CSX64
                     // remove the register section from the expression (replace with integral 0)
                     list[1].IntResult = 0;
 
-                    m += val; // add extracted mult to total mult
+                    mult_res += val; // add extracted mult to total mult
                     list.Clear(); // clear list for next pass
-                }
-
-                // -- final task: get mult code and negative flag -- //
-
-                // only other thing is transforming the multiplier into a mult code
-                switch (m)
-                {
-                    // 0 is not present
-                    case 0: m = 0; present = false; break;
-
-                    // if present, only 1, 2, 4, and 8 are allowed
-                    case 1: m = 0; present = true; break;
-                    case 2: m = 1; present = true; break;
-                    case 4: m = 2; present = true; break;
-                    case 8: m = 3; present = true; break;
-
-                    default: res = new AssembleResult(AssembleError.ArgError, $"line {line}: Register multipliers may only be 1, 2, 4, or 8. Got: {(Int64)m}*{label}"); return false;
                 }
 
                 // register successfully parsed
@@ -2518,10 +2501,10 @@ namespace CSX64
                 foreach (var entry in CPURegisterInfo)
                 {
                     // extract the register data
-                    if (!TryParseAddressReg(entry.Key, ref ptr_base, out bool present, out UInt64 mult)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to extract register data\n-> {res.ErrorMsg}"); return false; }
+                    if (!TryGetRegMult(entry.Key, ref ptr_base, out UInt64 mult)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to extract register data\n-> {res.ErrorMsg}"); return false; }
 
                     // if the register is present we need to do something with it
-                    if (present)
+                    if (mult != 0)
                     {
                         // if we have an explicit address component size to enforce
                         if (explicit_sz)
@@ -2531,22 +2514,39 @@ namespace CSX64
                         }
                         // otherwise record this as the size to enforce
                         else { sz = entry.Value.Item2; explicit_sz = true; }
+                    }
 
-                        // if the multiplier is non-trivial (non-1) it has to go in r1
-                        if (mult != 0)
-                        {
-                            // if r1 already has a value, this is an error
-                            if (r1 != UInt64.MaxValue) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Only one register may have a (non-1) pre-multiplier"); return false; }
+                    // if the multiplier is trivial or has a trivial component
+                    if ((mult & 1) != 0)
+                    {
+                        mult &= ~(UInt64)1; // remove the trivial component
 
-                            r1 = entry.Value.Item1;
-                            m1 = mult;
-                        }
-                        // otherwise multiplier is trivial, try to put it in r2 first
-                        else if (r2 == UInt64.MaxValue) r2 = entry.Value.Item1;
-                        // if that falied, try r1
+                        // if r2 is empty, put it there
+                        if (r2 == UInt64.MaxValue) r2 = entry.Value.Item1;
+                        // then try r1
                         else if (r1 == UInt64.MaxValue) r1 = entry.Value.Item1;
-                        // if nothing worked, both are full
+                        // otherwise we ran out of registers to use
                         else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: An address expression may use up to 2 registers"); return false; }
+                    }
+
+                    // if a non-trivial multiplier is present
+                    if (mult != 0)
+                    {
+                        // decode the mult code into m1
+                        switch (mult)
+                        {
+                            // (mult 1 is trivial and thus handled above)
+                            case 2: m1 = 1; break;
+                            case 4: m1 = 2; break;
+                            case 8: m1 = 3; break;
+
+                            default: res = new AssembleResult(AssembleError.UsageError, $"line {line}: Register multiplier must be 1, 2, 4, or 8. Got {(Int64)mult}*{entry.Key}"); return false;
+                        }
+
+                        // if r1 is empty, put it there
+                        if (r1 == UInt64.MaxValue) r1 = entry.Value.Item1;
+                        // otherwise we don't have anywhere to put it
+                        else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: An address expression may only use one non-trivial multiplier"); return false; }
                     }
                 }
 

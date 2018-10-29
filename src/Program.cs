@@ -113,7 +113,7 @@ report bugs to https://github.com/dragazo/CSX64/issues
                     switch (args[i])
                     {
                         // do the long names
-                        case "--help": Process.Start("https://github.com/dragazo/CSX64/blob/master/CSX64 Specification.pdf"); return 0;
+                        case "--help": Print(HelpMessage); return 0;
                         case "--graphical": if (action != ProgramAction.ExecuteConsole) { Print("usage error - see -h for help"); return 0; } action = ProgramAction.ExecuteGraphical; break;
                         case "--assemble": if (action != ProgramAction.ExecuteConsole) { Print("usage error - see -h for help"); return 0; } action = ProgramAction.Assemble; break;
                         case "--link": if (action != ProgramAction.ExecuteConsole) { Print("usage error - see -h for help"); return 0; } action = ProgramAction.Link; break;

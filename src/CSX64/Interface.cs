@@ -279,8 +279,11 @@ namespace CSX64
         /// </summary>
         public void CloseFiles()
         {
-            // close all files
-            foreach (FileDescriptor fd in FileDescriptors) fd.Close();
+            for (int i = 0; i < FileDescriptors.Length; ++i)
+            {
+                FileDescriptors[i]?.Close();
+                FileDescriptors[i] = null;
+            }
         }
 
         /// <summary>
