@@ -26,7 +26,7 @@ namespace CSX64
         // ----------------------------------------
 
         protected byte[] Memory = { };
-        protected FileDescriptor[] FileDescriptors = new FileDescriptor[16];
+        protected IFileWrapper[] FileDescriptors = new IFileWrapper[16];
 
         protected Random Rand = new Random();
 
@@ -88,7 +88,7 @@ namespace CSX64
         public Computer()
         {
             // allocate file descriptors
-            for (int i = 0; i < FileDescriptors.Length; ++i) FileDescriptors[i] = new FileDescriptor();
+            for (int i = 0; i < FileDescriptors.Length; ++i) FileDescriptors[i] = null;
 
             // define initial state
             Running = false;
@@ -228,27 +228,50 @@ namespace CSX64
         }
 
         /// <summary>
-        /// Gets the file descriptor at the specified index. (no bounds checking)
+        /// Links the provided file to the first available file descriptor.
+        /// returns the file descriptor that was used. if none were available, does not link the file and returns -1.
         /// </summary>
-        /// <param name="index">the index of the file descriptor</param>
-        public FileDescriptor GetFD(int index) => FileDescriptors[index];
-        /// <summary>
-        /// Finds the first available file descriptor, or null if there are none available
-        /// </summary>
-        /// <param name="index">the index of the result</param>
-        public FileDescriptor FindAvailableFD(out UInt64 index)
+        public int OpenFileWrapper(IFileWrapper f)
         {
-            index = UInt64.MaxValue;
+            int fd = FindAvailableFD();
+            if (fd >= 0) FileDescriptors[fd] = f;
+            return fd;
+        }
 
-            // get the first available file descriptor
+        /// <summary>
+        /// Links the provided file descriptor to the file.
+        /// If the file descriptor is already in use, it is first closed.
+        /// </summary>
+        public void OpenFileWrapper(int fd, IFileWrapper f)
+        {
+            FileDescriptors[fd]?.Close();
+            FileDescriptors[fd] = f;
+        }
+        /// <summary>
+        /// Closes the file wrapper with specified file descriptor. (no bounds checking)
+        /// If the file descriptor was not in use, does nothing.
+        /// </summary>
+        public void CloseFileWrapper(int fd)
+        {
+            FileDescriptors[fd]?.Close();
+            FileDescriptors[fd] = null;
+        }
+
+        /// <summary>
+        /// Gets the file wrapper with specified file descriptor (no bounds checking).
+        /// if this is null, the fd is not in use.
+        /// </summary>
+        public IFileWrapper GetFileWrapper(int fd) => FileDescriptors[fd];
+        
+        /// <summary>
+        /// Finds the first available file descriptor. reutrns -1 if there are none available
+        /// </summary>
+        public int FindAvailableFD()
+        {
             for (int i = 0; i < FileDescriptors.Length; ++i)
-                if (!FileDescriptors[i].InUse)
-                {
-                    index = (UInt64)i;
-                    return FileDescriptors[i];
-                }
+                if (FileDescriptors[i] == null) return i;
 
-            return null;
+            return -1;
         }
 
         /// <summary>

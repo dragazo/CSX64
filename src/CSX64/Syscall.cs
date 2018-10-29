@@ -19,8 +19,11 @@ namespace CSX64
             if (fd_index >= (UInt64)FDCount) { Terminate(ErrorCode.OutOfBounds); return false; }
 
             // get fd
-            FileDescriptor fd = FileDescriptors[fd_index];
-            if (!fd.InUse) { Terminate(ErrorCode.FDNotInUse); return false; }
+            IFileWrapper fd = FileDescriptors[fd_index];
+            if (fd == null) { Terminate(ErrorCode.FDNotInUse); return false; }
+
+            // make sure we can read from it
+            if (!fd.CanRead()) { Terminate(ErrorCode.FilePermissions); return false; }
 
             // make sure we're in bounds
             if (RCX >= MemorySize || RDX >= MemorySize || RCX + RDX > MemorySize) { Terminate(ErrorCode.OutOfBounds); return false; }
@@ -30,16 +33,16 @@ namespace CSX64
             // read from the file
             try
             {
-                UInt64 n = (UInt64)fd.BaseStream.Read(Memory, (int)RCX, (int)RDX);
+                Int64 n = fd.Read(Memory, (int)RCX, (int)RDX);
 
                 // if we got nothing but it's interactive
-                if (n == 0 && fd.Interactive)
+                if (n == 0 && fd.IsInteractive())
                 {
                     --RIP;                // await further data by repeating the syscall
                     SuspendedRead = true; // suspend execution until there's more data
                 }
                 // otherwise success - return num chars read from file
-                else RAX = n;
+                else RAX = (UInt64)n;
             }
             // errors are failures - return -1
             catch (Exception) { RAX = ~(UInt64)0; }
@@ -53,14 +56,17 @@ namespace CSX64
             if (fd_index >= (UInt64)FDCount) { Terminate(ErrorCode.OutOfBounds); return false; }
 
             // get fd
-            FileDescriptor fd = FileDescriptors[fd_index];
-            if (!fd.InUse) { Terminate(ErrorCode.FDNotInUse); return false; }
+            IFileWrapper fd = FileDescriptors[fd_index];
+            if (fd == null) { Terminate(ErrorCode.FDNotInUse); return false; }
+
+            // make sure we can write
+            if (!fd.CanWrite()) { Terminate(ErrorCode.FilePermissions); return false; }
 
             // make sure we're in bounds
             if (RCX >= MemorySize || RDX >= MemorySize || RCX + RDX > MemorySize) { Terminate(ErrorCode.OutOfBounds); return false; }
 
             // attempt to write from memory to the file - success = num written, fail = -1
-            try { fd.BaseStream.Write(Memory, (int)RCX, (int)RDX); RAX = RDX; }
+            try { RAX = (UInt64)fd.Write(Memory, (int)RCX, (int)RDX); }
             catch (Exception) { RAX = ~(UInt64)0; }
 
             return true;
@@ -72,10 +78,8 @@ namespace CSX64
             if (!FSF) { Terminate(ErrorCode.FSDisabled); return false; }
 
             // get an available file descriptor
-            FileDescriptor fd = FindAvailableFD(out UInt64 fd_index);
-
-            // if we couldn't get one, return -1
-            if (fd == null) { RAX = ~(UInt64)0; return true; }
+            int fd_index = FindAvailableFD();
+            if (fd_index < 0) { RAX = ~(UInt64)0; return true; }
 
             // get path
             if (!GetCString(RBX, out string path)) return false;
@@ -83,10 +87,14 @@ namespace CSX64
             int raw_flags = (int)RCX; // flags provided by user
             FileAccess file_access = 0; // file access for c#
             FileMode file_mode = 0;     // file mode for c#
-            
+
+            // alias permissions flags for convenience
+            bool can_read = (raw_flags & (int)OpenFlags.read) != 0;
+            bool can_write = (raw_flags & (int)OpenFlags.write) != 0;
+
             // process raw flags
-            if ((raw_flags & (int)OpenFlags.read) != 0) file_access |= FileAccess.Read;
-            if ((raw_flags & (int)OpenFlags.write) != 0) file_access |= FileAccess.Write;
+            if (can_read) file_access |= FileAccess.Read;
+            if (can_write) file_access |= FileAccess.Write;
 
             if ((raw_flags & (int)OpenFlags.trunc) != 0) file_mode |= FileMode.Truncate;
 
@@ -112,28 +120,26 @@ namespace CSX64
             }
             else if ((raw_flags & (int)OpenFlags.create) != 0) file_mode |= FileMode.OpenOrCreate;
             
-            // open the file - held by smart pointer for convenience
+            // open the file
             FileStream f = null;
             try { f = new FileStream(path, file_mode, file_access); }
             catch (Exception) { RAX = ~(UInt64)0; return true; }
 
-            // store in the file descriptor (make sure smart pointer is released)
-            fd.Open(f, true, false);
-            RAX = fd_index;
+            // store in the file descriptor
+            FileDescriptors[fd_index] = new BasicFileWrapper(f, true, false, can_read, can_write, true);
+            RAX = (UInt64)fd_index;
 
             return true;
         }
         private bool Sys_Close()
         {
             // get fd index
-            UInt64 fd_index = RBX;
-            if (fd_index >= (UInt64)FDCount) { Terminate(ErrorCode.OutOfBounds); return false; }
+            int fd_index = (int)RBX;
+            if (fd_index >= FDCount) { Terminate(ErrorCode.OutOfBounds); return false; }
 
-            // get fd
-            FileDescriptor fd = FileDescriptors[fd_index];
+            CloseFileWrapper(fd_index);
 
-            // close the file - success = 0, fail = -1
-            RAX = fd.Close() ? (UInt64)0 : ~(UInt64)0;
+            RAX = 0;
             return true;
         }
 
@@ -144,8 +150,11 @@ namespace CSX64
             if (fd_index >= (UInt64)FDCount) { Terminate(ErrorCode.OutOfBounds); return false; }
 
             // get fd
-            FileDescriptor fd = FileDescriptors[fd_index];
-            if (!fd.InUse) { Terminate(ErrorCode.FDNotInUse); return false; }
+            IFileWrapper fd = FileDescriptors[fd_index];
+            if (fd == null) { Terminate(ErrorCode.FDNotInUse); return false; }
+
+            // make sure it can seek
+            if (!fd.CanSeek()) { Terminate(ErrorCode.FilePermissions); return false; }
 
             int raw_mode = (int)RDX;
             SeekOrigin seek_origin;
@@ -158,14 +167,7 @@ namespace CSX64
             else { RAX = ~(UInt64)0; return true; }
 
             // attempt the seek
-            try
-            {
-                // perform the seek
-                fd.BaseStream.Seek((Int64)RCX, seek_origin);
-
-                // return position
-                RAX = (UInt64)fd.BaseStream.Position;
-            }
+            try { RAX = (UInt64)fd.Seek((Int64)RCX, seek_origin); }
             catch (Exception) { RAX = ~(UInt64)0; }
 
             return true;

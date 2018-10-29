@@ -654,9 +654,9 @@ report bugs to https://github.com/dragazo/CSX64/issues
                 computer.OTRF = true;
 
                 // tie standard streams - stdin is non-interactive because we don't control it
-                computer.GetFD(0).Open(Console.OpenStandardInput(), false, false); 
-                computer.GetFD(1).Open(Console.OpenStandardOutput(), false, false);
-                computer.GetFD(2).Open(Console.OpenStandardError(), false, false);
+                computer.OpenFileWrapper(0, new BasicFileWrapper(Console.OpenStandardInput(), false, false, true, false, false)); 
+                computer.OpenFileWrapper(1, new BasicFileWrapper(Console.OpenStandardOutput(), false, false, false, true, false));
+                computer.OpenFileWrapper(2, new BasicFileWrapper(Console.OpenStandardError(), false, false, false, true, false));
 
                 // begin execution
                 DateTime start = DateTime.Now;

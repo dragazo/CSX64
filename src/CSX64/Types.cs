@@ -13,7 +13,7 @@ namespace CSX64
         None, OutOfBounds, UnhandledSyscall, UndefinedBehavior, ArithmeticError, Abort,
         IOFailure, FSDisabled, AccessViolation, InsufficientFDs, FDNotInUse, NotImplemented, StackOverflow,
         FPUStackOverflow, FPUStackUnderflow, FPUError, FPUAccessViolation,
-        AlignmentViolation, UnknownOp,
+        AlignmentViolation, UnknownOp, FilePermissions,
     }
     public enum OPCode
     {
@@ -225,6 +225,128 @@ namespace CSX64
     }
 
     /// <summary>
+    /// exception type thrown when IFileWrapper permissions are violated
+    /// </summary>
+    public class FileWrapperPermissionsException : Exception
+    {
+        public FileWrapperPermissionsException(string msg) : base(msg) { }
+        public FileWrapperPermissionsException(string msg, Exception inner) : base(msg, inner) { }
+    }
+
+    /// <summary>
+    /// the interface used by CSX64 file descriptors to reference files
+    /// </summary>
+    public interface IFileWrapper
+    {
+        /// <summary>
+        /// returns true iff this stream is interactive (see CSX64 documentation)
+        /// </summary>
+        bool IsInteractive();
+
+        /// <summary>
+        /// Returns true iff this stream can read
+        /// </summary>
+        bool CanRead();
+        /// <summary>
+        /// Returns true iff this stream can write
+        /// </summary>
+        bool CanWrite();
+
+        /// <summary>
+        /// returns true iff this stream can seek
+        /// </summary>
+        bool CanSeek();
+
+        /// <summary>
+        /// reads at most (cap) bytes info buf (beginning at start). no null terminator is appended.
+        /// returns the number of bytes read.
+        /// throws <see cref="FileWrapperPermissionsException"/> if the file cannot read.
+        /// </summary>
+        Int64 Read(byte[] buf, Int64 start, Int64 cap);
+        /// <summary>
+        /// writes (len) bytes from buf (beginning at start)
+        /// returns the number of bytes written (may be less than len due to an io error)
+        /// throws <see cref="FileWrapperPermissionsException"/> if the file cannot write.
+        /// </summary>
+        Int64 Write(byte[] buf, Int64 start, Int64 len);
+
+        /// <summary>
+        /// sets the current position in the file based on an offset and on origin.
+        /// returns the resulting position (offset from beginning).
+        /// throws <see cref="FileWrapperPermissionsException"/> if the file cannot seek.
+        /// </summary>
+        Int64 Seek(Int64 off, SeekOrigin orig);
+
+        /// <summary>
+        /// Closes the file and releases its resources.
+        /// If the file is already closed, does nothing.
+        /// It is undefined behavior to use the object after this call is made (except to close an already-closed file).
+        /// </summary>
+        void Close();
+    }
+
+    public class BasicFileWrapper : IFileWrapper
+    {
+        private Stream f;
+        private bool _managed;
+        private bool _interactive;
+
+        private bool _CanRead;
+        private bool _CanWrite;
+
+        private bool _CanSeek;
+
+        /// <summary>
+        /// constructs a new BasicFileWrapper from the given file (which cannot be null).
+        /// if managed is true, the stream is closed and disposed when this object is destroyed.
+        /// throws <see cref="ArgumentNullException"/> if file is null.
+        /// </summary>
+        public BasicFileWrapper(Stream file, bool managed, bool interactive, bool canRead, bool canWrite, bool canSeek)
+        {
+            f = file ?? throw new ArgumentNullException("file cannot be null");
+
+            _managed = managed;
+            _interactive = interactive;
+            _CanRead = canRead;
+            _CanWrite = canWrite;
+            _CanSeek = canSeek;
+        }
+
+        public bool IsInteractive() { return _interactive; }
+        public bool IsManaged() { return _managed; }
+
+        public bool CanRead() { return _CanRead; }
+        public bool CanWrite() { return _CanWrite; }
+
+        public bool CanSeek() { return _CanSeek; }
+
+        public Int64 Read(byte[] buf, Int64 start, Int64 cap)
+        {
+            if (!CanRead()) throw new FileWrapperPermissionsException("FileWrapper not flagged for reading");
+            return (Int64)f.Read(buf, (int)start, (int)cap);
+        }
+        public Int64 Write(byte[] buf, Int64 start, Int64 len)
+        {
+            if (!CanWrite()) throw new FileWrapperPermissionsException("FileWrapper not flagged for writing");
+            f.Write(buf, (int)start, (int)len);
+            return len;
+        }
+
+        public Int64 Seek(Int64 off, SeekOrigin orig)
+        {
+            if (!CanSeek()) throw new FileWrapperPermissionsException("FileWrapper not flagged for seeking");
+            f.Seek(off, orig);
+            return f.Position;
+        }
+
+        public void Close()
+        {
+            f?.Dispose();
+            f = null;
+        }
+    }
+
+    /// <summary>
     /// Represents a file descriptor used by the <see cref="CSX64"/> processor
     /// </summary>
     public class FileDescriptor
@@ -239,6 +361,11 @@ namespace CSX64
         /// Reading past EOF on an interactive stream sets the SuspendedRead flag of the associated <see cref="CSX64"/>
         /// </summary>
         public bool Interactive { get; private set; }
+
+        public bool CanRead { get; private set; }
+        public bool CanWrite { get; private set; }
+
+        public bool CanSeek { get; private set; }
 
         /// <summary>
         /// The underlying stream associated with this file descriptor.
