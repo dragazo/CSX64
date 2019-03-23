@@ -37,18 +37,21 @@ namespace CSX64
         /// </summary>
         public UInt64 MaxMemory = int.MaxValue;
         /// <summary>
-        /// Gets the amount of memory (in bytes) the computer currently has access to
+        /// The minimum amount of memory the client can request.
+		/// This is the address of the base of the primary execution stack.
+		/// Anything at or beyond this point is regarded as heap memory.
         /// </summary>
-        public UInt64 MemorySize => (UInt64)Memory.Length;
-        /// <summary>
-        /// Gets the amount of memory (in bytes) the computer initially had access to
-        /// </summary>
-        public UInt64 InitMemorySize { get; private set; }
+        public UInt64 MinMemory { get; private set; }
 
-        /// <summary>
-        /// Gets the maximum number of file descriptors
-        /// </summary>
-        public int FDCount => FileDescriptors.Length;
+		/// <summary>
+		/// Gets the amount of memory (in bytes) the computer currently has access to
+		/// </summary>
+		public UInt64 MemorySize => (UInt64)Memory.Length;
+
+		/// <summary>
+		/// Gets the maximum number of file descriptors
+		/// </summary>
+		public int FDCount => FileDescriptors.Length;
 
         /// <summary>
         /// Flag marking if the program is still executing (still true even in halted state)
@@ -114,8 +117,10 @@ namespace CSX64
 
             // get new memory array (does not include header)
             Memory = new byte[size];
-            InitMemorySize = size;
 
+			// mark the minimum amount of memory (minimum sys_brk value) (so user can't truncate program data/stack/etc.)
+            MinMemory = size;
+			
             // copy over the text/rodata/data segments (not including header)
             for (int i = 32; i < exe.Length; ++i) Memory[i - 32] = exe[i];
             // zero the bss segment (should already be done by C# but this makes it more clear and explicit)
@@ -141,7 +146,7 @@ namespace CSX64
 
             // set execution state
             RIP = 0;
-            EFLAGS = 2; // x86 standard dictates this initial state
+            RFLAGS = 2; // x86 standard dictates this initial state
             Running = true;
             SuspendedRead = false;
             Error = ErrorCode.None;

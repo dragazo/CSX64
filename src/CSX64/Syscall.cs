@@ -178,7 +178,7 @@ namespace CSX64
             // special request of 0 returns current break
             if (RBX == 0) RAX = MemorySize;
             // if the request is too high or goes below init size, don't do it
-            else if (RBX > MaxMemory || RBX < InitMemorySize) RAX = ~(UInt64)0; // RAX = -1
+            else if (RBX > MaxMemory || RBX < MinMemory) RAX = ~(UInt64)0; // RAX = -1
             // otherwise perform the reallocation
             else
             {
