@@ -3446,9 +3446,13 @@ namespace CSX64
                 return true;
             }
 
-            private bool __TryProcessREP_init(out string actual)
+			/// <summary>
+			/// Extracts a prefix from the args and returns the actual instruction token (as uppercase)
+			/// </summary>
+			/// <param name="actual">the resulting actual (augmented) instruction</param>
+            public bool TryProcessPrefixOp(out string actual)
             {
-                if (args.Length == 0) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: REP expected an instruction to augment"); actual = ""; return false; }
+                if (args.Length == 0) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: expected an instruction to augment"); actual = ""; return false; }
 
                 // first arg contains the instrucion to execute - find first white-space delimiter
                 int len;
@@ -3469,12 +3473,15 @@ namespace CSX64
 
                 return true;
             }
+
             public bool TryProcessREP()
             {
-                if (!__TryProcessREP_init(out string actual)) return false;
+                if (!TryProcessPrefixOp(out string actual)) return false;
 
-                // route to proper handlers
-                if (actual == "MOVS") return TryProcessMOVS_string(OPCode.string_ops, true);
+				// route to proper handlers
+				if (actual == "RET") return TryProcessNoArgOp(OPCode.RET);
+
+                else if (actual == "MOVS") return TryProcessMOVS_string(OPCode.string_ops, true);
                 else if (actual == "MOVSB") return TryProcessNoArgOp(OPCode.string_ops, true, (1 << 2) | 0);
                 else if (actual == "MOVSW") return TryProcessNoArgOp(OPCode.string_ops, true, (1 << 2) | 1);
                 else if (actual == "MOVSD") return TryProcessNoArgOp(OPCode.string_ops, true, (1 << 2) | 2);
@@ -3497,10 +3504,12 @@ namespace CSX64
             }
             public bool TryProcessREPE()
             {
-                if (!__TryProcessREP_init(out string actual)) return false;
+                if (!TryProcessPrefixOp(out string actual)) return false;
 
-                // route to proper handlers
-                if (actual == "CMPS") return TryProcessCMPS_string(OPCode.string_ops, true, false);
+				// route to proper handlers
+				if (actual == "RET") return TryProcessNoArgOp(OPCode.RET);
+
+                else if (actual == "CMPS") return TryProcessCMPS_string(OPCode.string_ops, true, false);
                 else if (actual == "CMPSB") return TryProcessNoArgOp(OPCode.string_ops, true, (3 << 2) | 0);
                 else if (actual == "CMPSW") return TryProcessNoArgOp(OPCode.string_ops, true, (3 << 2) | 1);
                 else if (actual == "CMPSD") return TryProcessNoArgOp(OPCode.string_ops, true, (3 << 2) | 2);
@@ -3517,10 +3526,12 @@ namespace CSX64
             }
             public bool TryProcessREPNE()
             {
-                if (!__TryProcessREP_init(out string actual)) return false;
+                if (!TryProcessPrefixOp(out string actual)) return false;
 
-                // route to proper handlers
-                if (actual == "CMPS") return TryProcessCMPS_string(OPCode.string_ops, false, true);
+				// route to proper handlers
+				if (actual == "RET") return TryProcessNoArgOp(OPCode.RET);
+
+				else if (actual == "CMPS") return TryProcessCMPS_string(OPCode.string_ops, false, true);
                 else if (actual == "CMPSB") return TryProcessNoArgOp(OPCode.string_ops, true, (4 << 2) | 0);
                 else if (actual == "CMPSW") return TryProcessNoArgOp(OPCode.string_ops, true, (4 << 2) | 1);
                 else if (actual == "CMPSD") return TryProcessNoArgOp(OPCode.string_ops, true, (4 << 2) | 2);
@@ -4981,6 +4992,41 @@ namespace CSX64
                         case "REP": if (!args.TryProcessREP()) return args.res; break;
                         case "REPE": case "REPZ": if (!args.TryProcessREPE()) return args.res; break;
                         case "REPNE": case "REPNZ": if (!args.TryProcessREPNE()) return args.res; break;
+
+						case "LOCK":
+							{
+								if (!args.TryProcessPrefixOp(out string actual)) return args.res;
+
+								// decide what handler to use (can't use switch because goto can't jump to an external case label)
+								if (actual == "ADD") goto case "ADD";
+								if (actual == "ADC") goto case "ADC";
+								//if (actual == "XADD") goto case "XADD";
+
+								if (actual == "SUB") goto case "SUB";
+								//if (actual == "SBB") goto case "SBB";
+
+								if (actual == "AND") goto case "AND";
+								if (actual == "OR") goto case "OR";
+								if (actual == "XOR") goto case "XOR";
+
+								if (actual == "BTC") goto case "BTC";
+								if (actual == "BTR") goto case "BTR";
+								if (actual == "BTS") goto case "BTS";
+
+								if (actual == "DEC") goto case "DEC";
+								if (actual == "INC") goto case "INC";
+
+								if (actual == "NEG") goto case "NEG";
+								if (actual == "NOT") goto case "NOT";
+								if (actual == "XCHG") goto case "XCHG";
+
+								//if (actual == "CMPXCHG") goto case "CMPXCHG";
+								//if (actual == "CMPXCH8B") goto case "CMPXCH8B";
+								//if (actual == "CMPXCHG16B") goto case "CMPXCHG16B";
+
+								return new AssembleResult(AssembleError.UsageError, $"line {args.line}: LOCK cannot be used with the specified instruction");
+							}
+							break;
 
                         case "BSF": if (!args.TryProcessBSx(OPCode.BSx, true)) return args.res; break;
                         case "BSR": if (!args.TryProcessBSx(OPCode.BSx, false)) return args.res; break;
