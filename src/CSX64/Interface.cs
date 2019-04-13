@@ -155,27 +155,38 @@ namespace CSX64
             UInt64 stack = (UInt64)Memory.Length;
             RBP = stack; // RBP points to before we start pushing args
 
-            // if we have cmd line args, load them
-            if (args != null && args.Length > 0)
-            {
-                UInt64[] pointers = new UInt64[args.Length]; // an array of pointers to args in computer memory
+			// if we have args, handle those
+			if (args != null)
+			{
+				// an array of pointers to command line args in computer memory.
+				// one for each arg, plus a null terminator.
+				UInt64[] cmdarg_pointers = new UInt64[args.Length + 1];
 
-                // for each arg (backwards to make more sense visually, but the order doesn't actually matter)
-                for (int i = args.Length - 1; i >= 0; --i)
-                {
-                    // push the arg onto the stack
-                    stack -= (UInt64)args[i].Length + 1;
-                    SetCString(stack, args[i]);
+				// put each arg on the stack and get their addresses
+				for (int i = 0; i < args.Length; ++i)
+				{
+					// push the arg onto the stack
+					stack -= (UInt64)args[i].Length + 1;
+					SetCString(stack, args[i]);
 
-                    // record pointer to this arg
-                    pointers[i] = stack;
-                }
+					// record pointer to this arg
+					cmdarg_pointers[i] = stack;
+				}
+				// the last pointer is null (C guarantees this, so we will as well)
+				cmdarg_pointers[args.Length] = 0;
 
-                // make room for the pointer array
-                stack -= 8 * (UInt64)pointers.Length;
-                // write pointer array to memory
-                for (int i = 0; i < pointers.Length; ++i) SetMem(stack + (UInt64)i * 8, pointers[i]);
-            }
+				// make room for the pointer array
+				stack -= 8 * (UInt64)cmdarg_pointers.Length;
+				// write pointer array to memory
+				for (int i = 0; i < cmdarg_pointers.Length; ++i) SetMem(stack + (UInt64)i * 8, cmdarg_pointers[i]);
+			}
+			// otherwise we have no cmd line args
+			else
+			{
+				// this case is as above, but where args is empty, so it's extremely trivial
+				stack -= 8;
+				SetMem(stack, 0);
+			}
 
             // load arg count and arg array pointer to RDI, RSI
             RDI = args != null ? (UInt64)args.Length : 0;
