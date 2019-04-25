@@ -4722,8 +4722,19 @@ namespace CSX64
                 for (end = pos; end < code.Length && code[end] != '\n' && code[end] != CommentChar; ++end) ;
 
                 ++args.line; // advance line counter
-                // split the line
-                if (!args.SplitLine(code.Substring(pos, end - pos))) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Failed to parse line\n-> {args.res.ErrorMsg}");
+
+				// extract the line
+				string rawline = code.Substring(pos, end - pos);
+
+				// if this is a shebang line (must have "#!" at the start of line 1)
+				if (args.line == 1 && rawline.Length >= 2 && rawline[0] == '#' && rawline[1] == '!')
+				{
+					// ignore it - do this by pretending the line was empty
+					rawline = string.Empty;
+				}
+
+				// split the line
+				if (!args.SplitLine(rawline)) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Failed to parse line\n-> {args.res.ErrorMsg}");
                 // if the separator was a comment character, consume the rest of the line as well as no-op
                 if (end < code.Length && code[end] == CommentChar)
                     for (; end < code.Length && code[end] != '\n'; ++end) ;

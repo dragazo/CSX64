@@ -8,6 +8,9 @@ using static CSX64.Utility;
 
 namespace CSX64
 {
+	/// <summary>
+	/// error codes resulting from executing client code (these don't trigger exceptions)
+	/// </summary>
     public enum ErrorCode
     {
         None, OutOfBounds, UnhandledSyscall, UndefinedBehavior, ArithmeticError, Abort,
@@ -222,15 +225,6 @@ namespace CSX64
                 default: throw new ArgumentOutOfRangeException($"specified size code ({sizecode}) was out of range");
             }
         }
-    }
-
-    /// <summary>
-    /// exception type thrown when IFileWrapper permissions are violated
-    /// </summary>
-    public class FileWrapperPermissionsException : Exception
-    {
-        public FileWrapperPermissionsException(string msg) : base(msg) { }
-        public FileWrapperPermissionsException(string msg, Exception inner) : base(msg, inner) { }
     }
 
     /// <summary>

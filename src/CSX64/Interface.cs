@@ -104,22 +104,29 @@ namespace CSX64
         /// <param name="exe">the memory to load before starting execution (memory beyond this range is undefined)</param>
         /// <param name="args">the command line arguments to provide to the computer. pass null or empty array for none</param>
         /// <param name="stacksize">the amount of additional space to allocate for the program's stack</param>
-        public bool Initialize(byte[] exe, string[] args, UInt64 stacksize = 2 * 1024 * 1024)
+        public void Initialize(byte[] exe, string[] args, UInt64 stacksize = 2 * 1024 * 1024)
         {
-            // read header
-            if (!exe.Read(0, 8, out UInt64 text_seglen) || !exe.Read(8, 8, out UInt64 rodata_seglen)
-                || !exe.Read(16, 8, out UInt64 data_seglen) || !exe.Read(24, 8, out UInt64 bss_seglen)) return false;
+			// read header
+			if (!exe.Read(0, 8, out UInt64 text_seglen) || !exe.Read(8, 8, out UInt64 rodata_seglen)
+				|| !exe.Read(16, 8, out UInt64 data_seglen) || !exe.Read(24, 8, out UInt64 bss_seglen))
+				throw new ExecutableFormatError("executable header missing");
+
+			// make sure exe is well-formed
+			if (32 + text_seglen + rodata_seglen + data_seglen != (UInt64)exe.Length)
+				throw new ExecutableFormatError("executable header invalid");
 
             // get size of memory and make sure it's within limits
             UInt64 size = (UInt64)exe.Length - 32 + bss_seglen + stacksize;
-            // make sure it's within limits
-            if (size > MaxMemory) return false;
+
+			// mark the minimum amount of memory (minimum sys_brk value) (so user can't truncate program data/stack/etc.)
+			MinMemory = size;
+
+			// make sure it's within limits
+			if (size > MaxMemory)
+				throw new MemoryAllocException("executable size exceeded max memory");
 
             // get new memory array (does not include header)
             Memory = new byte[size];
-
-			// mark the minimum amount of memory (minimum sys_brk value) (so user can't truncate program data/stack/etc.)
-            MinMemory = size;
 			
             // copy over the text/rodata/data segments (not including header)
             for (int i = 32; i < exe.Length; ++i) Memory[i - 32] = exe[i];
@@ -198,8 +205,6 @@ namespace CSX64
             // also push args to stack (RTL)
             Push(RSI);
             Push(RDI);
-
-            return true;
         }
 
         /// <summary>
