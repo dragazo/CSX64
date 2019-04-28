@@ -5057,7 +5057,6 @@ namespace CSX64
 
 								return new AssembleResult(AssembleError.UsageError, $"line {args.line}: LOCK cannot be used with the specified instruction");
 							}
-							break;
 
                         case "BSF": if (!args.TryProcessBSx(OPCode.BSx, true)) return args.res; break;
                         case "BSR": if (!args.TryProcessBSx(OPCode.BSx, false)) return args.res; break;
