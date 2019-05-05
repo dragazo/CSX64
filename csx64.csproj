@@ -90,6 +90,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="src\CSX64\csx_exceptions.cs" />
+    <Compile Include="src\CSX64\Executable.cs" />
     <Compile Include="src\CSX64\Registers.cs" />
     <Compile Include="src\CSX64\Interface.cs" />
     <Compile Include="src\CSX64\Memory.cs" />

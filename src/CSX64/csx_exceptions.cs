@@ -3,12 +3,20 @@
 namespace CSX64
 {
 	/// <summary>
-	/// exception type thrown when attempting to use an invalid executable
+	/// Exception type thrown when attempting to use an object of incompatible version.
 	/// </summary>
-	public class ExecutableFormatError : FormatException
+	public class VersionError : ArgumentException
 	{
-		public ExecutableFormatError(string msg) : base(msg) { }
-		public ExecutableFormatError(string msg, Exception inner) : base(msg, inner) { }
+		public VersionError(string msg) : base(msg) { }
+		public VersionError(string msg, Exception inner) : base(msg, inner) { }
+	}
+	/// <summary>
+	/// Exception type thrown when attempting to use an object of the incorrect type
+	/// </summary>
+	public class TypeError : ArgumentException
+	{
+		public TypeError(string msg) : base(msg) { }
+		public TypeError(string msg, Exception inner) : base(msg, inner) { }
 	}
 
 	/// <summary>

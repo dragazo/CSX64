@@ -4664,8 +4664,6 @@ namespace CSX64
             {
                 file = file = new ObjectFile(),
 
-                time = Computer.Time,
-
                 current_seg = AsmSegment.INVALID,
                 done_segs = AsmSegment.INVALID,
 
@@ -4680,8 +4678,7 @@ namespace CSX64
             // create the table of predefined symbols
             args.file.Symbols = new Dictionary<string, Expr>(PredefinedSymbols)
             {
-                ["__time__"] = new Expr() { IntResult = args.time },
-                ["__version__"] = new Expr() { IntResult = Computer.Version },
+                ["__version__"] = new Expr() { IntResult = Utility.Version },
 
                 ["__pinf__"] = new Expr() { FloatResult = double.PositiveInfinity },
                 ["__ninf__"] = new Expr() { FloatResult = double.NegativeInfinity },
@@ -5626,10 +5623,8 @@ namespace CSX64
         /// <param name="objs">the object files to link. should all be clean. the first item in this array is the _start file</param>
         /// <param name="entry_point">the raw starting file</param>
         /// <exception cref="ArgumentException"></exception>
-        public static LinkResult Link(out byte[] exe, ObjectFile[] objs, string entry_point = "main")
+        public static LinkResult Link(Executable exe, ObjectFile[] objs, string entry_point = "main")
         {
-            exe = null; // initially null result
-
             // parsing locations for evaluation
             UInt64 _res;
             bool _floating;
@@ -5823,21 +5818,10 @@ namespace CSX64
                 if (!_FixAllHoles(obj.Symbols, obj.DataHoles, data, ref res)) return res;
             }
 
-            // -- finalize things -- //
+			// -- finalize things -- //
 
-            // allocate executable space (header + text + data)
-            exe = new byte[32 + (UInt64)text.Count + (UInt64)rodata.Count + (UInt64)data.Count];
-
-            // write header (length of each segment)
-            exe.Write(0, 8, (UInt64)text.Count);
-            exe.Write(8, 8, (UInt64)rodata.Count);
-            exe.Write(16, 8, (UInt64)data.Count);
-            exe.Write(24, 8, bsslen);
-
-            // copy text and data
-            text.CopyTo(0, exe, 32, text.Count);
-            rodata.CopyTo(0, exe, 32 + text.Count, rodata.Count);
-            data.CopyTo(0, exe, 32 + text.Count + rodata.Count, data.Count);
+			// construct the executable
+			exe.Construct(text, rodata, data, bsslen);
 
             // linked successfully
             return new LinkResult(LinkError.None, string.Empty);

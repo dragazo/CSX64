@@ -10,12 +10,19 @@ namespace CSX64
 {
     public static class Utility
     {
-        // -- misc utilities -- //
+		// -- versioning info -- //
 
-        /// <summary>
-        /// Swaps the contents of the specified l-values
-        /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+		/// <summary>
+		/// CSX64 version number
+		/// </summary>
+		public const UInt64 Version = 0x0500;
+
+		// -- misc utilities -- //
+
+		/// <summary>
+		/// Swaps the contents of the specified l-values
+		/// </summary>
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void Swap<T>(ref T a, ref T b)
         {
             T temp = a;

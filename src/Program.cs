@@ -160,18 +160,11 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 		/// </summary>
 		/// <param name="path">the file to save to</param>
 		/// <param name="exe">the csx64 executable to save</param>
-		private static int SaveExecutable(string path, byte[] exe)
+		private static int SaveExecutable(string path, Executable exe)
 		{
-			FileStream f = null; // file handle
-
 			try
 			{
-				// open the file
-				f = File.Open(path, FileMode.Create);
-
-				// write the data
-				f.Write(exe, 0, exe.Length);
-
+				exe.Save(path);
 				return 0;
 			}
 
@@ -187,32 +180,24 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 
 			// everything else that might happen for some reason
 			catch (Exception ex) { Console.Error.WriteLine($"An error occurred while attempting to execute \"{path}\"\n-> {ex}"); return (int)AsmLnkErrorExt.UnknownError; }
-
-			// close the file
-			finally { f?.Dispose(); }
 		}
 		/// <summary>
 		/// Loads a csx64 executable from a file (no format checking).
 		/// </summary>
 		/// <param name="path">the file to read</param>
-		/// <param name="exe">the resulting csx64 executable (on success)</param>
-		private static int LoadExecutable(string path, out byte[] exe)
+		/// <param name="exe">the resulting csx64 executable (on success) (non-null)</param>
+		private static int LoadExecutable(string path, Executable exe)
 		{
-			exe = null;
-
-			FileStream f = null; // file handle
-
 			try
 			{
-				// open the file
-				f = File.OpenRead(path);
-
-				// read the contents
-				exe = new byte[f.Length];
-				f.Read(exe, 0, (int)f.Length);
-
+				exe.Load(path);
 				return 0;
 			}
+
+			// things from CSX64
+			catch (TypeError) { Console.Error.WriteLine($"{path} is not a CSX64 executable"); return (int)AsmLnkErrorExt.FormatError; }
+			catch (VersionError) { Console.Error.WriteLine("Executable {path} is of an incompatible version of CSX64"); return (int)AsmLnkErrorExt.FormatError; }
+			catch (FormatException) { Console.Error.WriteLine($"{path} is either not a CSX64 executable or is corrupted"); return (int)AsmLnkErrorExt.FormatError; }
 
 			// things from File.OpenRead
 			catch (ArgumentNullException) { Console.Error.WriteLine("Path was null"); return (int)AsmLnkErrorExt.NullPath; }
@@ -226,9 +211,6 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 
 			// everything else that might happen for some reason
 			catch (Exception ex) { Console.Error.WriteLine($"An error occurred while attempting to execute \"{path}\"\n-> {ex}"); return (int)AsmLnkErrorExt.UnknownError; }
-
-			// close the file
-			finally { f?.Dispose(); }
 		}
 
 		// -------------------- //
@@ -439,14 +421,13 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 		/// <summary>
 		/// Links several files to create an executable (stored to dest).
 		/// </summary>
-		/// <param name="dest">the resulting executable (on success)</param>
+		/// <param name="dest">the resulting executable (on success) (non-null)</param>
 		/// <param name="files">the files to link. ".o" files are loaded as object files, otherwise treated as assembly source and assembled</param>
 		/// <param name="entry_point">the main entry point</param>
 		/// <param name="rootdir">the root directory to use for core file lookup - null for default</param>
-		private static int Link(out byte[] dest, List<string> files, string entry_point, string rootdir)
+		private static int Link(Executable dest, List<string> files, string entry_point, string rootdir)
 		{
 			var objs = new List<ObjectFile>();
-			dest = null; // to appease compiler
 
 			// load the stdlib files
 			int ret = LoadStdlibObjs(objs, rootdir);
@@ -463,7 +444,7 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 			}
 
 			// link the resulting object files into an executable
-			LinkResult res = Assembly.Link(out dest, objs.ToArray(), entry_point);
+			LinkResult res = Assembly.Link(dest, objs.ToArray(), entry_point);
 
 			// if there was an error, show error message
 			if (res.Error != LinkError.None)
@@ -488,7 +469,7 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 		/// <param name="args">command line args for the client program</param>
 		/// <param name="fsf">value of FSF (file system flag) furing client program execution</param>
 		/// <param name="time">marks if the execution time should be measured</param>
-		private static int RunConsole(byte[] exe, string[] args, bool fsf, bool time)
+		private static int RunConsole(Executable exe, string[] args, bool fsf, bool time)
 		{
 			// create the computer
 			using (Computer computer = new Computer())
@@ -500,11 +481,6 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 				{
 					// initialize program
 					computer.Initialize(exe, args);
-				}
-				catch (ExecutableFormatError ex)
-				{
-					Console.Error.WriteLine(ex.Message);
-					return (int)AsmLnkErrorExt.FormatError;
 				}
 				catch (MemoryAllocException ex)
 				{
@@ -546,7 +522,7 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 		/// Executes a program via the graphical client. returns true if there were no errors
 		/// </summary>
 		/// <param name="exe">the code to execute</param>
-		private static int RunGraphical(byte[] exe, string[] args, bool fsf)
+		private static int RunGraphical(Executable exe, string[] args, bool fsf)
 		{
 			// create the computer
 			using (GraphicalComputer computer = new GraphicalComputer())
@@ -555,11 +531,6 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 				{
 					// initialize program
 					computer.Initialize(exe, args);
-				}
-				catch (ExecutableFormatError ex)
-				{
-					Console.Error.WriteLine(ex.Message);
-					return (int)AsmLnkErrorExt.FormatError;
 				}
 				catch (MemoryAllocException ex)
 				{
@@ -800,7 +771,8 @@ so most of it won't work on this system!
 					{
 						if (dat.pathspec.Count == 0) { Console.Error.WriteLine("Expected a file to execute"); return 0; }
 
-						int res = LoadExecutable(dat.pathspec[0], out byte[] exe);
+						Executable exe = new Executable();
+						int res = LoadExecutable(dat.pathspec[0], exe);
 
 						return res != 0 ? res : RunConsole(exe, dat.pathspec.ToArray(), dat.fsf, dat.time);
 					}
@@ -810,7 +782,8 @@ so most of it won't work on this system!
 					{
 						if (dat.pathspec.Count == 0) { Console.Error.WriteLine("Expected a file to execute"); return 0; }
 
-						int res = LoadExecutable(dat.pathspec[0], out byte[] exe);
+						Executable exe = new Executable();
+						int res = LoadExecutable(dat.pathspec[0], exe);
 
 						return res != 0 ? res : RunGraphical(exe, dat.pathspec.ToArray(), dat.fsf);
 					}
@@ -821,7 +794,9 @@ so most of it won't work on this system!
 						if (dat.pathspec.Count == 0) { Console.Error.WriteLine("Expected a file to assemble, link, and execute"); return 0; }
 
 						AddPredefines();
-						int res = Link(out byte[] exe, new List<string>() { dat.pathspec[0] }, dat.entry_point ?? "main", dat.rootdir);
+						Executable exe = new Executable();
+
+						int res = Link(exe, new List<string>() { dat.pathspec[0] }, dat.entry_point ?? "main", dat.rootdir);
 
 						return res != 0 ? res : RunConsole(exe, dat.pathspec.ToArray(), dat.fsf, dat.time);
 					}
@@ -832,7 +807,9 @@ so most of it won't work on this system!
 						if (dat.pathspec.Count == 0) { Console.Error.WriteLine("Expected 1+ files to assemble, link, and execute"); return 0; }
 
 						AddPredefines();
-						int res = Link(out byte[] exe, dat.pathspec, dat.entry_point ?? "main", dat.rootdir);
+						Executable exe = new Executable();
+
+						int res = Link(exe, dat.pathspec, dat.entry_point ?? "main", dat.rootdir);
 
 						return res != 0 ? res : RunConsole(exe, new string[] { "<script>" }, dat.fsf, dat.time);
 					}
@@ -873,8 +850,9 @@ so most of it won't work on this system!
 						if (dat.pathspec.Count == 0) { Console.Error.WriteLine("Linker expected 1+ files to link"); return 0; }
 
 						AddPredefines();
+						Executable exe = new Executable();
 
-						int res = Link(out byte[] exe, dat.pathspec, dat.entry_point ?? "main", dat.rootdir);
+						int res = Link(exe, dat.pathspec, dat.entry_point ?? "main", dat.rootdir);
 						return res != 0 ? res : SaveExecutable(dat.output ?? "a.out", exe);
 					}
             } // end switch

@@ -9,19 +9,9 @@ namespace CSX64
     public partial class Computer : IDisposable
     {
         /// <summary>
-        /// Version number
-        /// </summary>
-        public const UInt64 Version = 0x0500;
-
-        /// <summary>
         /// Indicates if rmdir will remove non-empty directories recursively
         /// </summary>
         public const bool RecursiveRmdir = false;
-
-        /// <summary>
-        /// Gets the current time as used by the assembler
-        /// </summary>
-        public static UInt64 Time => (UInt64)DateTime.UtcNow.Ticks;
 
         // ----------------------------------------
 
@@ -104,41 +94,32 @@ namespace CSX64
         /// <param name="exe">the memory to load before starting execution (memory beyond this range is undefined)</param>
         /// <param name="args">the command line arguments to provide to the computer. pass null or empty array for none</param>
         /// <param name="stacksize">the amount of additional space to allocate for the program's stack</param>
-        public void Initialize(byte[] exe, string[] args, UInt64 stacksize = 2 * 1024 * 1024)
+        public void Initialize(Executable exe, string[] args, UInt64 stacksize = 2 * 1024 * 1024)
         {
-			// read header
-			if (!exe.Read(0, 8, out UInt64 text_seglen) || !exe.Read(8, 8, out UInt64 rodata_seglen)
-				|| !exe.Read(16, 8, out UInt64 data_seglen) || !exe.Read(24, 8, out UInt64 bss_seglen))
-				throw new ExecutableFormatError("executable header missing");
+            // get size of memory we need to allocate
+            UInt64 size = exe.TotalSize + stacksize;
 
-			// make sure exe is well-formed
-			if (32 + text_seglen + rodata_seglen + data_seglen != (UInt64)exe.Length)
-				throw new ExecutableFormatError("executable header invalid");
-
-            // get size of memory and make sure it's within limits
-            UInt64 size = (UInt64)exe.Length - 32 + bss_seglen + stacksize;
-
-			// mark the minimum amount of memory (minimum sys_brk value) (so user can't truncate program data/stack/etc.)
-			MinMemory = size;
-
-			// make sure it's within limits
-			if (size > MaxMemory)
-				throw new MemoryAllocException("executable size exceeded max memory");
+			// make sure we catch overflow from adding stacksize
+			if (size < stacksize) throw new OverflowException("memory size overflow uint64");
+			// make sure it's within max  memory usage limits
+			if (size > MaxMemory) throw new MemoryAllocException("executable size exceeded max memory");
 
             // get new memory array (does not include header)
             Memory = new byte[size];
-			
-            // copy over the text/rodata/data segments (not including header)
-            for (int i = 32; i < exe.Length; ++i) Memory[i - 32] = exe[i];
+			// mark the minimum amount of memory (minimum sys_brk value) (so user can't truncate program data/stack/etc.)
+			MinMemory = size;
+
+			// copy the executable content into our memory array
+			exe.Content.CopyTo(Memory, 0);
             // zero the bss segment (should already be done by C# but this makes it more clear and explicit)
-            for (int i = 0; i < (int)bss_seglen; ++i) Memory[i + exe.Length - 32] = 0;
+            for (int i = 0; i < (int)exe.bss_seglen; ++i) Memory[exe.Content.Length + i] = 0;
             // randomize the heap/stack segments (C# won't let us create an uninitialized array and bit-zero is too safe - more realistic danger)
-            for (int i = exe.Length - 32 + (int)bss_seglen; i < Memory.Length; ++i) Memory[i] = (byte)Rand.Next();
+            for (int i = (int)exe.TotalSize; i < Memory.Length; ++i) Memory[i] = (byte)Rand.Next();
 
             // set up memory barriers
-            ExeBarrier = text_seglen;
-            ReadonlyBarrier = text_seglen + rodata_seglen;
-            StackBarrier = text_seglen + rodata_seglen + data_seglen + bss_seglen;
+            ExeBarrier = exe.text_seglen;
+            ReadonlyBarrier = exe.text_seglen + exe.rodata_seglen;
+            StackBarrier = exe.text_seglen + exe.rodata_seglen + exe.data_seglen + exe.bss_seglen;
 
             // set up cpu registers
             for (int i = 0; i < CPURegisters.Length; ++i) CPURegisters[i].x64 = Rand.NextUInt64();
