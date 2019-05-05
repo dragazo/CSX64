@@ -12,53 +12,53 @@ using System.Diagnostics;
 
 namespace CSX64
 {
-    static class Program
-    {
-        /// <summary>
-        /// Represents a desired action
-        /// </summary>
-        private enum ProgramAction
-        {
-            ExecuteConsole, // takes 1 csx64 executable + args -- executes as a console application
+	static class Program
+	{
+		/// <summary>
+		/// Represents a desired action
+		/// </summary>
+		private enum ProgramAction
+		{
+			ExecuteConsole, // takes 1 csx64 executable + args -- executes as a console application
 
 			ExecuteConsoleScript, // takes 1 csx64 assembly file + args -- compiles, links, and executes in memory as a console application
 			ExecuteConsoleMultiscript, // takes 1+ csx64 assembly files -- compiles, links, and executes in memory as a console application
 
 			ExecuteGraphical, // takes 1 csx64 executable + args -- executes as a graphical application
 
-            Assemble, // assembles 1+ csx64 assembly files into csx64 object files
+			Assemble, // assembles 1+ csx64 assembly files into csx64 object files
 			Link,     // links 1+ csx64 object files into a csx64 executable
-        }
+		}
 
-        /// <summary>
-        /// An extension of assembly and link error codes for use specifically in <see cref="Main(string[])"/>
-        /// </summary>
-        private enum AsmLnkErrorExt
-        {
-            FailOpen = 100,
-            NullPath,
-            InvalidPath,
-            DirectoryNotFound,
-            AccessViolation,
-            FileNotFound,
-            PathFormatUnsupported,
-            IOError,
-            FormatError,
+		/// <summary>
+		/// An extension of assembly and link error codes for use specifically in <see cref="Main(string[])"/>
+		/// </summary>
+		private enum AsmLnkErrorExt
+		{
+			FailOpen = 100,
+			NullPath,
+			InvalidPath,
+			DirectoryNotFound,
+			AccessViolation,
+			FileNotFound,
+			PathFormatUnsupported,
+			IOError,
+			FormatError,
 
 			MemoryAllocError = 197,
 			ComputerInitError = 198,
 
-            UnknownError = 199
-        }
+			UnknownError = 199
+		}
 
-        // ---------------------------------
+		// ---------------------------------
 
-        /// <summary>
-        /// The return value to use in the case of error during execution
-        /// </summary>
-        private const int ExecErrorReturnCode = -1;
+		/// <summary>
+		/// The return value to use in the case of error during execution
+		/// </summary>
+		private const int ExecErrorReturnCode = -1;
 
-        private const string HelpMessage =
+		private const string HelpMessage =
 @"Usage: csx [OPTION]... [ARG]...
 Assemble, link, or execute CSX64 files.
 
@@ -81,10 +81,10 @@ Assemble, link, or execute CSX64 files.
 Report bugs to: https://github.com/dragazo/CSX64/issues
 ";
 
-        /// <summary>
-        /// The path to the executable's directory
-        /// </summary>
-        private static string ExeDir => AppDomain.CurrentDomain.BaseDirectory;
+		/// <summary>
+		/// The path to the executable's directory
+		/// </summary>
+		private static string ExeDir => AppDomain.CurrentDomain.BaseDirectory;
 
 		/// <summary>
 		/// adds standard symbols to the assembler predefine table
@@ -168,6 +168,9 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 				return 0;
 			}
 
+			// things from CSX64
+			catch (EmptyError) { Console.Error.WriteLine($"Attempt to save empty executable to {path}"); return (int)AsmLnkErrorExt.FormatError; }
+
 			// things from File.OpenRead
 			catch (ArgumentNullException) { Console.Error.WriteLine("Path was null"); return (int)AsmLnkErrorExt.NullPath; }
 			catch (ArgumentException) { Console.Error.WriteLine($"Path \"{path}\" was invalid"); return (int)AsmLnkErrorExt.InvalidPath; }
@@ -226,17 +229,9 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 		/// <param name="obj">the object file to save</param>
 		private static int SaveObjectFile(string path, ObjectFile obj)
 		{
-			FileStream f = null; // file handle
-
 			try
 			{
-				// open the file
-				f = File.Open(path, FileMode.Create);
-
-				// serialize the object
-				using (BinaryWriter writer = new BinaryWriter(f))
-					ObjectFile.WriteTo(writer, obj);
-
+				obj.Save(path);
 				return 0;
 			}
 
@@ -252,36 +247,28 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 
 			// everything else that might happen for some reason
 			catch (Exception ex) { Console.Error.WriteLine($"An error occurred while attempting to execute \"{path}\"\n-> {ex}"); return (int)AsmLnkErrorExt.UnknownError; }
-
-			// close the file
-			finally { f?.Dispose(); }
 		}
 		/// <summary>
 		/// Loads an object file from a file.
 		/// </summary>
 		/// <param name="path">the source fie to read from</param>
 		/// <param name="obj">the resulting object file (on success)</param>
-		private static int LoadObjectFile(string path, out ObjectFile obj)
+		private static int LoadObjectFile(string path, ObjectFile obj)
 		{
-			obj = null;
-
-			FileStream f = null; // file handle
-
 			try
 			{
-				// open the file
-				f = File.OpenRead(path);
-
-				// deserialize the object
-				using (BinaryReader reader = new BinaryReader(f))
-					ObjectFile.ReadFrom(reader, out obj);
-
+				obj.Load(path);
 				return 0;
 			}
 
+			// things from CSX64
+			catch (TypeError) { Console.Error.WriteLine($"{path} is not a CSX64 object file"); return (int)AsmLnkErrorExt.FormatError; }
+			catch (VersionError) { Console.Error.WriteLine($"Object file {path} is of an incompatible version of CSX64"); return (int)AsmLnkErrorExt.FormatError; }
+			catch (FormatException) { Console.Error.WriteLine($"Object file {path} is of an unrecognized format"); return (int)AsmLnkErrorExt.FormatError; }
+
 			// things from File.OpenRead
 			catch (ArgumentNullException) { Console.Error.WriteLine("Path was null"); return (int)AsmLnkErrorExt.NullPath; }
-			catch (ArgumentException) { Console.Error.WriteLine($"Path \"{path}\" was invalid"); return (int)AsmLnkErrorExt.InvalidPath; }
+			catch (ArgumentException ex) { Console.Error.WriteLine($"Path \"{path}\" was invalid\n{ex}"); return (int)AsmLnkErrorExt.InvalidPath; }
 			catch (PathTooLongException) { Console.Error.WriteLine($"Path \"{path}\" was too long"); return (int)AsmLnkErrorExt.InvalidPath; }
 			catch (DirectoryNotFoundException) { Console.Error.WriteLine($"Path \"{path}\" directory was not found"); return (int)AsmLnkErrorExt.DirectoryNotFound; }
 			catch (UnauthorizedAccessException) { Console.Error.WriteLine($"You do not have permission to open \"{path}\" for reading"); return (int)AsmLnkErrorExt.AccessViolation; }
@@ -289,17 +276,11 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 			catch (NotSupportedException) { Console.Error.WriteLine($"Path \"{path}\" was of an unsupported format"); return (int)AsmLnkErrorExt.PathFormatUnsupported; }
 			catch (IOException) { Console.Error.WriteLine($"An error occurred while reading file \"{path}\""); return (int)AsmLnkErrorExt.IOError; }
 
-			// things from ObjectFile.ReadFrom
-			catch (FormatException) { Console.Error.WriteLine($"Object file \"{path}\" was corrupted"); return (int)AsmLnkErrorExt.FormatError; }
-
 			// things from casting after deserialization
 			catch (InvalidCastException) { Console.Error.WriteLine($"file \"{path}\" was incorrectly-formatted"); return (int)AsmLnkErrorExt.FormatError; }
 
 			// everything else that might happen for some reason
 			catch (Exception ex) { Console.Error.WriteLine($"An error occurred while attempting to execute \"{path}\"\n-> {ex}"); return (int)AsmLnkErrorExt.UnknownError; }
-
-			// close the file
-			finally { f?.Dispose(); }
 		}
 
 		/// <summary>
@@ -314,7 +295,8 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 			string[] files = Directory.GetFiles(path, "*.o");
 			foreach (string file in files)
 			{
-				int ret = LoadObjectFile(file, out ObjectFile obj);
+				ObjectFile obj = new ObjectFile();
+				int ret = LoadObjectFile(file, obj);
 				if (ret != 0) return ret;
 				objs.Add(obj);
 			}
@@ -352,7 +334,7 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 
 			// things from File.OpenRead
 			catch (ArgumentNullException) { Console.Error.WriteLine("Path was null"); return (int)AsmLnkErrorExt.NullPath; }
-			catch (ArgumentException) { Console.Error.WriteLine($"Path \"{path}\" was invalid"); return (int)AsmLnkErrorExt.InvalidPath; }
+			catch (ArgumentException) { Console.Error.WriteLine($"Path \"{path}\" was invalid\n"); return (int)AsmLnkErrorExt.InvalidPath; }
 			catch (PathTooLongException) { Console.Error.WriteLine($"Path \"{path}\" was too long"); return (int)AsmLnkErrorExt.InvalidPath; }
 			catch (DirectoryNotFoundException) { Console.Error.WriteLine($"Path \"{path}\" directory was not found"); return (int)AsmLnkErrorExt.DirectoryNotFound; }
 			catch (UnauthorizedAccessException) { Console.Error.WriteLine($"You do not have permission to open \"{path}\" for reading"); return (int)AsmLnkErrorExt.AccessViolation; }
@@ -372,14 +354,14 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 		/// </summary>
 		/// <param name="file">the assembly source file</param>
 		/// <param name="dest">the resulting object file (on success)</param>
-		private static int Assemble(string file, out ObjectFile dest)
+		private static int Assemble(string file, ObjectFile dest)
 		{
 			// read the file contents
 			int ret = LoadTextFile(file, out string source);
 			if (ret != 0) { dest = null; return ret; }
 
 			// assemble the source
-			AssembleResult res = Assembly.Assemble(source, out dest);
+			AssembleResult res = Assembly.Assemble(source, dest);
 
 			// if there was an error, show error message
 			if (res.Error != AssembleError.None)
@@ -410,7 +392,8 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 			// in the C++ impl that can fail, but in C# it can't - fail case omitted
 
 			// load the _start fie
-			int ret = LoadObjectFile(dir + "/_start.o", out ObjectFile _start);
+			ObjectFile _start = new ObjectFile();
+			int ret = LoadObjectFile(dir + "/_start.o", _start);
 			if (ret != 0) return ret;
 			objs.Add(_start);
 
@@ -436,9 +419,9 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 			// load the provided files
 			foreach (string file in files)
 			{
-				// treat ".o" as object fie, otherwise as assembly source
-				ObjectFile obj;
-				ret = file.EndsWith(".o") ? LoadObjectFile(file, out obj) : Assemble(file, out obj);
+				// treat ".o" as object file, otherwise as assembly source
+				ObjectFile obj = new ObjectFile();
+				ret = file.EndsWith(".o") ? LoadObjectFile(file, obj) : Assemble(file, obj);
 				if (ret != 0) return ret;
 				objs.Add(obj);
 			}
@@ -734,130 +717,139 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 		/// The main entry point for the application.
 		/// </summary>
 		[STAThread]
-        private static unsafe int Main(string[] args)
-        {
-			if (!BitConverter.IsLittleEndian)
+		private static unsafe int Main(string[] args)
+		{
+			try
 			{
-				Console.Error.WriteLine(
-@"(Uhoh!! Looks like this platform isn't little-endian!
+				if (!BitConverter.IsLittleEndian)
+				{
+					Console.Error.WriteLine(
+	@"(Uhoh!! Looks like this platform isn't little-endian!
 Most everything in CSX64 assumes little-endian,
 so most of it won't work on this system!
 )");
-				return -1;
-			}
+					return -1;
+				}
 
-			// ------------------------------------- //
+				// ------------------------------------- //
 
-            // set up initilization thingys for graphical stuff
-            Application.EnableVisualStyles();
-            Application.SetCompatibleTextRenderingDefault(false);
+				// set up initilization thingys for graphical stuff
+				Application.EnableVisualStyles();
+				Application.SetCompatibleTextRenderingDefault(false);
 
-            // run statics fom client sources
-            GraphicalComputer.InitStatics();
+				// run statics fom client sources
+				GraphicalComputer.InitStatics();
 
-			// ------------------------------------- //
+				// ------------------------------------- //
 
-			cmdln_pack dat = new cmdln_pack();
+				cmdln_pack dat = new cmdln_pack();
 
-			if (!dat.parse(args)) return 0;
+				if (!dat.parse(args)) return 0;
 
-			// ------------------------------------- //
+				// ------------------------------------- //
 
-            // perform the action
-            switch (dat.action)
-            {
-                case ProgramAction.ExecuteConsole:
+				// perform the action
+				switch (dat.action)
+				{
+					case ProgramAction.ExecuteConsole:
 
-					{
-						if (dat.pathspec.Count == 0) { Console.Error.WriteLine("Expected a file to execute"); return 0; }
-
-						Executable exe = new Executable();
-						int res = LoadExecutable(dat.pathspec[0], exe);
-
-						return res != 0 ? res : RunConsole(exe, dat.pathspec.ToArray(), dat.fsf, dat.time);
-					}
-
-				case ProgramAction.ExecuteGraphical:
-
-					{
-						if (dat.pathspec.Count == 0) { Console.Error.WriteLine("Expected a file to execute"); return 0; }
-
-						Executable exe = new Executable();
-						int res = LoadExecutable(dat.pathspec[0], exe);
-
-						return res != 0 ? res : RunGraphical(exe, dat.pathspec.ToArray(), dat.fsf);
-					}
-
-				case ProgramAction.ExecuteConsoleScript:
-
-					{
-						if (dat.pathspec.Count == 0) { Console.Error.WriteLine("Expected a file to assemble, link, and execute"); return 0; }
-
-						AddPredefines();
-						Executable exe = new Executable();
-
-						int res = Link(exe, new List<string>() { dat.pathspec[0] }, dat.entry_point ?? "main", dat.rootdir);
-
-						return res != 0 ? res : RunConsole(exe, dat.pathspec.ToArray(), dat.fsf, dat.time);
-					}
-
-				case ProgramAction.ExecuteConsoleMultiscript:
-
-					{
-						if (dat.pathspec.Count == 0) { Console.Error.WriteLine("Expected 1+ files to assemble, link, and execute"); return 0; }
-
-						AddPredefines();
-						Executable exe = new Executable();
-
-						int res = Link(exe, dat.pathspec, dat.entry_point ?? "main", dat.rootdir);
-
-						return res != 0 ? res : RunConsole(exe, new string[] { "<script>" }, dat.fsf, dat.time);
-					}
-
-                case ProgramAction.Assemble:
-
-					{
-						if (dat.pathspec.Count == 0) { Console.Error.WriteLine("Expected 1+ files to assemble"); return 0; }
-
-						AddPredefines();
-
-						// if no explicit output is provided, batch process each pathspec
-						if (dat.output == null)
 						{
-							foreach (string path in dat.pathspec)
+							if (dat.pathspec.Count == 0) { Console.Error.WriteLine("Expected a file to execute"); return 0; }
+
+							Executable exe = new Executable();
+							int res = LoadExecutable(dat.pathspec[0], exe);
+
+							return res != 0 ? res : RunConsole(exe, dat.pathspec.ToArray(), dat.fsf, dat.time);
+						}
+
+					case ProgramAction.ExecuteGraphical:
+
+						{
+							if (dat.pathspec.Count == 0) { Console.Error.WriteLine("Expected a file to execute"); return 0; }
+
+							Executable exe = new Executable();
+							int res = LoadExecutable(dat.pathspec[0], exe);
+
+							return res != 0 ? res : RunGraphical(exe, dat.pathspec.ToArray(), dat.fsf);
+						}
+
+					case ProgramAction.ExecuteConsoleScript:
+
+						{
+							if (dat.pathspec.Count == 0) { Console.Error.WriteLine("Expected a file to assemble, link, and execute"); return 0; }
+
+							AddPredefines();
+							Executable exe = new Executable();
+
+							int res = Link(exe, new List<string>() { dat.pathspec[0] }, dat.entry_point ?? "main", dat.rootdir);
+
+							return res != 0 ? res : RunConsole(exe, dat.pathspec.ToArray(), dat.fsf, dat.time);
+						}
+
+					case ProgramAction.ExecuteConsoleMultiscript:
+
+						{
+							if (dat.pathspec.Count == 0) { Console.Error.WriteLine("Expected 1+ files to assemble, link, and execute"); return 0; }
+
+							AddPredefines();
+							Executable exe = new Executable();
+
+							int res = Link(exe, dat.pathspec, dat.entry_point ?? "main", dat.rootdir);
+
+							return res != 0 ? res : RunConsole(exe, new string[] { "<script>" }, dat.fsf, dat.time);
+						}
+
+					case ProgramAction.Assemble:
+
+						{
+							if (dat.pathspec.Count == 0) { Console.Error.WriteLine("Expected 1+ files to assemble"); return 0; }
+
+							AddPredefines();
+							ObjectFile obj = new ObjectFile();
+
+							// if no explicit output is provided, batch process each pathspec
+							if (dat.output == null)
 							{
-								int res = Assemble(path, out ObjectFile obj);
-								if (res != 0) return res;
+								foreach (string path in dat.pathspec)
+								{
+									int res = Assemble(path, obj);
+									if (res != 0) return res;
 
-								res = SaveObjectFile(Path.ChangeExtension(path, ".o"), obj);
-								if (res != 0) return res;
+									res = SaveObjectFile(Path.ChangeExtension(path, ".o"), obj);
+									if (res != 0) return res;
+								}
+								return 0;
 							}
-							return 0;
+							// otherwise, we're expecting only one input with a named output
+							else
+							{
+								if (dat.pathspec.Count != 1) { Console.Error.WriteLine("Assembler with an explicit output expected only one input"); return 0; }
+
+								int res = Assemble(dat.pathspec[0], obj);
+								return res != 0 ? res : SaveObjectFile(dat.output, obj);
+							}
 						}
-						// otherwise, we're expecting only one input with a named output
-						else
+
+					case ProgramAction.Link:
+
 						{
-							if (dat.pathspec.Count != 1) { Console.Error.WriteLine("Assembler with an explicit output expected only one input"); return 0; }
+							if (dat.pathspec.Count == 0) { Console.Error.WriteLine("Linker expected 1+ files to link"); return 0; }
 
-							int res = Assemble(dat.pathspec[0], out ObjectFile obj);
-							return res != 0 ? res : SaveObjectFile(dat.output, obj);
+							AddPredefines();
+							Executable exe = new Executable();
+
+							int res = Link(exe, dat.pathspec, dat.entry_point ?? "main", dat.rootdir);
+							return res != 0 ? res : SaveExecutable(dat.output ?? "a.out", exe);
 						}
-					}
+				} // end switch
 
-                case ProgramAction.Link:
-
-					{
-						if (dat.pathspec.Count == 0) { Console.Error.WriteLine("Linker expected 1+ files to link"); return 0; }
-
-						AddPredefines();
-						Executable exe = new Executable();
-
-						int res = Link(exe, dat.pathspec, dat.entry_point ?? "main", dat.rootdir);
-						return res != 0 ? res : SaveExecutable(dat.output ?? "a.out", exe);
-					}
-            } // end switch
-
-            return 0;
-        }
-    }
+				return 0;
+			}
+			catch (Exception ex)
+			{
+				Console.Error.WriteLine($"UNHANDLED EXCEPTION:\n{ex}");
+				return -666;
+			}
+		}
+	}
 }

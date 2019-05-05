@@ -20,6 +20,23 @@ namespace CSX64
 	}
 
 	/// <summary>
+	/// Exception type thrown when attempting to use a dirty object
+	/// </summary>
+	public class DirtyError : ArgumentException
+	{
+		public DirtyError(string msg) : base(msg) { }
+		public DirtyError(string msg, Exception inner) : base(msg, inner) { }
+	}
+	/// <summary>
+	/// Exception type thrown when attempting to use an empty object
+	/// </summary>
+	public class EmptyError : ArgumentException
+	{
+		public EmptyError(string msg) : base(msg) { }
+		public EmptyError(string msg, Exception inner) : base(msg, inner) { }
+	}
+
+	/// <summary>
 	/// exception type thrown when program code attempts to violate memory requirements
 	/// </summary>
 	public class MemoryAllocException : OutOfMemoryException

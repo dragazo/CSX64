@@ -123,163 +123,227 @@ namespace CSX64
         /// </summary>
         internal UInt32 BssLen = 0;
 
-        /// <summary>
-        /// Marks that this object file is in a valid, usable state
-        /// </summary>
-        public bool Clean { get; internal set; } = false;
+		// -- state -- //
 
-        internal ObjectFile() { }
+		/// <summary>
+		/// Marks that this object file is in a valid, usable state
+		/// </summary>
+		public bool IsClean { get; internal set; } = false;
+		/// <summary>
+		/// Marks the object file as dirty
+		/// </summary>
+		public void MakeDirty() { IsClean = false; }
 
-        // ---------------------------
+		/// <summary>
+		/// Clears the contents of the object file (result is dirty)
+		/// </summary>
+		public void Clear()
+		{
+			IsClean = false;
 
-        /// <summary>
-        /// Writes a binary representation of an object file to the stream. Throws <see cref="ArgumentException"/> if file is dirty
-        /// </summary>
-        /// <param name="writer">the binary writer to use. must be clean</param>
-        /// <param name="obj">the object file to write</param>
-        /// <exception cref="ArgumentException"></exception>
-        public static void WriteTo(BinaryWriter writer, ObjectFile obj)
+			GlobalSymbols.Clear();
+			ExternalSymbols.Clear();
+
+			Symbols.Clear();
+
+			TextAlign = 1;
+			RodataAlign = 1;
+			DataAlign = 1;
+			BSSAlign = 1;
+
+			TextHoles.Clear();
+			RodataHoles.Clear();
+			DataHoles.Clear();
+
+			Text.Clear();
+			Rodata.Clear();
+			Data.Clear();
+			BssLen = 0;
+		}
+
+		// ---------------------------
+
+		private static readonly byte[] header = { (byte)'C', (byte)'S', (byte)'X', (byte)'6', (byte)'4', (byte)'o', (byte)'b', (byte)'j' };
+
+		/// <summary>
+		/// Saves this object file to a file located at (path).
+		/// </summary>
+		/// <param name="path">file path to save to</param>
+		public void Save(string path)
         {
             // ensure the object is clean
-            if (!obj.Clean) throw new ArgumentException("Attempt to use dirty object file");
+            if (!IsClean) throw new ArgumentException("Attempt to use dirty object file");
 
-            // write the global symbols (length-prefixed)
-            writer.Write(obj.GlobalSymbols.Count);
-            foreach (string symbol in obj.GlobalSymbols)
-                writer.Write(symbol);
+			using (BinaryWriter writer = new BinaryWriter(File.OpenWrite(path)))
+			{
+				// -- write header and CSX64 version number -- //
 
-            // write the external symbols (length-prefixed)
-            writer.Write(obj.ExternalSymbols.Count);
-            foreach (string symbol in obj.ExternalSymbols)
-                writer.Write(symbol);
+				writer.Write(header);
+				writer.Write(Utility.Version);
 
-            // write the symbols (length-prefixed)
-            writer.Write(obj.Symbols.Count);
-            foreach (var entry in obj.Symbols)
-            {
-                writer.Write(entry.Key);
-                Expr.WriteTo(writer, entry.Value);
-            }
+				// -- write globals -- //
 
-            // write alignments
-            writer.Write(obj.TextAlign);
-            writer.Write(obj.RodataAlign);
-            writer.Write(obj.DataAlign);
-            writer.Write(obj.BSSAlign);
+				writer.Write(GlobalSymbols.Count);
+				foreach (string symbol in GlobalSymbols)
+					writer.Write(symbol);
 
-            // write the text holes (length-prefixed)
-            writer.Write(obj.TextHoles.Count);
-            foreach (HoleData hole in obj.TextHoles)
-                HoleData.WriteTo(writer, hole);
+				// -- write externals -- //
 
-            // write the rodata holes (length-prefixed)
-            writer.Write(obj.RodataHoles.Count);
-            foreach (HoleData hole in obj.RodataHoles)
-                HoleData.WriteTo(writer, hole);
+				writer.Write(ExternalSymbols.Count);
+				foreach (string symbol in ExternalSymbols)
+					writer.Write(symbol);
 
-            // write the data holes (length-prefixed)
-            writer.Write(obj.DataHoles.Count);
-            foreach (HoleData hole in obj.DataHoles)
-                HoleData.WriteTo(writer, hole);
+				// -- write symbols -- //
 
-            // write the text segment (length-prefixed)
-            writer.Write(obj.Text.Count);
-            writer.Write(obj.Text.ToArray()); // ToArray() costs an O(n) copy, but still beats an equal number of function calls
+				writer.Write(Symbols.Count);
+				foreach (var entry in Symbols)
+				{
+					writer.Write(entry.Key);
+					Expr.WriteTo(writer, entry.Value);
+				}
 
-            // write the rodata segment (length-prefixed)
-            writer.Write(obj.Rodata.Count);
-            writer.Write(obj.Rodata.ToArray()); // ToArray() costs an O(n) copy, but still beats an equal number of function calls
+				// -- write alignments -- //
 
-            // write the data segment (length-prefixed)
-            writer.Write(obj.Data.Count);
-            writer.Write(obj.Data.ToArray()); // ToArray() costs an O(n) copy, but still beats an equal number of function calls
+				writer.Write(TextAlign);
+				writer.Write(RodataAlign);
+				writer.Write(DataAlign);
+				writer.Write(BSSAlign);
 
-            // write length of bss
-            writer.Write(obj.BssLen);
+				// -- write segment holes -- //
+
+				writer.Write(TextHoles.Count);
+				foreach (HoleData hole in TextHoles)
+					HoleData.WriteTo(writer, hole);
+
+				writer.Write(RodataHoles.Count);
+				foreach (HoleData hole in RodataHoles)
+					HoleData.WriteTo(writer, hole);
+
+				writer.Write(DataHoles.Count);
+				foreach (HoleData hole in DataHoles)
+					HoleData.WriteTo(writer, hole);
+
+				// -- write segments -- //
+
+				writer.Write(Text.Count);
+				writer.Write(Text.ToArray()); // ToArray() costs an O(n) copy, but still beats an equal number of function calls
+
+				writer.Write(Rodata.Count);
+				writer.Write(Rodata.ToArray()); // ToArray() costs an O(n) copy, but still beats an equal number of function calls
+
+				writer.Write(Data.Count);
+				writer.Write(Data.ToArray()); // ToArray() costs an O(n) copy, but still beats an equal number of function calls
+
+				writer.Write(BssLen);
+			}
         }
-        /// <summary>
-        /// Reads a binary representation of an object file from the stream
-        /// </summary>
-        /// <param name="reader">the binary reader to use</param>
-        /// <param name="hole">the resulting object file</param>
-        public static void ReadFrom(BinaryReader reader, out ObjectFile obj)
+		/// <summary>
+		/// Loads this object file with the content of a file located at (path).
+		/// Throws <see cref="TypeError"/> if the file is not a CSX64 object file.
+		/// Throws <see cref="VersionError"/> if the file is of an incompatible version.
+		/// Throws <see cref="FormatException"/> if the file is corrupted.
+		/// </summary>
+		/// <param name="path">file to read from</param>
+		/// <exception cref="TypeError"></exception>
+		/// <exception cref="VersionError"></exception>
+		/// <exception cref="FormatException"></exception>
+		public void Load(string path)
         {
-            // create the object file
-            obj = new ObjectFile();
+			using (BinaryReader file = new BinaryReader(File.OpenRead(path)))
+			{
+				// mark as initially dirty
+				IsClean = false;
 
-            // read the global symbols (length-prefixed)
-            int count = reader.ReadInt32();
-            for (int i = 0; i < count; ++i)
-                obj.GlobalSymbols.Add(reader.ReadString());
+				// -- file validation -- //
 
-            // read the external symbols (length-prefixed)
-            count = reader.ReadInt32();
-            for (int i = 0; i < count; ++i)
-                obj.ExternalSymbols.Add(reader.ReadString());
+				// read the header from the file and make sure it matches - match failure is a type error, not a format error
+				if (!header.SequenceEqual(file.ReadBytes(header.Length))) throw new TypeError("File was not a CSX64 object file");
 
-            // read the symbols (length-prefixed)
-            count = reader.ReadInt32();
-            for (int i = 0; i < count; ++i)
-            {
-                string key = reader.ReadString();
-                Expr.ReadFrom(reader, out Expr value);
+				// read the version number from the file and make sure it matches - match failure is a version error, not a format error
+				if (Utility.Version != file.ReadUInt64()) throw new VersionError("Object File was from an incompatible version of CSX64");
 
-                obj.Symbols.Add(key, value);
-            }
+				// -- read globals -- //
 
-            // read alignments
-            if (!(obj.TextAlign = reader.ReadUInt32()).IsPowerOf2()) throw new FormatException("Object file was corrupted");
-            if (!(obj.RodataAlign = reader.ReadUInt32()).IsPowerOf2()) throw new FormatException("Object file was corrupted");
-            if (!(obj.DataAlign = reader.ReadUInt32()).IsPowerOf2()) throw new FormatException("Object file was corrupted");
-            if (!(obj.BSSAlign = reader.ReadUInt32()).IsPowerOf2()) throw new FormatException("Object file was corrupted");
+				int count = file.ReadInt32();
+				GlobalSymbols.Clear();
+				for (int i = 0; i < count; ++i)
+					GlobalSymbols.Add(file.ReadString());
 
-            // read the text holes (length-prefixed)
-            count = reader.ReadInt32();
-            for (int i = 0; i < count; ++i)
-            {
-                HoleData.ReadFrom(reader, out HoleData hole);
-                obj.TextHoles.Add(hole);
-            }
+				// -- read externals -- //
 
-            // read the rodata holes (length-prefixed)
-            count = reader.ReadInt32();
-            for (int i = 0; i < count; ++i)
-            {
-                HoleData.ReadFrom(reader, out HoleData hole);
-                obj.RodataHoles.Add(hole);
-            }
+				count = file.ReadInt32();
+				ExternalSymbols.Clear();
+				for (int i = 0; i < count; ++i)
+					ExternalSymbols.Add(file.ReadString());
 
-            // read the data holes (length-prefixed)
-            count = reader.ReadInt32();
-            for (int i = 0; i < count; ++i)
-            {
-                HoleData.ReadFrom(reader, out HoleData hole);
-                obj.DataHoles.Add(hole);
-            }
+				// -- read symbols -- //
 
-            // read the text segment (length-prefixed)
-            count = reader.ReadInt32();
-            byte[] raw = new byte[count];
-            if (reader.Read(raw, 0, count) != count) throw new FormatException("Object file was corrupted");
-            obj.Text = raw.ToList();
+				count = file.ReadInt32();
+				Symbols.Clear();
+				for (int i = 0; i < count; ++i)
+				{
+					string key = file.ReadString();
+					Expr.ReadFrom(file, out Expr value);
 
-            // read the rodata (length-prefixed)
-            count = reader.ReadInt32();
-            raw = new byte[count];
-            if (reader.Read(raw, 0, count) != count) throw new FormatException("Object file was corrupted");
-            obj.Rodata = raw.ToList();
+					Symbols.Add(key, value);
+				}
 
-            // read the data (length-prefixed)
-            count = reader.ReadInt32();
-            raw = new byte[count];
-            if (reader.Read(raw, 0, count) != count) throw new FormatException("Object file was corrupted");
-            obj.Data = raw.ToList();
+				// -- read alignments -- //
 
-            // read the length of bss segment
-            obj.BssLen = reader.ReadUInt32();
+				if (!(TextAlign = file.ReadUInt32()).IsPowerOf2()) throw new FormatException("Object file was corrupted");
+				if (!(RodataAlign = file.ReadUInt32()).IsPowerOf2()) throw new FormatException("Object file was corrupted");
+				if (!(DataAlign = file.ReadUInt32()).IsPowerOf2()) throw new FormatException("Object file was corrupted");
+				if (!(BSSAlign = file.ReadUInt32()).IsPowerOf2()) throw new FormatException("Object file was corrupted");
 
-            // validate the object
-            obj.Clean = true;
+				// -- read segment holes -- //
+
+				count = file.ReadInt32();
+				TextHoles.Clear();
+				for (int i = 0; i < count; ++i)
+				{
+					HoleData.ReadFrom(file, out HoleData hole);
+					TextHoles.Add(hole);
+				}
+
+				count = file.ReadInt32();
+				RodataHoles.Clear();
+				for (int i = 0; i < count; ++i)
+				{
+					HoleData.ReadFrom(file, out HoleData hole);
+					RodataHoles.Add(hole);
+				}
+
+				count = file.ReadInt32();
+				DataHoles.Clear();
+				for (int i = 0; i < count; ++i)
+				{
+					HoleData.ReadFrom(file, out HoleData hole);
+					DataHoles.Add(hole);
+				}
+
+				// -- read segments -- //
+
+				count = file.ReadInt32();
+				byte[] raw = new byte[count];
+				if (file.Read(raw, 0, count) != count) throw new FormatException("Object file was corrupted");
+				Text = raw.ToList();
+
+				count = file.ReadInt32();
+				raw = new byte[count];
+				if (file.Read(raw, 0, count) != count) throw new FormatException("Object file was corrupted");
+				Rodata = raw.ToList();
+
+				count = file.ReadInt32();
+				raw = new byte[count];
+				if (file.Read(raw, 0, count) != count) throw new FormatException("Object file was corrupted");
+				Data = raw.ToList();
+
+				// read the length of bss segment
+				BssLen = file.ReadUInt32();
+
+				// validate the object
+				IsClean = true;
+			}
         }
 
         /// <summary>
@@ -1605,21 +1669,26 @@ namespace CSX64
 
             public ObjectFile file;
 
-            public UInt64 time;
+			public AsmSegment current_seg = AsmSegment.INVALID;
+            public AsmSegment done_segs = AsmSegment.INVALID;
 
-            public AsmSegment current_seg;
-            public AsmSegment done_segs;
+            public int line = 0;
+            public UInt64 line_pos_in_seg = 0;
 
-            public int line;
-            public UInt64 line_pos_in_seg;
-
-            public string last_nonlocal_label;
+            public string last_nonlocal_label = null;
 
             public string label_def;
             public string op;
             public string[] args; // must be array for ref params
 
             public AssembleResult res;
+
+			// -- construction -- //
+
+			public AssembleArgs(ObjectFile dest)
+			{
+				file = dest;
+			}
 
             // -- Assembly Functions -- //
 
@@ -4657,23 +4726,14 @@ namespace CSX64
         /// Assembles the code into an object file
         /// </summary>
         /// <param name="code">the code to assemble</param>
-        /// <param name="file">the resulting object file if no errors occur</param>
-        public static AssembleResult Assemble(string code, out ObjectFile file)
+        /// <param name="_file_">the resulting object file if no errors occur</param>
+        public static AssembleResult Assemble(string code, ObjectFile file)
         {
-            AssembleArgs args = new AssembleArgs()
-            {
-                file = file = new ObjectFile(),
+			// clear out the destination object file
+			file.Clear();
 
-                current_seg = AsmSegment.INVALID,
-                done_segs = AsmSegment.INVALID,
-
-                line = 0,
-                line_pos_in_seg = 0,
-
-                last_nonlocal_label = null,
-
-                res = default(AssembleResult)
-            };
+			// create the asm args for parsing - reference the (cleared) destination object file
+			AssembleArgs args = new AssembleArgs(file);
 
             // create the table of predefined symbols
             args.file.Symbols = new Dictionary<string, Expr>(PredefinedSymbols)
@@ -5609,8 +5669,8 @@ namespace CSX64
             // rename all the symbols we can shorten (done after verify to ensure there's no verify error messages with the renamed symbols)
             for (int i = 0; i < rename_symbols.Count; ++i) file.RenameSymbol(rename_symbols[i], $"^{i:x}");
 
-            // validate result
-            file.Clean = true;
+            // validate assembled result (referentially bound to file argument)
+            file.IsClean = true;
 
             // return no error
             return new AssembleResult(AssembleError.None, string.Empty);
@@ -5640,7 +5700,7 @@ namespace CSX64
             if (objs == null || objs.Length == 0) return new LinkResult(LinkError.EmptyResult, $"Got no object files");
 
             // make sure all object files are starting out clean
-            foreach (ObjectFile obj in objs) if (!obj.Clean) throw new ArgumentException("Attempt to use dirty object file");
+            foreach (ObjectFile obj in objs) if (!obj.IsClean) throw new ArgumentException("Attempt to use dirty object file");
 
             // -- validate _start file -- //
 
@@ -5648,7 +5708,7 @@ namespace CSX64
             if (!objs[0].ExternalSymbols.Contains("_start")) return new LinkResult(LinkError.FormatError, "_start file must declare an external named \"_start\"");
 
             // rename "_start" symbol in _start file to whatever the entry point is (makes _start dirty)
-            try { objs[0].Clean = false; objs[0].RenameSymbol("_start", entry_point); }
+            try { objs[0].IsClean = false; objs[0].RenameSymbol("_start", entry_point); }
             catch (Exception ex) { return new LinkResult(LinkError.FormatError, ex.ToString()); }
 
             // -- define things -- //
@@ -5711,7 +5771,7 @@ namespace CSX64
                 // get the object file we need to incorporate
                 ObjectFile obj = include_queue.Dequeue();
                 // all included files are dirty
-                obj.Clean = false;
+                obj.IsClean = false;
 
                 // account for alignment requirements
                 text.Align(obj.TextAlign);

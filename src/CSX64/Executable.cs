@@ -109,14 +109,14 @@ namespace CSX64
 
 		/// <summary>
 		/// Saves this executable to a file located at (path).
-		/// throws <see cref="ArgumentException"/> if the executable is empty.
+		/// throws <see cref="EmptyError"/> if the executable is empty.
 		/// </summary>
 		/// <param name="path">the file path to save to</param>
-		/// <exception cref="ArgumentException"></exception>
+		/// <exception cref="EmptyError"></exception>
 		public void Save(string path)
 		{
 			// make sure the executable is not empty
-			if (Empty()) throw new ArgumentException("Attempt to save empty executable");
+			if (Empty()) throw new EmptyError("Attempt to save empty executable");
 
 			using (BinaryWriter file = new BinaryWriter(File.OpenWrite(path)))
 			{
@@ -144,11 +144,15 @@ namespace CSX64
 			{
 				using (BinaryReader file = new BinaryReader(File.OpenRead(path)))
 				{
+					// -- file validation -- //
+
 					// read the header from the file and make sure it matches - match failure is a type error, not a format error
 					if (!header.SequenceEqual(file.ReadBytes(header.Length))) throw new TypeError("File was not a CSX64 executable");
 
 					// read the version number from the file and make sure it matches - match failure is a version error, not a format error
 					if (Utility.Version != file.ReadUInt64()) throw new VersionError("Executable was from an incompatible version of CSX64");
+
+					// -- read executable info -- //
 
 					// read the segment lengths
 					UInt64[] seg = new UInt64[4];
@@ -169,6 +173,8 @@ namespace CSX64
 
 					// make sure the file is the correct size
 					if ((UInt64)file.BaseStream.Length != 48ul + text_seglen + rodata_seglen + data_seglen) goto err;
+
+					// -- read executable content -- //
 
 					// read the content - make sure we got everything
 					Content = file.ReadBytes((int)(text_seglen + rodata_seglen + data_seglen));
