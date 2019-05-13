@@ -15,7 +15,7 @@ namespace CSX64
 {
     public enum AssembleError
     {
-        None, ArgCount, MissingSize, ArgError, FormatError, UsageError, UnknownOp, EmptyFile, InvalidLabel, SymbolRedefinition, UnknownSymbol, NotImplemented
+        None, ArgCount, MissingSize, ArgError, FormatError, UsageError, UnknownOp, EmptyFile, InvalidLabel, SymbolRedefinition, UnknownSymbol, NotImplemented, Assertion
     }
     public enum LinkError
     {
@@ -500,8 +500,7 @@ namespace CSX64
             // switch through op
             switch (OP)
             {
-                // value
-                case OPs.None:
+                case OPs.None: // -- value -- //
                     // if this has already been evaluated, return the cached result
                     if (Token == null) { res = _Result; floating = _Floating; return true; }
 
@@ -558,8 +557,7 @@ namespace CSX64
                         res = 0; // zero res just in case that's removed from the top of the function later on
 
                         // build the value
-                        for (int i = 0; i < chars.Length; ++i)
-                            res |= (UInt64)(chars[i] & 0xff) << (i * 8);
+                        for (int i = 0; i < chars.Length; ++i) res |= (UInt64)(chars[i] & 0xff) << (i * 8);
 
                         break;
                     }
@@ -578,9 +576,7 @@ namespace CSX64
                     // otherwise we can't evaluate it
                     else { err = $"Failed to evaluate \"{Token}\""; return false; }
 
-                // -- operators -- //
-
-                // binary ops
+                // -- binary operators -- //
 
                 case OPs.Mul:
                     if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
@@ -794,17 +790,17 @@ namespace CSX64
                     if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
                     if (ret == false) return false;
 
-                    res = L != 0 ? 1 : 0ul;
+                    res = !IsZero(L, LF) && !IsZero(R, RF) ? 1 : 0ul;
                     break;
                 case OPs.LogOr:
                     if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
                     if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
                     if (ret == false) return false;
 
-                    res = L != 0 ? 1 : 0ul;
+                    res = !IsZero(L, LF) || !IsZero(R, RF) ? 1 : 0ul;
                     break;
 
-                // unary ops
+                // -- unary operators -- //
 
                 case OPs.Neg:
                     if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
@@ -819,7 +815,7 @@ namespace CSX64
                 case OPs.LogNot:
                     if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
 
-                    res = L == 0 ? 1 : 0ul;
+                    res = IsZero(L, LF) ? 1 : 0ul;
                     break;
                 case OPs.Int:
                     if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
@@ -833,15 +829,15 @@ namespace CSX64
                     floating = true;
                     break;
 
-                // misc
+                // -- misc operators -- //
 
                 case OPs.NullCoalesce:
                     if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
                     if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
                     if (ret == false) return false;
 
-                    res = L != 0 ? L : R;
-                    floating = L != 0 ? LF : RF;
+					if (!IsZero(L, LF)) { res = L; floating = LF; }
+					else /*          */ { res = R; floating = RF; }
                     break;
                 case OPs.Condition:
                     if (!Left.__Evaluate__(symbols, out Aux, out AuxF, ref err, visited)) ret = false;
@@ -849,9 +845,9 @@ namespace CSX64
                     if (!Right.Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
                     if (ret == false) return false;
 
-                    res = Aux != 0 ? L : R;
-                    floating = Aux != 0 ? LF : RF;
-                    break;
+					if (!IsZero(Aux, AuxF)) { res = L; floating = LF; }
+					else /*              */ { res = R; floating = RF; }
+					break;
 
                 default: err = "Unknown operation"; return false;
             }
@@ -1678,6 +1674,7 @@ namespace CSX64
             public string last_nonlocal_label = null;
 
             public string label_def;
+			public Int64 times;
             public string op;
             public string[] args; // must be array for ref params
 
@@ -1690,7 +1687,138 @@ namespace CSX64
 				file = dest;
 			}
 
-            // -- Assembly Functions -- //
+			// -- Assembly Functions -- //
+
+			/// <summary>
+			/// Updates current line positioning variables.
+			/// Must be called before <see cref="TryExtractLineHeader(ref string)"/> and at the start of each TIMES assembly iteration (before <see cref="SplitLine(string)"/>).
+			/// </summary>
+			public void UpdateLinePos()
+			{
+				// update current line pos
+				switch (current_seg)
+				{
+					case AsmSegment.TEXT: line_pos_in_seg = (UInt64)file.Text.Count; break;
+					case AsmSegment.RODATA: line_pos_in_seg = (UInt64)file.Rodata.Count; break;
+					case AsmSegment.DATA: line_pos_in_seg = (UInt64)file.Data.Count; break;
+					case AsmSegment.BSS: line_pos_in_seg = file.BssLen; break;
+
+					// default does nothing - (nothing to update)
+				}
+			}
+
+			/// <summary>
+			/// Attempts to extract the header information from a raw line of source code.
+			/// Should be called after <see cref="UpdateLinePos"/> and before <see cref="SplitLine(string)"/>.
+			/// <see cref="label_def"/> receives the label definition for htis line (if any).
+			/// <see cref="times"/> receives the number of times to repeat the instruction (or 1 if not specified).
+			/// </summary>
+			/// <param name="rawline">the raw line to extract header information from</param>
+			public bool TryExtractLineHeader(ref string rawline)
+			{
+				// (label:) (times/if imm) (op (arg, arg, ...))
+
+				int pos, end; // position in line parsing
+
+				// -- parse label prefix -- //
+
+				// find the first white space delimited token
+				for (pos = 0; pos < rawline.Length && char.IsWhiteSpace(rawline[pos]) ; ++pos);
+				for (end = pos; end < rawline.Length && !char.IsWhiteSpace(rawline[end]) ; ++end);
+
+				// if we got a label
+				if (pos < rawline.Length && rawline[end - 1] == LabelDefChar)
+				{
+					// set as label def
+					label_def = rawline.Substring(pos, end - pos - 1);
+
+					// get another white space delimited token
+					for (pos = end; pos < rawline.Length && char.IsWhiteSpace(rawline[pos]) ; ++pos);
+					for (end = pos; end < rawline.Length && !char.IsWhiteSpace(rawline[end]) ; ++end);
+				}
+				// otherwise there's no label for this line
+				else label_def = null;
+
+				// -- parse times prefix -- //
+
+				Expr rep_expr = null;
+				string err = null;
+
+				// extract the found token (as upper case)
+				string tok = rawline.Substring(pos, end - pos).ToUpper();
+
+				// decode tok 0 is no TIMES/IF prefix, 1 is TIMES prefix, 2 is IF prefix
+				int rep_code = tok == "TIMES" ? 1 : tok == "IF" ? 2 : 0;
+
+				// if we got a TIMES/IF prefix (nonzero rep code)
+				if (rep_code != 0)
+				{
+					// extract an expression starting at end (the number of times to repeat the instruction) (store aft index into end)
+					if (!TryExtractExpr(rawline, end, rawline.Length, out rep_expr, out end)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: TIMES/IF expected an expression\n-> {res.ErrorMsg}"); return false; }
+
+					// make sure we didn't consume the whole line (that would mean there was a times prefix with nothing to augment)
+					if (end == rawline.Length) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Encountered TIMES/IF prefix with no instruction to augment"); return false; }
+
+					// get the next white space delimited token
+					for (pos = end; pos < (int)rawline.Length && char.IsWhiteSpace(rawline[pos]) ; ++pos);
+					for (end = pos; end < (int)rawline.Length && !char.IsWhiteSpace(rawline[end]) ; ++end);
+				}
+				// otherwise there's no times prefix for this line
+				else times = 1;
+
+				// -- process label -- //
+
+				// if we defined a label for this line, insert it now
+				if (label_def != null)
+				{
+					// if it's not a local, mark as last non-local label
+					if (label_def[0] != '.') last_nonlocal_label = label_def;
+
+					// mutate and test result for legality
+					if (!MutateName(ref label_def)) return false;
+					if (!IsValidName(label_def, ref err)) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: {err}"); return false; }
+
+					// it can't be a reserved symbol
+					if (IsReservedSymbol(label_def)) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: Symbol name is reserved: {label_def}"); return false; }
+
+					// ensure we don't define an external
+					if (file.ExternalSymbols.Contains(label_def)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Cannot define external symbol internally: {label_def}"); return false; }
+
+					// if this line isn't an EQU directive, inject a label (EQU will handle the insertion otherwise - prevents erroneous ptrdiff simplifications if first defined as a label)
+					if (rawline.Substring(pos, end - pos).ToUpper() != "EQU")
+					{
+						// ensure we don't redefine a symbol. not outside this if because we definitely insert a symbol here, but EQU might not (e.g. if TIMES = 0) - so let EQU decide how to handle that.
+						if (file.Symbols.ContainsKey(label_def)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Symbol was already defined: {label_def}"); return false; }
+
+						// addresses must be in a valid segment
+						if (current_seg == AsmSegment.INVALID) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to address outside of a segment"); return false; }
+
+						file.Symbols.Add(label_def, new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Token = SegOffsets[current_seg] }, Right = new Expr() { IntResult = line_pos_in_seg } });
+					}
+				}
+
+				// -- process times -- //
+
+				// if there was a times directive for this line
+				if (rep_expr != null)
+				{
+					// make sure the repeat count is an instant imm (critical expression)
+					if (!rep_expr.Evaluate(file.Symbols, out UInt64 val, out bool floating, ref err)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: TIMES/IF prefix requires a critical expression\n-> {err}"); return false; }
+
+					// if using a TIMES prefix and the imm is floating, that's an error
+					if (rep_code == 1 && floating) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: TIMES/IF prefix requires an integral expression"); return false; }
+
+					// use the evaluated expression as the times count (account for TIMES vs IF prefix logic)
+					times = rep_code == 2 ? !IsZero(val, floating) ? 1 : 0 : (Int64)val;
+				}
+
+				// -- finalize -- //
+
+				// chop off everything we consumed (pos currently points to the start of op)
+				rawline = rawline.Substring(pos);
+
+				return true;
+			}
 
             /// <summary>
             /// Splits the raw line into its separate components. The raw line should not have a comment section.
@@ -1705,28 +1833,11 @@ namespace CSX64
 
                 List<string> args = new List<string>();
 
-                // -- parse label and op -- //
+                // -- parse op -- //
 
-                // skip leading white space
+                // get the first white space delimited token
                 for (; pos < rawline.Length && char.IsWhiteSpace(rawline[pos]); ++pos) ;
-                // get a white space-delimited token
                 for (end = pos; end < rawline.Length && !char.IsWhiteSpace(rawline[end]); ++end) ;
-
-                // if we got a label
-                if (pos < rawline.Length && rawline[end - 1] == LabelDefChar)
-                {
-                    // set as label def
-                    label_def = rawline.Substring(pos, end - pos - 1);
-
-                    // get another token for op to use
-
-                    // skip leading white space
-                    for (pos = end; pos < rawline.Length && char.IsWhiteSpace(rawline[pos]); ++pos) ;
-                    // get a white space-delimited token
-                    for (end = pos; end < rawline.Length && !char.IsWhiteSpace(rawline[end]); ++end) ;
-                }
-                // otherwise there's no label for this line
-                else label_def = null;
 
                 // if we got something, record as op, otherwise is empty string
                 op = pos < rawline.Length ? rawline.Substring(pos, end - pos) : string.Empty;
@@ -1972,13 +2083,24 @@ namespace CSX64
                 // if nothing found, fail
                 return false;
             }
-            private bool __TryParseImm(string token, out Expr expr)
+			
+			/// <summary>
+			/// Attempts to extract an expression from str.
+			/// </summary>
+			/// <param name="str">the string containing an expression</param>
+			/// <param name="str_begin">the starting index for expression extraction</param>
+			/// <param name="str_end">one past the last index character under consideration (e.g. use string len to fetch the longest contiguous expression)</param>
+			/// <param name="expr">the extracted expression (on success)</param>
+			/// <param name="aft">the index immediately after the parsed expression (on success)</param>
+            public bool TryExtractExpr(string str, int str_begin, int str_end, out Expr expr, out int aft)
             {
-                expr = null; // initially-nulled result
+				// give default values to out params
+                expr = null;
+				aft = str_begin;
 
                 Expr temp; // temporary for node creation
 
-                int pos = 0, end; // position in token
+                int pos = str_begin, end; // position in token
 
                 bool binPair = false;          // marker if tree contains complete binary pairs (i.e. N+1 values and N binary ops)
                 int unpaired_conditionals = 0; // number of unpaired conditional ops
@@ -1996,74 +2118,77 @@ namespace CSX64
                 stack.Push(null); // stack will always have a null at its base (simplifies code slightly)
 
                 // skip white space
-                for (; pos < token.Length && char.IsWhiteSpace(token[pos]); ++pos) ;
-                // if we're past the end, token was empty
-                if (pos >= token.Length) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Empty expression encountered"); return false; }
+                for (; pos < str_end && char.IsWhiteSpace(str[pos]); ++pos) ;
+                // if we're past the end, str was empty
+                if (pos >= str_end) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Empty expression encountered"); return false; }
 
                 while (true)
                 {
                     // -- read (unary op...)[operand](binary op) -- //
 
                     // consume unary ops (allows white space)
-                    for (; pos < token.Length; ++pos)
+                    for (; pos < str_end; ++pos)
                     {
-                        if (UnaryOps.Contains(token[pos])) unaryOps.Push(token[pos]); // absorb unary ops
-                        else if (!char.IsWhiteSpace(token[pos])) break; // non-white is start of operand
+                        if (UnaryOps.Contains(str[pos])) unaryOps.Push(str[pos]); // absorb unary ops
+                        else if (!char.IsWhiteSpace(str[pos])) break; // non-white is start of operand
                     }
                     // if we're past the end, there were unary ops with no operand
-                    if (pos >= token.Length) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Unary ops encountered without an operand"); return false; }
+                    if (pos >= str_end) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Unary ops encountered without an operand"); return false; }
 
                     int depth = 0;  // parens depth - initially 0
                     int quote = -1; // index of current quote char - initially not in one
 
-                    bool numeric = char.IsDigit(token[pos]); // flag if this is a numeric literal
+                    bool numeric = char.IsDigit(str[pos]); // flag if this is a numeric literal
 
                     // move end to next logical separator (white space or binary op)
-                    for (end = pos; end < token.Length; ++end)
+                    for (end = pos; end < str_end; ++end)
                     {
                         // if we're not in a quote
                         if (quote < 0)
                         {
                             // account for important characters
-                            if (token[end] == '(') ++depth;
-                            else if (token[end] == ')') --depth; // depth control
-                            else if (numeric && (token[end] == 'e' || token[end] == 'E') && end + 1 < token.Length && (token[end + 1] == '+' || token[end + 1] == '-')) ++end; // make sure an exponent sign won't be parsed as binary + or - by skipping it
-                            else if (token[end] == '"' || token[end] == '\'' || token[end] == '`') quote = end; // quotes mark start of a string
-                            else if (depth == 0 && (char.IsWhiteSpace(token[end]) || TryGetOp(token, end, out op, out oplen))) break; // break on white space or binary op
+                            if (str[end] == '(') ++depth;
+                            else if (str[end] == ')') --depth; // depth control
+                            else if (numeric && (str[end] == 'e' || str[end] == 'E') && end + 1 < str.Length && (str[end + 1] == '+' || str[end + 1] == '-')) ++end; // make sure an exponent sign won't be parsed as binary + or - by skipping it
+                            else if (str[end] == '"' || str[end] == '\'' || str[end] == '`') quote = end; // quotes mark start of a string
+                            else if (depth == 0 && (char.IsWhiteSpace(str[end]) || TryGetOp(str, end, out op, out oplen))) break; // break on white space or binary op
 
                             // can't ever have negative depth
-                            if (depth < 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched parenthesis: {token}"); return false; }
+                            if (depth < 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched parenthesis in expression"); return false; }
                         }
                         // otherwise we're in a quote
                         else
                         {
                             // if we have a matching quote, break out of quote mode
-                            if (token[end] == token[quote]) quote = -1;
+                            if (str[end] == str[quote]) quote = -1;
                         }
                     }
                     // if depth isn't back to 0, there was a parens mismatch
-                    if (depth != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched parenthesis: {token}"); return false; }
+                    if (depth != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched parenthesis in expression"); return false; }
                     // if quote isn't back to -1, there was a quote mismatch
-                    if (quote >= 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched quotation: {token}"); return false; }
+                    if (quote >= 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched quotation in expression"); return false; }
                     // if pos == end we'll have an empty token (e.g. expression was just a binary op)
-                    if (pos == end) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Empty token encountered in expression: {token}"); return false; }
+                    if (pos == end) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Empty token encountered in expression"); return false; }
 
                     // -- convert to expression tree -- //
 
                     // if sub-expression
-                    if (token[pos] == '(')
+                    if (str[pos] == '(')
                     {
-                        // parse the inside into temp
-                        if (!__TryParseImm(token.Substring(pos + 1, end - pos - 2), out temp)) return false;
+						// parse the inside into temp
+						if (!TryExtractExpr(str, pos + 1, end - 1, out temp, out int sub_aft)) return false;
+
+						// if the sub expression didn't capture the entire parenthetical region then the interior was not a (single) expression
+						if (sub_aft != end - 1) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Interior of parenthesis is not an expression"); return false; }
                     }
                     // otherwise is value
                     else
                     {
                         // get the value to insert
-                        string val = token.Substring(pos, end - pos);
+                        string val = str.Substring(pos, end - pos);
 
                         // mutate it
-                        if (!MutateName(ref val)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse imm \"{token}\"\n-> {res.ErrorMsg}"); return false; }
+                        if (!MutateName(ref val)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse expression\n-> {res.ErrorMsg}"); return false; }
 
                         // if it's the current line macro
                         if (val == CurrentLineMacro)
@@ -2088,8 +2213,7 @@ namespace CSX64
                             temp = new Expr() { Token = val };
 
                             // it either needs to be evaluatable or a valid label name
-                            if (!temp.Evaluate(file.Symbols, out UInt64 _res, out bool floating, ref err) && !IsValidName(val, ref err))
-                            { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to resolve token as a valid imm or symbol name: {val}\n-> {err}"); return false; }
+                            if (!temp.Evaluatable(file.Symbols) && !IsValidName(val, ref err)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to resolve token as a valid expression or symbol name: {val}\n-> {err}"); return false; }
                         }
                     }
 
@@ -2127,14 +2251,14 @@ namespace CSX64
                     // -- get binary op -- //
 
                     // we may have stopped token parsing on white space, so wind up to find a binary op
-                    for (; end < token.Length; ++end)
+                    for (; end < str_end; ++end)
                     {
-                        if (TryGetOp(token, end, out op, out oplen)) break; // break when we find an op
-                        // if we hit a non-white character, there are tokens with no binary ops between them
-                        else if (!char.IsWhiteSpace(token[end])) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Encountered two tokens with no binary op between them: {token}"); return false; }
+						if (TryGetOp(str, end, out op, out oplen)) break; // break when we find an op
+						// if we hit a non-white character, there are tokens with no binary ops between them - that's the end of the expression
+						else if (!char.IsWhiteSpace(str[end])) goto stop_parsing;
                     }
                     // if we didn't find any binary ops, we're done
-                    if (end >= token.Length) break;
+                    if (end >= str_end) break;
 
                     // -- process binary op -- //
 
@@ -2144,7 +2268,7 @@ namespace CSX64
                         // seek out nearest conditional without a pair
                         for (; stack.Peek() != null && (stack.Peek().OP != Expr.OPs.Condition || stack.Peek().Right.OP == Expr.OPs.Pair); stack.Pop()) ;
                         // if we didn't find anywhere to put it, this is an error
-                        if (stack.Peek() == null) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expression contained a ternary conditional pair without a corresponding condition: {token}"); return false; }
+                        if (stack.Peek() == null) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expression contained a ternary conditional pair without a corresponding condition"); return false; }
                     }
                     // right-to-left operators
                     else if (op == Expr.OPs.Condition)
@@ -2178,20 +2302,45 @@ namespace CSX64
                     if (op == Expr.OPs.Condition) ++unpaired_conditionals;
                     else if (op == Expr.OPs.Pair) --unpaired_conditionals;
 
-                    // pass last delimiter
-                    pos = end + oplen;
+					// pass last delimeter and skip white space (end + oplen points just after the binary op)
+					for (pos = end + oplen; pos < str_end && char.IsWhiteSpace(str[pos]); ++pos) ;
+
+					// if pos is now out of bounds, there was a binary op with no second operand
+					if (pos >= str_end) { res = new AssembleResult(AssembleError.UsageError, $"Binary op encountered without a second operand"); return false; }
                 }
 
+				stop_parsing:
+
                 // handle binary pair mismatch
-                if (!binPair) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expression contained a mismatched binary op: {token}"); return false; }
+                if (!binPair) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expression contained a mismatched binary op"); return false; }
                 // make sure all conditionals were matched
-                if (unpaired_conditionals != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expression contained {unpaired_conditionals} incomplete ternary {(unpaired_conditionals == 1 ? "conditional" : "conditionals")}: {token}"); return false; }
+                if (unpaired_conditionals != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expression contained {unpaired_conditionals} incomplete ternary {(unpaired_conditionals == 1 ? "conditional" : "conditionals")}"); return false; }
 
                 // run ptrdiff logic on result
                 expr = Ptrdiff(expr);
 
+				// update the aft index (most recent end index during parsing)
+				aft = end;
+
                 return true;
             }
+			/// <summary>
+			/// Attempts to extract an expression from str.
+			/// Equivalent to calling <see cref="TryExtractExpr(string, int, int, out Expr, out int)"/> from 0,len and guaranteeing aft==len.
+			/// </summary>
+			/// <param name="str">the string containing an expression</param>
+			/// <param name="expr">the resulting expression (on success)</param>
+			public bool TryExtractExpr(string str, out Expr expr)
+			{
+				// try to extract an expr from 0,len
+				if (!TryExtractExpr(str, 0, str.Length, out expr, out int aft)) return false;
+
+				// ensure that the entire string was consumed
+				if (aft != str.Length) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse \"{str}\" as an expression"); return false; }
+
+				return true;
+			}
+
             public bool TryParseImm(string token, out Expr expr, out UInt64 sizecode, out bool explicit_size)
             {
                 sizecode = 3; explicit_size = false; // initially no explicit size
@@ -2204,7 +2353,7 @@ namespace CSX64
                 else if (utoken.StartsWithToken("QWORD")) { sizecode = 3; explicit_size = true; token = token.Substring(5).TrimStart(); }
 
                 // refer to helper
-                return __TryParseImm(token, out expr);
+                return TryExtractExpr(token, out expr);
             }
             public bool TryParseInstantImm(string token, out UInt64 val, out bool floating, out UInt64 sizecode, out bool explicit_size)
             {
@@ -2726,43 +2875,7 @@ namespace CSX64
                     default: return false;
                 }
             }
-            public bool TryProcessLabel()
-            {
-                if (label_def != null)
-                {
-                    string err = null;
-
-                    // ensure it's not empty
-                    if (label_def.Length == 0) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: Empty label encountered"); return false; }
-
-                    // if it's not a local, mark as last non-local label
-                    if (label_def[0] != '.') last_nonlocal_label = label_def;
-
-                    // mutate and test result for legality
-                    if (!MutateName(ref label_def)) return false;
-                    if (!IsValidName(label_def, ref err)) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: {err}"); return false; }
-
-                    // it can't be a reserved symbol
-                    if (IsReservedSymbol(label_def)) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: Symbol name is reserved: {label_def}"); return false; }
-
-                    // ensure we don't redefine a symbol
-                    if (file.Symbols.ContainsKey(label_def)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Symbol was already defined: {label_def}"); return false; }
-                    // ensure we don't define an external
-                    if (file.ExternalSymbols.Contains(label_def)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Cannot define external symbol internally: {label_def}"); return false; }
-
-                    // if it's not an EQU expression, inject a label
-                    if (op.ToUpper() != "EQU")
-                    {
-                        // addresses must be in a valid segment
-                        if (current_seg == AsmSegment.INVALID) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to address outside of a segment"); return false; }
-
-                        file.Symbols.Add(label_def, new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Token = SegOffsets[current_seg] }, Right = new Expr() { IntResult = line_pos_in_seg } });
-                    }
-                }
-
-                return true;
-            }
-
+            
             public bool TryProcessAlignXX(UInt64 size)
             {
                 if (args.Length != 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected no operands"); return false; }
@@ -2896,11 +3009,35 @@ namespace CSX64
                 if (!TryParseImm(args[0], out Expr expr, out UInt64 sizecode, out bool explicit_size)) return false;
                 if (explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A size directive in this context is not allowed"); return false; }
 
+				// make sure the symbol isn't already defined (this could be the case for a TIMES prefix on an EQU directive)
+				if (file.Symbols.ContainsKey(label_def)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Symbol {label_def} was already defined"); return false; }
+
                 // inject the symbol
                 file.Symbols.Add(label_def, expr);
 
                 return true;
             }
+			public bool TryProcessStaticAssert()
+			{
+				if (args.Length != 1 && args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected an expression and an optional assertion message"); return false; }
+
+				// get the expression
+				if (!TryParseImm(args[0], out Expr expr, out UInt64 sizecode, out bool explicit_size)) return false;
+				if (explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A size directive in this context is not allowed"); return false; }
+
+				// it must be a critical expression - get its value
+				string err = null;
+				if (!expr.Evaluate(file.Symbols, out UInt64 val, out bool floating, ref err)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected a critical expression\n-> {err}"); return false; }
+
+				// get the assertion message
+				string msg = null;
+				if (args.Length == 2 && !TryExtractStringChars(args[1], out msg, ref err)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Second (optional) argument was not a string\n-> {err}"); return false; }
+
+				// if the assertion failed, assembly fails
+				if (IsZero(val, floating)) { res = new AssembleResult(AssembleError.Assertion, $"line {line}: Assertion failed {(args.Length == 2 ? " - " : "")}{msg}"); return false; }
+
+				return true;
+			}
 
             public bool TryProcessSegment()
             {
@@ -4764,16 +4901,7 @@ namespace CSX64
 
             while (pos < code.Length)
             {
-                // update current line pos
-                switch (args.current_seg)
-                {
-                    case AsmSegment.TEXT: args.line_pos_in_seg = (UInt64)args.file.Text.Count; break;
-                    case AsmSegment.RODATA: args.line_pos_in_seg = (UInt64)args.file.Rodata.Count; break;
-                    case AsmSegment.DATA: args.line_pos_in_seg = (UInt64)args.file.Data.Count; break;
-                    case AsmSegment.BSS: args.line_pos_in_seg = args.file.BssLen; break;
-
-                    // default does nothing - it is ill-formed to make an address outside of any segment
-                }
+				args.UpdateLinePos();
 
                 // find the next separator
                 for (end = pos; end < code.Length && code[end] != '\n' && code[end] != CommentChar; ++end) ;
@@ -4783,6 +4911,11 @@ namespace CSX64
 				// extract the line
 				string rawline = code.Substring(pos, end - pos);
 
+				// if the separator was a comment character, consume the rest of the line as well as no-op
+				if (end < code.Length && code[end] == CommentChar) for (; end < code.Length && code[end] != '\n'; ++end) ;
+				// advance to after the new line
+				pos = end + 1;
+
 				// if this is a shebang line (must have "#!" at the start of line 1)
 				if (args.line == 1 && rawline.Length >= 2 && rawline[0] == '#' && rawline[1] == '!')
 				{
@@ -4790,842 +4923,850 @@ namespace CSX64
 					rawline = string.Empty;
 				}
 
-				// split the line
-				if (!args.SplitLine(rawline)) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Failed to parse line\n-> {args.res.ErrorMsg}");
-                // if the separator was a comment character, consume the rest of the line as well as no-op
-                if (end < code.Length && code[end] == CommentChar)
-                    for (; end < code.Length && code[end] != '\n'; ++end) ;
-
-                // process marked label
-                if (!args.TryProcessLabel()) return args.res;
-
-                // empty lines are ignored
-                if (args.op != string.Empty)
-                {
-                    // -- directive routing -- //
-                    switch (args.op.ToUpper())
-                    {
-                        case "GLOBAL": if (!args.TryProcessGlobal()) return args.res; goto op_done;
-                        case "EXTERN": if (!args.TryProcessExtern()) return args.res; goto op_done;
-
-                        case "ALIGN": if (!args.TryProcessAlign()) return args.res; goto op_done;
-
-                        case "ALIGNB": goto op_done;
-                        case "ALIGNW": if (!args.TryProcessAlignXX(2)) return args.res; goto op_done;
-                        case "ALIGND": if (!args.TryProcessAlignXX(4)) return args.res; goto op_done;
-                        case "ALIGNQ": if (!args.TryProcessAlignXX(8)) return args.res; goto op_done;
-                        case "ALIGNX": if (!args.TryProcessAlignXX(16)) return args.res; goto op_done;
-                        case "ALIGNY": if (!args.TryProcessAlignXX(32)) return args.res; goto op_done;
-                        case "ALIGNZ": if (!args.TryProcessAlignXX(64)) return args.res; goto op_done;
-
-                        case "DB": if (!args.TryProcessDeclare(1)) return args.res; goto op_done;
-                        case "DW": if (!args.TryProcessDeclare(2)) return args.res; goto op_done;
-                        case "DD": if (!args.TryProcessDeclare(4)) return args.res; goto op_done;
-                        case "DQ": if (!args.TryProcessDeclare(8)) return args.res; goto op_done;
-                        case "DX": if (!args.TryProcessDeclare(16)) return args.res; goto op_done;
-                        case "DY": if (!args.TryProcessDeclare(32)) return args.res; goto op_done;
-                        case "DZ": if (!args.TryProcessDeclare(64)) return args.res; goto op_done;
-
-                        case "RESB": if (!args.TryProcessReserve(1)) return args.res; goto op_done;
-                        case "RESW": if (!args.TryProcessReserve(2)) return args.res; goto op_done;
-                        case "RESD": if (!args.TryProcessReserve(4)) return args.res; goto op_done;
-                        case "RESQ": if (!args.TryProcessReserve(8)) return args.res; goto op_done;
-                        case "RESX": if (!args.TryProcessReserve(16)) return args.res; goto op_done;
-                        case "RESY": if (!args.TryProcessReserve(32)) return args.res; goto op_done;
-                        case "RESZ": if (!args.TryProcessReserve(64)) return args.res; goto op_done;
-
-                        case "EQU": if (!args.TryProcessEQU()) return args.res; goto op_done;
-
-                        case "SEGMENT": case "SECTION": if (!args.TryProcessSegment()) return args.res; goto op_done;
-                    }
-
-                    // if it wasn't a directive it's about to be an instruction: make sure we're in the text segment
-                    if (args.current_seg != AsmSegment.TEXT) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Attempt to write executable instructions to the {args.current_seg} segment");
-
-                    // -- instruction routing -- //
-                    switch (args.op.ToUpper())
-                    {
-                        // unmapped
-
-                        case "LFENCE": if (!args.TryProcessNoArgOp_no_write()) return args.res; break;
-                        case "SFENCE": if (!args.TryProcessNoArgOp_no_write()) return args.res; break;
-                        case "MFENCE": if (!args.TryProcessNoArgOp_no_write()) return args.res; break;
-
-                        case "PAUSE": if (!args.TryProcessNoArgOp_no_write()) return args.res; break;
-
-                        // x86 instructions
-
-                        case "NOP": if (!args.TryProcessNoArgOp(OPCode.NOP)) return args.res; break;
-
-                        case "HLT": if (!args.TryProcessNoArgOp(OPCode.HLT)) return args.res; break;
-                        case "SYSCALL": if (!args.TryProcessNoArgOp(OPCode.SYSCALL)) return args.res; break;
-
-                        case "PUSHF": if (!args.TryProcessNoArgOp(OPCode.STLDF, true, 0)) return args.res; break;
-                        case "PUSHFD": if (!args.TryProcessNoArgOp(OPCode.STLDF, true, 1)) return args.res; break;
-                        case "PUSHFQ": if (!args.TryProcessNoArgOp(OPCode.STLDF, true, 2)) return args.res; break;
-
-                        case "POPF": if (!args.TryProcessNoArgOp(OPCode.STLDF, true, 3)) return args.res; break;
-                        case "POPFD": if (!args.TryProcessNoArgOp(OPCode.STLDF, true, 4)) return args.res; break;
-                        case "POPFQ": if (!args.TryProcessNoArgOp(OPCode.STLDF, true, 5)) return args.res; break;
-
-                        case "SAHF": if (!args.TryProcessNoArgOp(OPCode.STLDF, true, 6)) return args.res; break;
-                        case "LAHF": if (!args.TryProcessNoArgOp(OPCode.STLDF, true, 7)) return args.res; break;
-
-                        case "STC": if (!args.TryProcessNoArgOp(OPCode.FlagManip, true, 0)) return args.res; break;
-                        case "CLC": if (!args.TryProcessNoArgOp(OPCode.FlagManip, true, 1)) return args.res; break;
-                        case "STI": if (!args.TryProcessNoArgOp(OPCode.FlagManip, true, 2)) return args.res; break;
-                        case "CLI": if (!args.TryProcessNoArgOp(OPCode.FlagManip, true, 3)) return args.res; break;
-                        case "STD": if (!args.TryProcessNoArgOp(OPCode.FlagManip, true, 4)) return args.res; break;
-                        case "CLD": if (!args.TryProcessNoArgOp(OPCode.FlagManip, true, 5)) return args.res; break;
-                        case "STAC": if (!args.TryProcessNoArgOp(OPCode.FlagManip, true, 6)) return args.res; break;
-                        case "CLAC": if (!args.TryProcessNoArgOp(OPCode.FlagManip, true, 7)) return args.res; break;
-                        case "CMC": if (!args.TryProcessNoArgOp(OPCode.FlagManip, true, 8)) return args.res; break;
-
-                        case "SETZ": case "SETE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 0, 1)) return args.res; break;
-                        case "SETNZ": case "SETNE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 1, 1)) return args.res; break;
-                        case "SETS": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 2, 1)) return args.res; break;
-                        case "SETNS": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 3, 1)) return args.res; break;
-                        case "SETP": case "SETPE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 4, 1)) return args.res; break;
-                        case "SETNP": case "SETPO": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 5, 1)) return args.res; break;
-                        case "SETO": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 6, 1)) return args.res; break;
-                        case "SETNO": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 7, 1)) return args.res; break;
-                        case "SETC": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 8, 1)) return args.res; break;
-                        case "SETNC": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 9, 1)) return args.res; break;
-
-                        case "SETB": case "SETNAE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 10, 1)) return args.res; break;
-                        case "SETBE": case "SETNA": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 11, 1)) return args.res; break;
-                        case "SETA": case "SETNBE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 12, 1)) return args.res; break;
-                        case "SETAE": case "SETNB": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 13, 1)) return args.res; break;
-
-                        case "SETL": case "SETNGE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 14, 1)) return args.res; break;
-                        case "SETLE": case "SETNG": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 15, 1)) return args.res; break;
-                        case "SETG": case "SETNLE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 16, 1)) return args.res; break;
-                        case "SETGE": case "SETNL": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 17, 1)) return args.res; break;
-
-                        case "MOV": if (!args.TryProcessBinaryOp(OPCode.MOV)) return args.res; break;
-
-                        case "MOVZ": case "MOVE": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 0)) return args.res; break;
-                        case "MOVNZ": case "MOVNE": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 1)) return args.res; break;
-                        // MOVS (mov) requires disambiguation
-                        case "MOVNS": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 3)) return args.res; break;
-                        case "MOVP": case "MOVPE": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 4)) return args.res; break;
-                        case "MOVNP": case "MOVPO": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 5)) return args.res; break;
-                        case "MOVO": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 6)) return args.res; break;
-                        case "MOVNO": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 7)) return args.res; break;
-                        case "MOVC": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 8)) return args.res; break;
-                        case "MOVNC": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 9)) return args.res; break;
-
-                        case "MOVB": case "MOVNAE": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 10)) return args.res; break;
-                        case "MOVBE": case "MOVNA": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 11)) return args.res; break;
-                        case "MOVA": case "MOVNBE": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 12)) return args.res; break;
-                        case "MOVAE": case "MOVNB": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 13)) return args.res; break;
-
-                        case "MOVL": case "MOVNGE": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 14)) return args.res; break;
-                        case "MOVLE": case "MOVNG": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 15)) return args.res; break;
-                        case "MOVG": case "MOVNLE": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 16)) return args.res; break;
-                        case "MOVGE": case "MOVNL": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 17)) return args.res; break;
-
-                        case "XCHG": if (!args.TryProcessXCHG(OPCode.XCHG)) return args.res; break;
-
-                        case "JMP": if (!args.TryProcessIMMRM(OPCode.JMP, false, 0, 14, 3)) return args.res; break;
-
-                        case "JZ": case "JE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 0, 14, 3)) return args.res; break;
-                        case "JNZ": case "JNE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 1, 14, 3)) return args.res; break;
-                        case "JS": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 2, 14, 3)) return args.res; break;
-                        case "JNS": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 3, 14, 3)) return args.res; break;
-                        case "JP": case "JPE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 4, 14, 3)) return args.res; break;
-                        case "JNP": case "JPO": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 5, 14, 3)) return args.res; break;
-                        case "JO": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 6, 14, 3)) return args.res; break;
-                        case "JNO": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 7, 14, 3)) return args.res; break;
-                        case "JC": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 8, 14, 3)) return args.res; break;
-                        case "JNC": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 9, 14, 3)) return args.res; break;
-
-                        case "JB": case "JNAE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 10, 14, 3)) return args.res; break;
-                        case "JBE": case "JNA": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 11, 14, 3)) return args.res; break;
-                        case "JA": case "JNBE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 12, 14, 3)) return args.res; break;
-                        case "JAE": case "JNB": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 13, 14, 3)) return args.res; break;
-
-                        case "JL": case "JNGE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 14, 14, 3)) return args.res; break;
-                        case "JLE": case "JNG": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 15, 14, 3)) return args.res; break;
-                        case "JG": case "JNLE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 16, 14, 3)) return args.res; break;
-                        case "JGE": case "JNL": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 17, 14, 3)) return args.res; break;
-
-                        case "JCXZ": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 18, 2, 1)) return args.res; break;
-                        case "JECXZ": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 18, 4, 2)) return args.res; break;
-                        case "JRCXZ": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 18, 8, 3)) return args.res; break;
-
-                        case "LOOP": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, 0, 14, 3)) return args.res; break;
-                        case "LOOPZ": case "LOOPE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, 1, 14, 3)) return args.res; break;
-                        case "LOOPNZ": case "LOOPNE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, 2, 14, 3)) return args.res; break;
-
-                        case "CALL": if (!args.TryProcessIMMRM(OPCode.CALL, false, 0, 14, 3)) return args.res; break;
-                        case "RET": if (!args.TryProcessNoArgOp(OPCode.RET)) return args.res; break;
-
-                        case "PUSH": if (!args.TryProcessIMMRM(OPCode.PUSH, false, 0, 14)) return args.res; break;
-                        case "POP": if (!args.TryProcessPOP(OPCode.POP)) return args.res; break;
-
-                        case "LEA": if (!args.TryProcessLEA(OPCode.LEA)) return args.res; break;
-
-                        case "ADD": if (!args.TryProcessBinaryOp(OPCode.ADD)) return args.res; break;
-                        case "SUB": if (!args.TryProcessBinaryOp(OPCode.SUB)) return args.res; break;
-
-                        case "MUL": if (!args.TryProcessIMMRM(OPCode.MUL_x, true, 0)) return args.res; break;
-                        case "MULX": if (!args.TryProcessRR_RM(OPCode.MUL_x, true, 1, 12)) return args.res; break;
-                        case "IMUL":
-                            switch (args.args.Length)
-                            {
-                                case 1: if (!args.TryProcessIMMRM(OPCode.IMUL, true, 0)) return args.res; break;
-                                case 2: if (!args.TryProcessBinaryOp(OPCode.IMUL, true, 1)) return args.res; break;
-                                case 3: if (!args.TryProcessTernaryOp(OPCode.IMUL, true, 2)) return args.res; break;
-
-                                default: return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: IMUL expected 1, 2, or 3 args");
-                            }
-                            break;
-                        case "DIV": if (!args.TryProcessIMMRM(OPCode.DIV)) return args.res; break;
-                        case "IDIV": if (!args.TryProcessIMMRM(OPCode.IDIV)) return args.res; break;
-
-                        case "SHL": if (!args.TryProcessShift(OPCode.SHL)) return args.res; break;
-                        case "SHR": if (!args.TryProcessShift(OPCode.SHR)) return args.res; break;
-                        case "SAL": if (!args.TryProcessShift(OPCode.SAL)) return args.res; break;
-                        case "SAR": if (!args.TryProcessShift(OPCode.SAR)) return args.res; break;
-                        case "ROL": if (!args.TryProcessShift(OPCode.ROL)) return args.res; break;
-                        case "ROR": if (!args.TryProcessShift(OPCode.ROR)) return args.res; break;
-                        case "RCL": if (!args.TryProcessShift(OPCode.RCL)) return args.res; break;
-                        case "RCR": if (!args.TryProcessShift(OPCode.RCR)) return args.res; break;
-
-                        case "AND": if (!args.TryProcessBinaryOp(OPCode.AND)) return args.res; break;
-                        case "OR": if (!args.TryProcessBinaryOp(OPCode.OR)) return args.res; break;
-                        case "XOR": if (!args.TryProcessBinaryOp(OPCode.XOR)) return args.res; break;
-
-                        case "INC": if (!args.TryProcessUnaryOp(OPCode.INC)) return args.res; break;
-                        case "DEC": if (!args.TryProcessUnaryOp(OPCode.DEC)) return args.res; break;
-                        case "NEG": if (!args.TryProcessUnaryOp(OPCode.NEG)) return args.res; break;
-                        case "NOT": if (!args.TryProcessUnaryOp(OPCode.NOT)) return args.res; break;
-
-                        case "CMP":
-                            // if there are 2 args and the second one is an instant 0, we can make this a CMPZ instruction
-                            if (args.args.Length == 2 && args.TryParseInstantImm(args.args[1], out a, out floating, out b, out btemp) && a == 0)
-                            {
-                                // set new args for the unary version
-                                args.args = new string[] { args.args[0] };
-                                if (!args.TryProcessUnaryOp(OPCode.CMPZ)) return args.res;
-                            }
-                            // otherwise normal binary
-                            else if (!args.TryProcessBinaryOp(OPCode.CMP)) return args.res;
-                            break;
-                        case "TEST": if (!args.TryProcessBinaryOp(OPCode.TEST)) return args.res; break;
-
-                        case "BSWAP": if (!args.TryProcessUnaryOp(OPCode.BSWAP)) return args.res; break;
-                        case "BEXTR": if (!args.TryProcessBinaryOp(OPCode.BEXTR, false, 0, 15, 1)) return args.res; break;
-                        case "BLSI": if (!args.TryProcessUnaryOp(OPCode.BLSI)) return args.res; break;
-                        case "BLSMSK": if (!args.TryProcessUnaryOp(OPCode.BLSMSK)) return args.res; break;
-                        case "BLSR": if (!args.TryProcessUnaryOp(OPCode.BLSR)) return args.res; break;
-                        case "ANDN": if (!args.TryProcessRR_RM(OPCode.ANDN, false, 0, 12)) return args.res; break;
-
-                        case "BT": if (!args.TryProcessBinaryOp_NoBMem(OPCode.BTx, true, 0, 15, 0)) return args.res; break;
-                        case "BTS": if (!args.TryProcessBinaryOp_NoBMem(OPCode.BTx, true, 1, 15, 0)) return args.res; break;
-                        case "BTR": if (!args.TryProcessBinaryOp_NoBMem(OPCode.BTx, true, 2, 15, 0)) return args.res; break;
-                        case "BTC": if (!args.TryProcessBinaryOp_NoBMem(OPCode.BTx, true, 3, 15, 0)) return args.res; break;
-                            
-                        case "CWD": if (!args.TryProcessNoArgOp(OPCode.Cxy, true, 0)) return args.res; break;
-                        case "CDQ": if (!args.TryProcessNoArgOp(OPCode.Cxy, true, 1)) return args.res; break;
-                        case "CQO": if (!args.TryProcessNoArgOp(OPCode.Cxy, true, 2)) return args.res; break;
-
-                        case "CBW": if (!args.TryProcessNoArgOp(OPCode.Cxy, true, 3)) return args.res; break;
-                        case "CWDE": if (!args.TryProcessNoArgOp(OPCode.Cxy, true, 4)) return args.res; break;
-                        case "CDQE": if (!args.TryProcessNoArgOp(OPCode.Cxy, true, 5)) return args.res; break;
-
-                        case "MOVZX": if (!args.TryProcessMOVxX(OPCode.MOVxX, false)) return args.res; break;
-                        case "MOVSX": if (!args.TryProcessMOVxX(OPCode.MOVxX, true)) return args.res; break;
-
-                        case "ADC": if (!args.TryProcessBinaryOp(OPCode.ADXX, true, 0)) return args.res; break;
-                        case "ADCX": if (!args.TryProcessBinaryOp_R_RM(OPCode.ADXX, true, 1, 12)) return args.res; break;
-                        case "ADOX": if (!args.TryProcessBinaryOp_R_RM(OPCode.ADXX, true, 2, 12)) return args.res; break;
-
-                        case "AAA": if (!args.TryProcessNoArgOp(OPCode.AAX, true, 0)) return args.res; break;
-                        case "AAS": if (!args.TryProcessNoArgOp(OPCode.AAX, true, 1)) return args.res; break;
-                        case "DAA": if (!args.TryProcessNoArgOp(OPCode.AAX, true, 2)) return args.res; break;
-                        case "DAS": if (!args.TryProcessNoArgOp(OPCode.AAX, true, 3)) return args.res; break;
-
-                        // MOVS (string) requires disambiguation
-                        case "MOVSB": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, 0)) return args.res; break;
-                        case "MOVSW": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, 1)) return args.res; break;
-                        // MOVSD (string) requires disambiguation
-                        case "MOVSQ": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, 3)) return args.res; break;
-
-                        case "CMPS": if (!args.TryProcessCMPS_string(OPCode.string_ops, false, false)) return args.res; break;
-                        case "CMPSB": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (2 << 2) | 0)) return args.res; break;
-                        case "CMPSW": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (2 << 2) | 1)) return args.res; break;
-                        // CMPSD (string) requires disambiguation
-                        case "CMPSQ": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (2 << 2) | 3)) return args.res; break;
-
-                        case "LODS": if (!args.TryProcessLODS_string(OPCode.string_ops, false)) return args.res; break;
-                        case "LODSB": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (5 << 2) | 0)) return args.res; break;
-                        case "LODSW": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (5 << 2) | 1)) return args.res; break;
-                        case "LODSD": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (5 << 2) | 2)) return args.res; break;
-                        case "LODSQ": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (5 << 2) | 3)) return args.res; break;
-
-                        case "STOS": if (!args.TryProcessSTOS_string(OPCode.string_ops, false)) return args.res; break;
-                        case "STOSB": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (7 << 2) | 0)) return args.res; break;
-                        case "STOSW": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (7 << 2) | 1)) return args.res; break;
-                        case "STOSD": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (7 << 2) | 2)) return args.res; break;
-                        case "STOSQ": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (7 << 2) | 3)) return args.res; break;
-
-                        case "SCAS": if (!args.TryProcessSCAS_string(OPCode.string_ops, false, false)) return args.res; break;
-                        case "SCASB": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (9 << 2) | 0)) return args.res; break;
-                        case "SCASW": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (9 << 2) | 1)) return args.res; break;
-                        case "SCASD": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (9 << 2) | 2)) return args.res; break;
-                        case "SCASQ": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (9 << 2) | 3)) return args.res; break;
-
-                        case "REP": if (!args.TryProcessREP()) return args.res; break;
-                        case "REPE": case "REPZ": if (!args.TryProcessREPE()) return args.res; break;
-                        case "REPNE": case "REPNZ": if (!args.TryProcessREPNE()) return args.res; break;
-
-						case "LOCK":
-							{
-								if (!args.TryProcessPrefixOp(out string actual)) return args.res;
-
-								// decide what handler to use (can't use switch because goto can't jump to an external case label)
-								if (actual == "ADD") goto case "ADD";
-								if (actual == "ADC") goto case "ADC";
-								//if (actual == "XADD") goto case "XADD";
-
-								if (actual == "SUB") goto case "SUB";
-								//if (actual == "SBB") goto case "SBB";
-
-								if (actual == "AND") goto case "AND";
-								if (actual == "OR") goto case "OR";
-								if (actual == "XOR") goto case "XOR";
-
-								if (actual == "BTC") goto case "BTC";
-								if (actual == "BTR") goto case "BTR";
-								if (actual == "BTS") goto case "BTS";
-
-								if (actual == "DEC") goto case "DEC";
-								if (actual == "INC") goto case "INC";
-
-								if (actual == "NEG") goto case "NEG";
-								if (actual == "NOT") goto case "NOT";
-								if (actual == "XCHG") goto case "XCHG";
-
-								//if (actual == "CMPXCHG") goto case "CMPXCHG";
-								//if (actual == "CMPXCH8B") goto case "CMPXCH8B";
-								//if (actual == "CMPXCHG16B") goto case "CMPXCHG16B";
-
-								return new AssembleResult(AssembleError.UsageError, $"line {args.line}: LOCK cannot be used with the specified instruction");
-							}
-
-                        case "BSF": if (!args.TryProcessBSx(OPCode.BSx, true)) return args.res; break;
-                        case "BSR": if (!args.TryProcessBSx(OPCode.BSx, false)) return args.res; break;
-
-                        case "TZCNT": if (!args.TryProcessBSx(OPCode.TZCNT, true)) return args.res; break; // forward flag doesn't matter
-
-                        case "UD": if (!args.TryProcessNoArgOp(OPCode.UD)) return args.res; break;
-
-                        // x87 instructions
-
-                        case "FNOP": if (!args.TryProcessNoArgOp(OPCode.NOP)) return args.res; break; // no sense in wasting another opcode on no-op
-
-                        case "FWAIT": case "WAIT": if (!args.TryProcessNoArgOp(OPCode.FWAIT)) return args.res; break;
-
-                        case "FINIT":
-                            if (!args.TryAppendByte((byte)OPCode.FWAIT)) return args.res;
-                            goto case "FNINIT"; // c# doesn't allow implicit fallthrough
-                        case "FNINIT": if (!args.TryProcessNoArgOp(OPCode.FINIT)) return args.res; break;
-
-                        case "FCLEX":
-                            if (!args.TryAppendByte((byte)OPCode.FWAIT)) return args.res;
-                            goto case "FNCLEX"; // c# doesn't allow implicit fallthrough
-                        case "FNCLEX": if (!args.TryProcessNoArgOp(OPCode.FCLEX)) return args.res; break;
-
-                        case "FSTSW":
-                            if (!args.TryAppendByte((byte)OPCode.FWAIT)) return args.res;
-                            goto case "FNSTSW"; // c# doesn't allow implicit fallthrough
-                        case "FNSTSW": // handle FNSTSW AX case here since the other forms don't allow it
-                            if (args.args.Length == 1 && args.args[0].ToUpper() == "AX")
-                            {
-                                if (!args.TryAppendByte((byte)OPCode.FSTLD_WORD)) return args.res;
-                                if (!args.TryAppendByte(0)) return args.res;
-                            }
-                            else if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 1, 1)) return args.res;
-                            break;
-
-                        case "FSTCW":
-                            if (!args.TryAppendByte((byte)OPCode.FWAIT)) return args.res;
-                            goto case "FNSTCW"; // c# doesn't allow implicit fallthrough
-                        case "FNSTCW": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 2, 1)) return args.res; break;
-
-                        case "FLDCW": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 3, 1)) return args.res; break;
-
-                        case "FLD1": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 0)) return args.res; break;
-                        case "FLDL2T": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 1)) return args.res; break;
-                        case "FLDL2E": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 2)) return args.res; break;
-                        case "FLDPI": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 3)) return args.res; break;
-                        case "FLDLG2": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 4)) return args.res; break;
-                        case "FLDLN2": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 5)) return args.res; break;
-                        case "FLDZ": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 6)) return args.res; break;
-
-                        case "FLD": if (!args.TryProcessFLD(OPCode.FLD, false)) return args.res; break;
-                        case "FILD": if (!args.TryProcessFLD(OPCode.FLD, true)) return args.res; break;
-
-                        case "FST": if (!args.TryProcessFST(OPCode.FST, false, false, false)) return args.res; break;
-                        case "FIST": if (!args.TryProcessFST(OPCode.FST, true, false, false)) return args.res; break;
-                        case "FSTP": if (!args.TryProcessFST(OPCode.FST, false, true, false)) return args.res; break;
-                        case "FISTP": if (!args.TryProcessFST(OPCode.FST, true, true, false)) return args.res; break;
-                        case "FISTTP": if (!args.TryProcessFST(OPCode.FST, true, true, true)) return args.res; break;
-
-                        case "FXCH": // no arg version swaps st0 and st1
-                            if (args.args.Length == 0) { if (!args.TryProcessNoArgOp(OPCode.FXCH, true, 1)) return args.res; break; }
-                            else { if (!args.TryProcessFPURegisterOp(OPCode.FXCH)) return args.res; break; }
-
-                        case "FMOVE": if (!args.TryProcessFMOVcc(OPCode.FMOVcc, 0)) return args.res; break;
-                        case "FMOVNE": if (!args.TryProcessFMOVcc(OPCode.FMOVcc, 1)) return args.res; break;
-                        case "FMOVB": case "FMOVNAE": if (!args.TryProcessFMOVcc(OPCode.FMOVcc, 2)) return args.res; break;
-                        case "FMOVBE": case "FMOVNA": if (!args.TryProcessFMOVcc(OPCode.FMOVcc, 3)) return args.res; break;
-                        case "FMOVA": case "FMOVNBE": if (!args.TryProcessFMOVcc(OPCode.FMOVcc, 4)) return args.res; break;
-                        case "FMOVAE": case "FMOVNB": if (!args.TryProcessFMOVcc(OPCode.FMOVcc, 5)) return args.res; break;
-                        case "FMOVU": if (!args.TryProcessFMOVcc(OPCode.FMOVcc, 6)) return args.res; break;
-                        case "FMOVNU": if (!args.TryProcessFMOVcc(OPCode.FMOVcc, 7)) return args.res; break;
-
-                        case "FADD": if (!args.TryProcessFPUBinaryOp(OPCode.FADD, false, false)) return args.res; break;
-                        case "FADDP": if (!args.TryProcessFPUBinaryOp(OPCode.FADD, false, true)) return args.res; break;
-                        case "FIADD": if (!args.TryProcessFPUBinaryOp(OPCode.FADD, true, false)) return args.res; break;
-
-                        case "FSUB": if (!args.TryProcessFPUBinaryOp(OPCode.FSUB, false, false)) return args.res; break;
-                        case "FSUBP": if (!args.TryProcessFPUBinaryOp(OPCode.FSUB, false, true)) return args.res; break;
-                        case "FISUB": if (!args.TryProcessFPUBinaryOp(OPCode.FSUB, true, false)) return args.res; break;
-
-                        case "FSUBR": if (!args.TryProcessFPUBinaryOp(OPCode.FSUBR, false, false)) return args.res; break;
-                        case "FSUBRP": if (!args.TryProcessFPUBinaryOp(OPCode.FSUBR, false, true)) return args.res; break;
-                        case "FISUBR": if (!args.TryProcessFPUBinaryOp(OPCode.FSUBR, true, false)) return args.res; break;
-
-                        case "FMUL": if (!args.TryProcessFPUBinaryOp(OPCode.FMUL, false, false)) return args.res; break;
-                        case "FMULP": if (!args.TryProcessFPUBinaryOp(OPCode.FMUL, false, true)) return args.res; break;
-                        case "FIMUL": if (!args.TryProcessFPUBinaryOp(OPCode.FMUL, true, false)) return args.res; break;
-
-                        case "FDIV": if (!args.TryProcessFPUBinaryOp(OPCode.FDIV, false, false)) return args.res; break;
-                        case "FDIVP": if (!args.TryProcessFPUBinaryOp(OPCode.FDIV, false, true)) return args.res; break;
-                        case "FIDIV": if (!args.TryProcessFPUBinaryOp(OPCode.FDIV, true, false)) return args.res; break;
-
-                        case "FDIVR": if (!args.TryProcessFPUBinaryOp(OPCode.FDIVR, false, false)) return args.res; break;
-                        case "FDIVRP": if (!args.TryProcessFPUBinaryOp(OPCode.FDIVR, false, true)) return args.res; break;
-                        case "FIDIVR": if (!args.TryProcessFPUBinaryOp(OPCode.FDIVR, true, false)) return args.res; break;
-
-                        case "F2XM1": if (!args.TryProcessNoArgOp(OPCode.F2XM1)) return args.res; break;
-                        case "FABS": if (!args.TryProcessNoArgOp(OPCode.FABS)) return args.res; break;
-                        case "FCHS": if (!args.TryProcessNoArgOp(OPCode.FCHS)) return args.res; break;
-                        case "FPREM": if (!args.TryProcessNoArgOp(OPCode.FPREM)) return args.res; break;
-                        case "FPREM1": if (!args.TryProcessNoArgOp(OPCode.FPREM1)) return args.res; break;
-                        case "FRNDINT": if (!args.TryProcessNoArgOp(OPCode.FRNDINT)) return args.res; break;
-                        case "FSQRT": if (!args.TryProcessNoArgOp(OPCode.FSQRT)) return args.res; break;
-                        case "FYL2X": if (!args.TryProcessNoArgOp(OPCode.FYL2X)) return args.res; break;
-                        case "FYL2XP1": if (!args.TryProcessNoArgOp(OPCode.FYL2XP1)) return args.res; break;
-                        case "FXTRACT": if (!args.TryProcessNoArgOp(OPCode.FXTRACT)) return args.res; break;
-                        case "FSCALE": if (!args.TryProcessNoArgOp(OPCode.FSCALE)) return args.res; break;
-
-                        case "FXAM": if (!args.TryProcessNoArgOp(OPCode.FXAM)) return args.res; break;
-                        case "FTST": if (!args.TryProcessNoArgOp(OPCode.FTST)) return args.res; break;
-
-                        case "FCOM": if (!args.TryProcessFCOM(OPCode.FCOM, false, false, false, false, false)) return args.res; break;
-                        case "FCOMP": if (!args.TryProcessFCOM(OPCode.FCOM, false, true, false, false, false)) return args.res; break;
-                        case "FCOMPP": if (!args.TryProcessFCOM(OPCode.FCOM, false, false, true, false, false)) return args.res; break;
-
-                        case "FUCOM": if (!args.TryProcessFCOM(OPCode.FCOM, false, false, false, false, true)) return args.res; break;
-                        case "FUCOMP": if (!args.TryProcessFCOM(OPCode.FCOM, false, true, false, false, true)) return args.res; break;
-                        case "FUCOMPP": if (!args.TryProcessFCOM(OPCode.FCOM, false, false, true, false, true)) return args.res; break;
-
-                        case "FCOMI": if (!args.TryProcessFCOM(OPCode.FCOM, false, false, false, true, false)) return args.res; break;
-                        case "FCOMIP": if (!args.TryProcessFCOM(OPCode.FCOM, false, true, false, true, false)) return args.res; break;
-
-                        case "FUCOMI": if (!args.TryProcessFCOM(OPCode.FCOM, false, false, false, true, true)) return args.res; break;
-                        case "FUCOMIP": if (!args.TryProcessFCOM(OPCode.FCOM, false, true, false, true, true)) return args.res; break;
-
-                        case "FICOM": if (!args.TryProcessFCOM(OPCode.FCOM, true, false, false, false, false)) return args.res; break;
-                        case "FICOMP": if (!args.TryProcessFCOM(OPCode.FCOM, true, true, false, false, false)) return args.res; break;
-
-                        case "FSIN": if (!args.TryProcessNoArgOp(OPCode.FSIN)) return args.res; break;
-                        case "FCOS": if (!args.TryProcessNoArgOp(OPCode.FCOS)) return args.res; break;
-                        case "FSINCOS": if (!args.TryProcessNoArgOp(OPCode.FSINCOS)) return args.res; break;
-                        case "FPTAN": if (!args.TryProcessNoArgOp(OPCode.FPTAN)) return args.res; break;
-                        case "FPATAN": if (!args.TryProcessNoArgOp(OPCode.FPATAN)) return args.res; break;
-
-                        case "FINCSTP": if (!args.TryProcessNoArgOp(OPCode.FINCDECSTP, true, 0)) return args.res; break;
-                        case "FDECSTP": if (!args.TryProcessNoArgOp(OPCode.FINCDECSTP, true, 1)) return args.res; break;
-                        
-                        case "FFREE": if (!args.TryProcessFPURegisterOp(OPCode.FFREE)) return args.res; break;
-
-                        case "FNSAVE": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 6, ~(UInt64)0)) return args.res; break; // sizecode = 0xff.ff to ensure user can't use explicit size (since it's not a standard size)
-                        case "FSAVE": if (!args.TryAppendByte((byte)OPCode.FWAIT)) return args.res; goto case "FNSAVE";
-
-                        case "FRSTOR": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 7, ~(UInt64)0)) return args.res; break; // sizecode = 0xff.ff to ensure user can't use explicit size (since it's not a standard size)
-
-                        case "FNSTENV": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 8, ~(UInt64)0)) return args.res; break; // sizecode = 0xff.ff to ensure user can't use explicit size (since it's not a standard size)
-                        case "FSTENV": if (!args.TryAppendByte((byte)OPCode.FWAIT)) return args.res; goto case "FNSTENV";
-
-                        case "FLDENV": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 9, ~(UInt64)0)) return args.res; break; // sizecode = 0xff.ff to ensure user can't use explicit size (since it's not a standard size)
-
-                        // vpu instructions
-
-                        case "MOVQ": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, false, false, true)) return args.res; break;
-                        case "MOVD": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 2, false, false, true)) return args.res; break;
-
-                        // MOVSD (vec) requires disambiguation
-                        case "MOVSS": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 2, false, false, true)) return args.res; break;
-
-                        case "MOVDQA": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, false, true, false)) return args.res; break; // size codes for these 2 don't matter
-                        case "MOVDQU": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, false, false, false)) return args.res; break;
-
-                        case "MOVDQA64": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, true, true, false)) return args.res; break;
-                        case "MOVDQA32": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 2, true, true, false)) return args.res; break;
-                        case "MOVDQA16": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 1, true, true, false)) return args.res; break;
-                        case "MOVDQA8": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 0, true, true, false)) return args.res; break;
-
-                        case "MOVDQU64": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, true, false, false)) return args.res; break;
-                        case "MOVDQU32": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 2, true, false, false)) return args.res; break;
-                        case "MOVDQU16": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 1, true, false, false)) return args.res; break;
-                        case "MOVDQU8": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 0, true, false, false)) return args.res; break;
-
-                        case "MOVAPD": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, true, true, false)) return args.res; break;
-                        case "MOVAPS": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 2, true, true, false)) return args.res; break;
-
-                        case "MOVUPD": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, true, false, false)) return args.res; break;
-                        case "MOVUPS": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 2, true, false, false)) return args.res; break;
-
-                        case "ADDSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FADD, 3, false, false, true)) return args.res; break;
-                        case "SUBSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FSUB, 3, false, false, true)) return args.res; break;
-                        case "MULSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FMUL, 3, false, false, true)) return args.res; break;
-                        case "DIVSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FDIV, 3, false, false, true)) return args.res; break;
-
-                        case "ADDSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FADD, 2, false, false, true)) return args.res; break;
-                        case "SUBSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FSUB, 2, false, false, true)) return args.res; break;
-                        case "MULSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FMUL, 2, false, false, true)) return args.res; break;
-                        case "DIVSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FDIV, 2, false, false, true)) return args.res; break;
-
-                        case "ADDPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FADD, 3, true, true, false)) return args.res; break;
-                        case "SUBPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FSUB, 3, true, true, false)) return args.res; break;
-                        case "MULPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FMUL, 3, true, true, false)) return args.res; break;
-                        case "DIVPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FDIV, 3, true, true, false)) return args.res; break;
-
-                        case "ADDPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FADD, 2, true, true, false)) return args.res; break;
-                        case "SUBPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FSUB, 2, true, true, false)) return args.res; break;
-                        case "MULPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FMUL, 2, true, true, false)) return args.res; break;
-                        case "DIVPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FDIV, 2, true, true, false)) return args.res; break;
-
-                        case "PAND": if (!args.TryProcessVPUBinary(OPCode.VPU_AND, 3, false, true, false)) return args.res; break;
-                        case "POR": if (!args.TryProcessVPUBinary(OPCode.VPU_OR, 3, false, true, false)) return args.res; break;
-                        case "PXOR": if (!args.TryProcessVPUBinary(OPCode.VPU_XOR, 3, false, true, false)) return args.res; break;
-                        case "PANDN": if (!args.TryProcessVPUBinary(OPCode.VPU_ANDN, 3, false, true, false)) return args.res; break;
-
-                        case "PANDQ": case "ANDPD": if (!args.TryProcessVPUBinary(OPCode.VPU_AND, 3, true, true, false)) return args.res; break;
-                        case "PORQ": case "ORPD": if (!args.TryProcessVPUBinary(OPCode.VPU_OR, 3, true, true, false)) return args.res; break;
-                        case "PXORQ": case "XORPD": if (!args.TryProcessVPUBinary(OPCode.VPU_XOR, 3, true, true, false)) return args.res; break;
-                        case "PANDNQ": case "ANDNPD": if (!args.TryProcessVPUBinary(OPCode.VPU_ANDN, 3, true, true, false)) return args.res; break;
-
-                        case "PANDD": case "ANDPS": if (!args.TryProcessVPUBinary(OPCode.VPU_AND, 2, true, true, false)) return args.res; break;
-                        case "PORD": case "ORPS": if (!args.TryProcessVPUBinary(OPCode.VPU_OR, 2, true, true, false)) return args.res; break;
-                        case "PXORD": case "XORPS": if (!args.TryProcessVPUBinary(OPCode.VPU_XOR, 2, true, true, false)) return args.res; break;
-                        case "PANDND": case "ANDNPS": if (!args.TryProcessVPUBinary(OPCode.VPU_ANDN, 2, true, true, false)) return args.res; break;
-
-                        case "PADDQ": if (!args.TryProcessVPUBinary(OPCode.VPU_ADD, 3, true, true, false)) return args.res; break;
-                        case "PADDD": if (!args.TryProcessVPUBinary(OPCode.VPU_ADD, 2, true, true, false)) return args.res; break;
-                        case "PADDW": if (!args.TryProcessVPUBinary(OPCode.VPU_ADD, 1, true, true, false)) return args.res; break;
-                        case "PADDB": if (!args.TryProcessVPUBinary(OPCode.VPU_ADD, 0, true, true, false)) return args.res; break;
-
-                        case "PADDSW": if (!args.TryProcessVPUBinary(OPCode.VPU_ADDS, 1, true, true, false)) return args.res; break;
-                        case "PADDSB": if (!args.TryProcessVPUBinary(OPCode.VPU_ADDS, 0, true, true, false)) return args.res; break;
-
-                        case "PADDUSW": if (!args.TryProcessVPUBinary(OPCode.VPU_ADDUS, 1, true, true, false)) return args.res; break;
-                        case "PADDUSB": if (!args.TryProcessVPUBinary(OPCode.VPU_ADDUS, 0, true, true, false)) return args.res; break;
-
-                        case "PSUBQ": if (!args.TryProcessVPUBinary(OPCode.VPU_SUB, 3, true, true, false)) return args.res; break;
-                        case "PSUBD": if (!args.TryProcessVPUBinary(OPCode.VPU_SUB, 2, true, true, false)) return args.res; break;
-                        case "PSUBW": if (!args.TryProcessVPUBinary(OPCode.VPU_SUB, 1, true, true, false)) return args.res; break;
-                        case "PSUBB": if (!args.TryProcessVPUBinary(OPCode.VPU_SUB, 0, true, true, false)) return args.res; break;
-
-                        case "PSUBSW": if (!args.TryProcessVPUBinary(OPCode.VPU_SUBS, 1, true, true, false)) return args.res; break;
-                        case "PSUBSB": if (!args.TryProcessVPUBinary(OPCode.VPU_SUBS, 0, true, true, false)) return args.res; break;
-
-                        case "PSUBUSW": if (!args.TryProcessVPUBinary(OPCode.VPU_SUBUS, 1, true, true, false)) return args.res; break;
-                        case "PSUBUSB": if (!args.TryProcessVPUBinary(OPCode.VPU_SUBUS, 0, true, true, false)) return args.res; break;
-
-                        case "PMULLQ": if (!args.TryProcessVPUBinary(OPCode.VPU_MULL, 3, true, true, false)) return args.res; break;
-                        case "PMULLD": if (!args.TryProcessVPUBinary(OPCode.VPU_MULL, 2, true, true, false)) return args.res; break;
-                        case "PMULLW": if (!args.TryProcessVPUBinary(OPCode.VPU_MULL, 1, true, true, false)) return args.res; break;
-
-                        case "MINSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FMIN, 3, false, false, true)) return args.res; break;
-                        case "MINSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FMIN, 2, false, false, true)) return args.res; break;
-
-                        case "MINPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FMIN, 3, true, true, false)) return args.res; break;
-                        case "MINPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FMIN, 2, true, true, false)) return args.res; break;
-
-                        case "MAXSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FMAX, 3, false, false, true)) return args.res; break;
-                        case "MAXSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FMAX, 2, false, false, true)) return args.res; break;
-
-                        case "MAXPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FMAX, 3, true, true, false)) return args.res; break;
-                        case "MAXPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FMAX, 2, true, true, false)) return args.res; break;
-
-                        case "PMINUQ": if (!args.TryProcessVPUBinary(OPCode.VPU_UMIN, 3, true, true, false)) return args.res; break;
-                        case "PMINUD": if (!args.TryProcessVPUBinary(OPCode.VPU_UMIN, 2, true, true, false)) return args.res; break;
-                        case "PMINUW": if (!args.TryProcessVPUBinary(OPCode.VPU_UMIN, 1, true, true, false)) return args.res; break;
-                        case "PMINUB": if (!args.TryProcessVPUBinary(OPCode.VPU_UMIN, 0, true, true, false)) return args.res; break;
-
-                        case "PMINSQ": if (!args.TryProcessVPUBinary(OPCode.VPU_SMIN, 3, true, true, false)) return args.res; break;
-                        case "PMINSD": if (!args.TryProcessVPUBinary(OPCode.VPU_SMIN, 2, true, true, false)) return args.res; break;
-                        case "PMINSW": if (!args.TryProcessVPUBinary(OPCode.VPU_SMIN, 1, true, true, false)) return args.res; break;
-                        case "PMINSB": if (!args.TryProcessVPUBinary(OPCode.VPU_SMIN, 0, true, true, false)) return args.res; break;
-
-                        case "PMAXUQ": if (!args.TryProcessVPUBinary(OPCode.VPU_UMAX, 3, true, true, false)) return args.res; break;
-                        case "PMAXUD": if (!args.TryProcessVPUBinary(OPCode.VPU_UMAX, 2, true, true, false)) return args.res; break;
-                        case "PMAXUW": if (!args.TryProcessVPUBinary(OPCode.VPU_UMAX, 1, true, true, false)) return args.res; break;
-                        case "PMAXUB": if (!args.TryProcessVPUBinary(OPCode.VPU_UMAX, 0, true, true, false)) return args.res; break;
-
-                        case "PMAXSQ": if (!args.TryProcessVPUBinary(OPCode.VPU_SMAX, 3, true, true, false)) return args.res; break;
-                        case "PMAXSD": if (!args.TryProcessVPUBinary(OPCode.VPU_SMAX, 2, true, true, false)) return args.res; break;
-                        case "PMAXSW": if (!args.TryProcessVPUBinary(OPCode.VPU_SMAX, 1, true, true, false)) return args.res; break;
-                        case "PMAXSB": if (!args.TryProcessVPUBinary(OPCode.VPU_SMAX, 0, true, true, false)) return args.res; break;
-
-                        case "ADDSUBPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FADDSUB, 3, true, true, false)) return args.res; break;
-                        case "ADDSUBPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FADDSUB, 2, true, true, false)) return args.res; break;
-
-                        case "PAVGW": if (!args.TryProcessVPUBinary(OPCode.VPU_AVG, 1, true, true, false)) return args.res; break;
-                        case "PAVGB": if (!args.TryProcessVPUBinary(OPCode.VPU_AVG, 0, true, true, false)) return args.res; break;
-
-                        case "CMPPD": if (!args.TryProcessVPU_FCMP(OPCode.VPU_FCMP, 3, true, true, false)) return args.res; break;
-                        case "CMPPS": if (!args.TryProcessVPU_FCMP(OPCode.VPU_FCMP, 2, true, true, false)) return args.res; break;
-
-                        // CMPSD (vec) requires disambiguation
-                        case "CMPSS": if (!args.TryProcessVPU_FCMP(OPCode.VPU_FCMP, 2, false, false, true)) return args.res; break;
-
-                        // packed double comparisons
-                        case "CMPEQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 0)) return args.res; break;
-                        case "CMPLTPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 1)) return args.res; break;
-                        case "CMPLEPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 2)) return args.res; break;
-                        case "CMPUNORDPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 3)) return args.res; break;
-                        case "CMPNEQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 4)) return args.res; break;
-                        case "CMPNLTPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 5)) return args.res; break;
-                        case "CMPNLEPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 6)) return args.res; break;
-                        case "CMPORDPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 7)) return args.res; break;
-                        case "CMPEQ_UQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 8)) return args.res; break;
-                        case "CMPNGEPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 9)) return args.res; break;
-                        case "CMPNGTPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 10)) return args.res; break;
-                        case "CMPFALSEPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 11)) return args.res; break;
-                        case "CMPNEQ_OQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 12)) return args.res; break;
-                        case "CMPGEPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 13)) return args.res; break;
-                        case "CMPGTPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 14)) return args.res; break;
-                        case "CMPTRUEPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 15)) return args.res; break;
-                        case "CMPEQ_OSPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 16)) return args.res; break;
-                        case "CMPLT_OQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 17)) return args.res; break;
-                        case "CMPLE_OQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 18)) return args.res; break;
-                        case "CMPUNORD_SPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 19)) return args.res; break;
-                        case "CMPNEQ_USPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 20)) return args.res; break;
-                        case "CMPNLT_UQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 21)) return args.res; break;
-                        case "CMPNLE_UQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 22)) return args.res; break;
-                        case "CMPORD_SPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 23)) return args.res; break;
-                        case "CMPEQ_USPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 24)) return args.res; break;
-                        case "CMPNGE_UQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 25)) return args.res; break;
-                        case "CMPNGT_UQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 26)) return args.res; break;
-                        case "CMPFALSE_OSPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 27)) return args.res; break;
-                        case "CMPNEQ_OSPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 28)) return args.res; break;
-                        case "CMPGE_OQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 29)) return args.res; break;
-                        case "CMPGT_OQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 30)) return args.res; break;
-                        case "CMPTRUE_USPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 31)) return args.res; break;
-
-                        // packed single comparisons
-                        case "CMPEQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 0)) return args.res; break;
-                        case "CMPLTPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 1)) return args.res; break;
-                        case "CMPLEPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 2)) return args.res; break;
-                        case "CMPUNORDPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 3)) return args.res; break;
-                        case "CMPNEQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 4)) return args.res; break;
-                        case "CMPNLTPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 5)) return args.res; break;
-                        case "CMPNLEPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 6)) return args.res; break;
-                        case "CMPORDPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 7)) return args.res; break;
-                        case "CMPEQ_UQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 8)) return args.res; break;
-                        case "CMPNGEPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 9)) return args.res; break;
-                        case "CMPNGTPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 10)) return args.res; break;
-                        case "CMPFALSEPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 11)) return args.res; break;
-                        case "CMPNEQ_OQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 12)) return args.res; break;
-                        case "CMPGEPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 13)) return args.res; break;
-                        case "CMPGTPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 14)) return args.res; break;
-                        case "CMPTRUEPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 15)) return args.res; break;
-                        case "CMPEQ_OSPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 16)) return args.res; break;
-                        case "CMPLT_OQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 17)) return args.res; break;
-                        case "CMPLE_OQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 18)) return args.res; break;
-                        case "CMPUNORD_SPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 19)) return args.res; break;
-                        case "CMPNEQ_USPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 20)) return args.res; break;
-                        case "CMPNLT_UQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 21)) return args.res; break;
-                        case "CMPNLE_UQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 22)) return args.res; break;
-                        case "CMPORD_SPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 23)) return args.res; break;
-                        case "CMPEQ_USPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 24)) return args.res; break;
-                        case "CMPNGE_UQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 25)) return args.res; break;
-                        case "CMPNGT_UQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 26)) return args.res; break;
-                        case "CMPFALSE_OSPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 27)) return args.res; break;
-                        case "CMPNEQ_OSPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 28)) return args.res; break;
-                        case "CMPGE_OQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 29)) return args.res; break;
-                        case "CMPGT_OQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 30)) return args.res; break;
-                        case "CMPTRUE_USPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 31)) return args.res; break;
-
-                        // scalar double comparisons
-                        case "CMPEQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 0)) return args.res; break;
-                        case "CMPLTSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 1)) return args.res; break;
-                        case "CMPLESD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 2)) return args.res; break;
-                        case "CMPUNORDSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 3)) return args.res; break;
-                        case "CMPNEQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 4)) return args.res; break;
-                        case "CMPNLTSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 5)) return args.res; break;
-                        case "CMPNLESD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 6)) return args.res; break;
-                        case "CMPORDSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 7)) return args.res; break;
-                        case "CMPEQ_UQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 8)) return args.res; break;
-                        case "CMPNGESD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 9)) return args.res; break;
-                        case "CMPNGTSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 10)) return args.res; break;
-                        case "CMPFALSESD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 11)) return args.res; break;
-                        case "CMPNEQ_OQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 12)) return args.res; break;
-                        case "CMPGESD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 13)) return args.res; break;
-                        case "CMPGTSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 14)) return args.res; break;
-                        case "CMPTRUESD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 15)) return args.res; break;
-                        case "CMPEQ_OSSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 16)) return args.res; break;
-                        case "CMPLT_OQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 17)) return args.res; break;
-                        case "CMPLE_OQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 18)) return args.res; break;
-                        case "CMPUNORD_SSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 19)) return args.res; break;
-                        case "CMPNEQ_USSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 20)) return args.res; break;
-                        case "CMPNLT_UQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 21)) return args.res; break;
-                        case "CMPNLE_UQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 22)) return args.res; break;
-                        case "CMPORD_SSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 23)) return args.res; break;
-                        case "CMPEQ_USSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 24)) return args.res; break;
-                        case "CMPNGE_UQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 25)) return args.res; break;
-                        case "CMPNGT_UQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 26)) return args.res; break;
-                        case "CMPFALSE_OSSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 27)) return args.res; break;
-                        case "CMPNEQ_OSSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 28)) return args.res; break;
-                        case "CMPGE_OQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 29)) return args.res; break;
-                        case "CMPGT_OQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 30)) return args.res; break;
-                        case "CMPTRUE_USSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 31)) return args.res; break;
-
-                        // scalar single comparisons
-                        case "CMPEQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 0)) return args.res; break;
-                        case "CMPLTSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 1)) return args.res; break;
-                        case "CMPLESS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 2)) return args.res; break;
-                        case "CMPUNORDSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 3)) return args.res; break;
-                        case "CMPNEQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 4)) return args.res; break;
-                        case "CMPNLTSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 5)) return args.res; break;
-                        case "CMPNLESS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 6)) return args.res; break;
-                        case "CMPORDSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 7)) return args.res; break;
-                        case "CMPEQ_UQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 8)) return args.res; break;
-                        case "CMPNGESS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 9)) return args.res; break;
-                        case "CMPNGTSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 10)) return args.res; break;
-                        case "CMPFALSESS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 11)) return args.res; break;
-                        case "CMPNEQ_OQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 12)) return args.res; break;
-                        case "CMPGESS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 13)) return args.res; break;
-                        case "CMPGTSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 14)) return args.res; break;
-                        case "CMPTRUESS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 15)) return args.res; break;
-                        case "CMPEQ_OSSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 16)) return args.res; break;
-                        case "CMPLT_OQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 17)) return args.res; break;
-                        case "CMPLE_OQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 18)) return args.res; break;
-                        case "CMPUNORD_SSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 19)) return args.res; break;
-                        case "CMPNEQ_USSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 20)) return args.res; break;
-                        case "CMPNLT_UQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 21)) return args.res; break;
-                        case "CMPNLE_UQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 22)) return args.res; break;
-                        case "CMPORD_SSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 23)) return args.res; break;
-                        case "CMPEQ_USSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 24)) return args.res; break;
-                        case "CMPNGE_UQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 25)) return args.res; break;
-                        case "CMPNGT_UQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 26)) return args.res; break;
-                        case "CMPFALSE_OSSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 27)) return args.res; break;
-                        case "CMPNEQ_OSSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 28)) return args.res; break;
-                        case "CMPGE_OQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 29)) return args.res; break;
-                        case "CMPGT_OQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 30)) return args.res; break;
-                        case "CMPTRUE_USSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 31)) return args.res; break;
-
-                        case "COMISD": if (!args.TryProcessVPUBinary_2arg(OPCode.VPU_FCOMI, 3, false, false, true)) return args.res; break;
-                        case "COMISS": if (!args.TryProcessVPUBinary_2arg(OPCode.VPU_FCOMI, 2, false, false, true)) return args.res; break;
-
-                        case "SQRTPD": if (!args.TryProcessVPUUnary(OPCode.VPU_FSQRT, 3, true, true, false)) return args.res; break;
-                        case "SQRTPS": if (!args.TryProcessVPUUnary(OPCode.VPU_FSQRT, 2, true, true, false)) return args.res; break;
-
-                        case "SQRTSD": if (!args.TryProcessVPUUnary(OPCode.VPU_FSQRT, 3, false, false, true)) return args.res; break;
-                        case "SQRTSS": if (!args.TryProcessVPUUnary(OPCode.VPU_FSQRT, 2, false, false, true)) return args.res; break;
-
-                        case "RSQRTPD": if (!args.TryProcessVPUUnary(OPCode.VPU_FRSQRT, 3, true, true, false)) return args.res; break;
-                        case "RSQRTPS": if (!args.TryProcessVPUUnary(OPCode.VPU_FRSQRT, 2, true, true, false)) return args.res; break;
-
-                        case "RSQRTSD": if (!args.TryProcessVPUUnary(OPCode.VPU_FRSQRT, 3, false, false, true)) return args.res; break;
-                        case "RSQRTSS": if (!args.TryProcessVPUUnary(OPCode.VPU_FRSQRT, 2, false, false, true)) return args.res; break;
-
-                        case "STMXCSR": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 4, 2)) return args.res; break;
-                        case "LDMXCSR": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 5, 2)) return args.res; break;
-
-                        case "CVTSD2SI": if (!args.TryProcessVPUCVT_scalar_f2i(OPCode.VPU_CVT, false, false)) return args.res; break;
-                        case "CVTSS2SI": if (!args.TryProcessVPUCVT_scalar_f2i(OPCode.VPU_CVT, false, true)) return args.res; break;
-                        case "CVTTSD2SI": if (!args.TryProcessVPUCVT_scalar_f2i(OPCode.VPU_CVT, true, false)) return args.res; break;
-                        case "CVTTSS2SI": if (!args.TryProcessVPUCVT_scalar_f2i(OPCode.VPU_CVT, true, true)) return args.res; break;
-
-                        case "CVTSI2SD": if (!args.TryProcessVPUCVT_scalar_i2f(OPCode.VPU_CVT, false)) return args.res; break;
-                        case "CVTSI2SS": if (!args.TryProcessVPUCVT_scalar_i2f(OPCode.VPU_CVT, true)) return args.res; break;
-
-                        case "CVTSD2SS": if (!args.TryProcessVPUCVT_scalar_f2f(OPCode.VPU_CVT, false)) return args.res; break;
-                        case "CVTSS2SD": if (!args.TryProcessVPUCVT_scalar_f2f(OPCode.VPU_CVT, true)) return args.res; break;
-
-                        case "CVTPD2DQ": if (!args.TryProcessVPUCVT_packed_f2i(OPCode.VPU_CVT, false, false)) return args.res; break;
-                        case "CVTPS2DQ": if (!args.TryProcessVPUCVT_packed_f2i(OPCode.VPU_CVT, false, true)) return args.res; break;
-                        case "CVTTPD2DQ": if (!args.TryProcessVPUCVT_packed_f2i(OPCode.VPU_CVT, true, false)) return args.res; break;
-                        case "CVTTPS2DQ": if (!args.TryProcessVPUCVT_packed_f2i(OPCode.VPU_CVT, true, true)) return args.res; break;
-
-                        case "CVTDQ2PD": if (!args.TryProcessVPUCVT_packed_i2f(OPCode.VPU_CVT, false)) return args.res; break;
-                        case "CVTDQ2PS": if (!args.TryProcessVPUCVT_packed_i2f(OPCode.VPU_CVT, true)) return args.res; break;
-
-                        case "CVTPD2PS": if (!args.TryProcessVPUCVT_packed_f2f(OPCode.VPU_CVT, false)) return args.res; break;
-                        case "CVTPS2PD": if (!args.TryProcessVPUCVT_packed_f2f(OPCode.VPU_CVT, true)) return args.res; break;
-
-
-                        // misc instructions
-
-                        case "DEBUG_CPU": if (!args.TryProcessNoArgOp(OPCode.DEBUG, true, 0)) return args.res; break;
-                        case "DEBUG_VPU": if (!args.TryProcessNoArgOp(OPCode.DEBUG, true, 1)) return args.res; break;
-                        case "DEBUG_FULL": if (!args.TryProcessNoArgOp(OPCode.DEBUG, true, 2)) return args.res; break;
-
-                        // disambiguation
-
-                        case "MOVS":
-                            // MOVS (string) has 2 memory operands
-                            if (args.args.Length == 2 && args.args[0].EndsWith(']') && args.args[1].EndsWith(']'))
-                            {
-                                if (!args.TryProcessMOVS_string(OPCode.string_ops, false)) return args.res;
-                            }
-                            // otherwise is MOVS (mov)
-                            else
-                            {
-                                if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 2)) return args.res;
-                            }
-                            break;
-                        case "MOVSD":
-                            // MOVSD (string) takes no operands
-                            if (args.args.Length == 0)
-                            {
-                                if (!args.TryProcessNoArgOp(OPCode.string_ops, true, 2)) return args.res;
-                            }
-                            // otherwise is MOVSD (vec)
-                            else
-                            {
-                                if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, false, false, true)) return args.res;
-                            }
-                            break;
-                        case "CMPSD":
-                            // CMPSD (string) takes no operands
-                            if (args.args.Length == 0)
-                            {
-                                if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (2 << 2) | 2)) return args.res;
-                            }
-                            // otherwise is CMPSD(vec)
-                            else
-                            {
-                                if (!args.TryProcessVPU_FCMP(OPCode.VPU_FCMP, 3, false, false, true)) return args.res;
-                            }
-                            break;
-
-                        default: return new AssembleResult(AssembleError.UnknownOp, $"line {args.line}: Unknown operation \"{args.op}\"");
-                    }
-                }
-
-                op_done:
-
-                // advance to after the new line
-                pos = end + 1;
+				// must update current line poas before TryExtractLineHeader() (because it may introduce labels)
+				args.UpdateLinePos();
+
+				// extract line header info
+				if (!args.TryExtractLineHeader(ref rawline)) return args.res;
+
+				// assemble this line a number of times equal to args.times (updated by callng TryExtractLineHeader() above)
+				for (Int64 times_i = 0; times_i < args.times; ++times_i)
+				{
+					// must update current line pos before each TIMES assembly iteration (because each TIMES iteration is like a new line)
+					args.UpdateLinePos();
+
+					// split the line and prepare for parsing
+					if (!args.SplitLine(rawline)) return args.res;
+
+					// empty lines are ignored
+					if (args.op != string.Empty)
+					{
+						// -- directive routing -- //
+
+						switch (args.op.ToUpper())
+						{
+							case "GLOBAL": if (!args.TryProcessGlobal()) return args.res; goto op_done;
+							case "EXTERN": if (!args.TryProcessExtern()) return args.res; goto op_done;
+
+							case "ALIGN": if (!args.TryProcessAlign()) return args.res; goto op_done;
+
+							case "ALIGNB": goto op_done;
+							case "ALIGNW": if (!args.TryProcessAlignXX(2)) return args.res; goto op_done;
+							case "ALIGND": if (!args.TryProcessAlignXX(4)) return args.res; goto op_done;
+							case "ALIGNQ": if (!args.TryProcessAlignXX(8)) return args.res; goto op_done;
+							case "ALIGNX": if (!args.TryProcessAlignXX(16)) return args.res; goto op_done;
+							case "ALIGNY": if (!args.TryProcessAlignXX(32)) return args.res; goto op_done;
+							case "ALIGNZ": if (!args.TryProcessAlignXX(64)) return args.res; goto op_done;
+
+							case "DB": if (!args.TryProcessDeclare(1)) return args.res; goto op_done;
+							case "DW": if (!args.TryProcessDeclare(2)) return args.res; goto op_done;
+							case "DD": if (!args.TryProcessDeclare(4)) return args.res; goto op_done;
+							case "DQ": if (!args.TryProcessDeclare(8)) return args.res; goto op_done;
+							case "DX": if (!args.TryProcessDeclare(16)) return args.res; goto op_done;
+							case "DY": if (!args.TryProcessDeclare(32)) return args.res; goto op_done;
+							case "DZ": if (!args.TryProcessDeclare(64)) return args.res; goto op_done;
+
+							case "RESB": if (!args.TryProcessReserve(1)) return args.res; goto op_done;
+							case "RESW": if (!args.TryProcessReserve(2)) return args.res; goto op_done;
+							case "RESD": if (!args.TryProcessReserve(4)) return args.res; goto op_done;
+							case "RESQ": if (!args.TryProcessReserve(8)) return args.res; goto op_done;
+							case "RESX": if (!args.TryProcessReserve(16)) return args.res; goto op_done;
+							case "RESY": if (!args.TryProcessReserve(32)) return args.res; goto op_done;
+							case "RESZ": if (!args.TryProcessReserve(64)) return args.res; goto op_done;
+
+							case "EQU": if (!args.TryProcessEQU()) return args.res; goto op_done;
+
+							case "STATIC_ASSERT": if (!args.TryProcessStaticAssert()) return args.res; goto op_done;
+
+							case "SEGMENT": case "SECTION": if (!args.TryProcessSegment()) return args.res; goto op_done;
+						}
+
+						// if it wasn't a directive it's about to be an instruction: make sure we're in the text segment
+						if (args.current_seg != AsmSegment.TEXT) return new AssembleResult(AssembleError.FormatError, $"line {args.line}: Attempt to write executable instructions to the {args.current_seg} segment");
+
+						// -- instruction routing -- //
+
+						switch (args.op.ToUpper())
+						{
+							// unmapped
+
+							case "LFENCE": if (!args.TryProcessNoArgOp_no_write()) return args.res; break;
+							case "SFENCE": if (!args.TryProcessNoArgOp_no_write()) return args.res; break;
+							case "MFENCE": if (!args.TryProcessNoArgOp_no_write()) return args.res; break;
+
+							case "PAUSE": if (!args.TryProcessNoArgOp_no_write()) return args.res; break;
+
+							// x86 instructions
+
+							case "NOP": if (!args.TryProcessNoArgOp(OPCode.NOP)) return args.res; break;
+
+							case "HLT": if (!args.TryProcessNoArgOp(OPCode.HLT)) return args.res; break;
+							case "SYSCALL": if (!args.TryProcessNoArgOp(OPCode.SYSCALL)) return args.res; break;
+
+							case "PUSHF": if (!args.TryProcessNoArgOp(OPCode.STLDF, true, 0)) return args.res; break;
+							case "PUSHFD": if (!args.TryProcessNoArgOp(OPCode.STLDF, true, 1)) return args.res; break;
+							case "PUSHFQ": if (!args.TryProcessNoArgOp(OPCode.STLDF, true, 2)) return args.res; break;
+
+							case "POPF": if (!args.TryProcessNoArgOp(OPCode.STLDF, true, 3)) return args.res; break;
+							case "POPFD": if (!args.TryProcessNoArgOp(OPCode.STLDF, true, 4)) return args.res; break;
+							case "POPFQ": if (!args.TryProcessNoArgOp(OPCode.STLDF, true, 5)) return args.res; break;
+
+							case "SAHF": if (!args.TryProcessNoArgOp(OPCode.STLDF, true, 6)) return args.res; break;
+							case "LAHF": if (!args.TryProcessNoArgOp(OPCode.STLDF, true, 7)) return args.res; break;
+
+							case "STC": if (!args.TryProcessNoArgOp(OPCode.FlagManip, true, 0)) return args.res; break;
+							case "CLC": if (!args.TryProcessNoArgOp(OPCode.FlagManip, true, 1)) return args.res; break;
+							case "STI": if (!args.TryProcessNoArgOp(OPCode.FlagManip, true, 2)) return args.res; break;
+							case "CLI": if (!args.TryProcessNoArgOp(OPCode.FlagManip, true, 3)) return args.res; break;
+							case "STD": if (!args.TryProcessNoArgOp(OPCode.FlagManip, true, 4)) return args.res; break;
+							case "CLD": if (!args.TryProcessNoArgOp(OPCode.FlagManip, true, 5)) return args.res; break;
+							case "STAC": if (!args.TryProcessNoArgOp(OPCode.FlagManip, true, 6)) return args.res; break;
+							case "CLAC": if (!args.TryProcessNoArgOp(OPCode.FlagManip, true, 7)) return args.res; break;
+							case "CMC": if (!args.TryProcessNoArgOp(OPCode.FlagManip, true, 8)) return args.res; break;
+
+							case "SETZ": case "SETE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 0, 1)) return args.res; break;
+							case "SETNZ": case "SETNE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 1, 1)) return args.res; break;
+							case "SETS": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 2, 1)) return args.res; break;
+							case "SETNS": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 3, 1)) return args.res; break;
+							case "SETP": case "SETPE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 4, 1)) return args.res; break;
+							case "SETNP": case "SETPO": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 5, 1)) return args.res; break;
+							case "SETO": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 6, 1)) return args.res; break;
+							case "SETNO": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 7, 1)) return args.res; break;
+							case "SETC": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 8, 1)) return args.res; break;
+							case "SETNC": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 9, 1)) return args.res; break;
+
+							case "SETB": case "SETNAE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 10, 1)) return args.res; break;
+							case "SETBE": case "SETNA": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 11, 1)) return args.res; break;
+							case "SETA": case "SETNBE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 12, 1)) return args.res; break;
+							case "SETAE": case "SETNB": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 13, 1)) return args.res; break;
+
+							case "SETL": case "SETNGE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 14, 1)) return args.res; break;
+							case "SETLE": case "SETNG": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 15, 1)) return args.res; break;
+							case "SETG": case "SETNLE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 16, 1)) return args.res; break;
+							case "SETGE": case "SETNL": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 17, 1)) return args.res; break;
+
+							case "MOV": if (!args.TryProcessBinaryOp(OPCode.MOV)) return args.res; break;
+
+							case "MOVZ": case "MOVE": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 0)) return args.res; break;
+							case "MOVNZ": case "MOVNE": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 1)) return args.res; break;
+							// MOVS (mov) requires disambiguation
+							case "MOVNS": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 3)) return args.res; break;
+							case "MOVP": case "MOVPE": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 4)) return args.res; break;
+							case "MOVNP": case "MOVPO": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 5)) return args.res; break;
+							case "MOVO": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 6)) return args.res; break;
+							case "MOVNO": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 7)) return args.res; break;
+							case "MOVC": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 8)) return args.res; break;
+							case "MOVNC": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 9)) return args.res; break;
+
+							case "MOVB": case "MOVNAE": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 10)) return args.res; break;
+							case "MOVBE": case "MOVNA": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 11)) return args.res; break;
+							case "MOVA": case "MOVNBE": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 12)) return args.res; break;
+							case "MOVAE": case "MOVNB": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 13)) return args.res; break;
+
+							case "MOVL": case "MOVNGE": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 14)) return args.res; break;
+							case "MOVLE": case "MOVNG": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 15)) return args.res; break;
+							case "MOVG": case "MOVNLE": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 16)) return args.res; break;
+							case "MOVGE": case "MOVNL": if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 17)) return args.res; break;
+
+							case "XCHG": if (!args.TryProcessXCHG(OPCode.XCHG)) return args.res; break;
+
+							case "JMP": if (!args.TryProcessIMMRM(OPCode.JMP, false, 0, 14, 3)) return args.res; break;
+
+							case "JZ": case "JE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 0, 14, 3)) return args.res; break;
+							case "JNZ": case "JNE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 1, 14, 3)) return args.res; break;
+							case "JS": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 2, 14, 3)) return args.res; break;
+							case "JNS": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 3, 14, 3)) return args.res; break;
+							case "JP": case "JPE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 4, 14, 3)) return args.res; break;
+							case "JNP": case "JPO": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 5, 14, 3)) return args.res; break;
+							case "JO": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 6, 14, 3)) return args.res; break;
+							case "JNO": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 7, 14, 3)) return args.res; break;
+							case "JC": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 8, 14, 3)) return args.res; break;
+							case "JNC": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 9, 14, 3)) return args.res; break;
+
+							case "JB": case "JNAE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 10, 14, 3)) return args.res; break;
+							case "JBE": case "JNA": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 11, 14, 3)) return args.res; break;
+							case "JA": case "JNBE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 12, 14, 3)) return args.res; break;
+							case "JAE": case "JNB": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 13, 14, 3)) return args.res; break;
+
+							case "JL": case "JNGE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 14, 14, 3)) return args.res; break;
+							case "JLE": case "JNG": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 15, 14, 3)) return args.res; break;
+							case "JG": case "JNLE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 16, 14, 3)) return args.res; break;
+							case "JGE": case "JNL": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 17, 14, 3)) return args.res; break;
+
+							case "JCXZ": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 18, 2, 1)) return args.res; break;
+							case "JECXZ": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 18, 4, 2)) return args.res; break;
+							case "JRCXZ": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 18, 8, 3)) return args.res; break;
+
+							case "LOOP": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, 0, 14, 3)) return args.res; break;
+							case "LOOPZ": case "LOOPE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, 1, 14, 3)) return args.res; break;
+							case "LOOPNZ": case "LOOPNE": if (!args.TryProcessIMMRM(OPCode.LOOPcc, true, 2, 14, 3)) return args.res; break;
+
+							case "CALL": if (!args.TryProcessIMMRM(OPCode.CALL, false, 0, 14, 3)) return args.res; break;
+							case "RET": if (!args.TryProcessNoArgOp(OPCode.RET)) return args.res; break;
+
+							case "PUSH": if (!args.TryProcessIMMRM(OPCode.PUSH, false, 0, 14)) return args.res; break;
+							case "POP": if (!args.TryProcessPOP(OPCode.POP)) return args.res; break;
+
+							case "LEA": if (!args.TryProcessLEA(OPCode.LEA)) return args.res; break;
+
+							case "ADD": if (!args.TryProcessBinaryOp(OPCode.ADD)) return args.res; break;
+							case "SUB": if (!args.TryProcessBinaryOp(OPCode.SUB)) return args.res; break;
+
+							case "MUL": if (!args.TryProcessIMMRM(OPCode.MUL_x, true, 0)) return args.res; break;
+							case "MULX": if (!args.TryProcessRR_RM(OPCode.MUL_x, true, 1, 12)) return args.res; break;
+							case "IMUL":
+								switch (args.args.Length)
+								{
+									case 1: if (!args.TryProcessIMMRM(OPCode.IMUL, true, 0)) return args.res; break;
+									case 2: if (!args.TryProcessBinaryOp(OPCode.IMUL, true, 1)) return args.res; break;
+									case 3: if (!args.TryProcessTernaryOp(OPCode.IMUL, true, 2)) return args.res; break;
+
+									default: return new AssembleResult(AssembleError.ArgCount, $"line {args.line}: IMUL expected 1, 2, or 3 args");
+								}
+								break;
+							case "DIV": if (!args.TryProcessIMMRM(OPCode.DIV)) return args.res; break;
+							case "IDIV": if (!args.TryProcessIMMRM(OPCode.IDIV)) return args.res; break;
+
+							case "SHL": if (!args.TryProcessShift(OPCode.SHL)) return args.res; break;
+							case "SHR": if (!args.TryProcessShift(OPCode.SHR)) return args.res; break;
+							case "SAL": if (!args.TryProcessShift(OPCode.SAL)) return args.res; break;
+							case "SAR": if (!args.TryProcessShift(OPCode.SAR)) return args.res; break;
+							case "ROL": if (!args.TryProcessShift(OPCode.ROL)) return args.res; break;
+							case "ROR": if (!args.TryProcessShift(OPCode.ROR)) return args.res; break;
+							case "RCL": if (!args.TryProcessShift(OPCode.RCL)) return args.res; break;
+							case "RCR": if (!args.TryProcessShift(OPCode.RCR)) return args.res; break;
+
+							case "AND": if (!args.TryProcessBinaryOp(OPCode.AND)) return args.res; break;
+							case "OR": if (!args.TryProcessBinaryOp(OPCode.OR)) return args.res; break;
+							case "XOR": if (!args.TryProcessBinaryOp(OPCode.XOR)) return args.res; break;
+
+							case "INC": if (!args.TryProcessUnaryOp(OPCode.INC)) return args.res; break;
+							case "DEC": if (!args.TryProcessUnaryOp(OPCode.DEC)) return args.res; break;
+							case "NEG": if (!args.TryProcessUnaryOp(OPCode.NEG)) return args.res; break;
+							case "NOT": if (!args.TryProcessUnaryOp(OPCode.NOT)) return args.res; break;
+
+							case "CMP":
+								// if there are 2 args and the second one is an instant 0, we can make this a CMPZ instruction
+								if (args.args.Length == 2 && args.TryParseInstantImm(args.args[1], out a, out floating, out b, out btemp) && a == 0)
+								{
+									// set new args for the unary version
+									args.args = new string[] { args.args[0] };
+									if (!args.TryProcessUnaryOp(OPCode.CMPZ)) return args.res;
+								}
+								// otherwise normal binary
+								else if (!args.TryProcessBinaryOp(OPCode.CMP)) return args.res;
+								break;
+							case "TEST": if (!args.TryProcessBinaryOp(OPCode.TEST)) return args.res; break;
+
+							case "BSWAP": if (!args.TryProcessUnaryOp(OPCode.BSWAP)) return args.res; break;
+							case "BEXTR": if (!args.TryProcessBinaryOp(OPCode.BEXTR, false, 0, 15, 1)) return args.res; break;
+							case "BLSI": if (!args.TryProcessUnaryOp(OPCode.BLSI)) return args.res; break;
+							case "BLSMSK": if (!args.TryProcessUnaryOp(OPCode.BLSMSK)) return args.res; break;
+							case "BLSR": if (!args.TryProcessUnaryOp(OPCode.BLSR)) return args.res; break;
+							case "ANDN": if (!args.TryProcessRR_RM(OPCode.ANDN, false, 0, 12)) return args.res; break;
+
+							case "BT": if (!args.TryProcessBinaryOp_NoBMem(OPCode.BTx, true, 0, 15, 0)) return args.res; break;
+							case "BTS": if (!args.TryProcessBinaryOp_NoBMem(OPCode.BTx, true, 1, 15, 0)) return args.res; break;
+							case "BTR": if (!args.TryProcessBinaryOp_NoBMem(OPCode.BTx, true, 2, 15, 0)) return args.res; break;
+							case "BTC": if (!args.TryProcessBinaryOp_NoBMem(OPCode.BTx, true, 3, 15, 0)) return args.res; break;
+
+							case "CWD": if (!args.TryProcessNoArgOp(OPCode.Cxy, true, 0)) return args.res; break;
+							case "CDQ": if (!args.TryProcessNoArgOp(OPCode.Cxy, true, 1)) return args.res; break;
+							case "CQO": if (!args.TryProcessNoArgOp(OPCode.Cxy, true, 2)) return args.res; break;
+
+							case "CBW": if (!args.TryProcessNoArgOp(OPCode.Cxy, true, 3)) return args.res; break;
+							case "CWDE": if (!args.TryProcessNoArgOp(OPCode.Cxy, true, 4)) return args.res; break;
+							case "CDQE": if (!args.TryProcessNoArgOp(OPCode.Cxy, true, 5)) return args.res; break;
+
+							case "MOVZX": if (!args.TryProcessMOVxX(OPCode.MOVxX, false)) return args.res; break;
+							case "MOVSX": if (!args.TryProcessMOVxX(OPCode.MOVxX, true)) return args.res; break;
+
+							case "ADC": if (!args.TryProcessBinaryOp(OPCode.ADXX, true, 0)) return args.res; break;
+							case "ADCX": if (!args.TryProcessBinaryOp_R_RM(OPCode.ADXX, true, 1, 12)) return args.res; break;
+							case "ADOX": if (!args.TryProcessBinaryOp_R_RM(OPCode.ADXX, true, 2, 12)) return args.res; break;
+
+							case "AAA": if (!args.TryProcessNoArgOp(OPCode.AAX, true, 0)) return args.res; break;
+							case "AAS": if (!args.TryProcessNoArgOp(OPCode.AAX, true, 1)) return args.res; break;
+							case "DAA": if (!args.TryProcessNoArgOp(OPCode.AAX, true, 2)) return args.res; break;
+							case "DAS": if (!args.TryProcessNoArgOp(OPCode.AAX, true, 3)) return args.res; break;
+
+							// MOVS (string) requires disambiguation
+							case "MOVSB": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, 0)) return args.res; break;
+							case "MOVSW": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, 1)) return args.res; break;
+							// MOVSD (string) requires disambiguation
+							case "MOVSQ": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, 3)) return args.res; break;
+
+							case "CMPS": if (!args.TryProcessCMPS_string(OPCode.string_ops, false, false)) return args.res; break;
+							case "CMPSB": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (2 << 2) | 0)) return args.res; break;
+							case "CMPSW": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (2 << 2) | 1)) return args.res; break;
+							// CMPSD (string) requires disambiguation
+							case "CMPSQ": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (2 << 2) | 3)) return args.res; break;
+
+							case "LODS": if (!args.TryProcessLODS_string(OPCode.string_ops, false)) return args.res; break;
+							case "LODSB": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (5 << 2) | 0)) return args.res; break;
+							case "LODSW": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (5 << 2) | 1)) return args.res; break;
+							case "LODSD": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (5 << 2) | 2)) return args.res; break;
+							case "LODSQ": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (5 << 2) | 3)) return args.res; break;
+
+							case "STOS": if (!args.TryProcessSTOS_string(OPCode.string_ops, false)) return args.res; break;
+							case "STOSB": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (7 << 2) | 0)) return args.res; break;
+							case "STOSW": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (7 << 2) | 1)) return args.res; break;
+							case "STOSD": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (7 << 2) | 2)) return args.res; break;
+							case "STOSQ": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (7 << 2) | 3)) return args.res; break;
+
+							case "SCAS": if (!args.TryProcessSCAS_string(OPCode.string_ops, false, false)) return args.res; break;
+							case "SCASB": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (9 << 2) | 0)) return args.res; break;
+							case "SCASW": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (9 << 2) | 1)) return args.res; break;
+							case "SCASD": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (9 << 2) | 2)) return args.res; break;
+							case "SCASQ": if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (9 << 2) | 3)) return args.res; break;
+
+							case "REP": if (!args.TryProcessREP()) return args.res; break;
+							case "REPE": case "REPZ": if (!args.TryProcessREPE()) return args.res; break;
+							case "REPNE": case "REPNZ": if (!args.TryProcessREPNE()) return args.res; break;
+
+							case "LOCK":
+								{
+									if (!args.TryProcessPrefixOp(out string actual)) return args.res;
+
+									// decide what handler to use (can't use switch because goto can't jump to an external case label)
+									if (actual == "ADD") goto case "ADD";
+									if (actual == "ADC") goto case "ADC";
+									//if (actual == "XADD") goto case "XADD";
+
+									if (actual == "SUB") goto case "SUB";
+									//if (actual == "SBB") goto case "SBB";
+
+									if (actual == "AND") goto case "AND";
+									if (actual == "OR") goto case "OR";
+									if (actual == "XOR") goto case "XOR";
+
+									if (actual == "BTC") goto case "BTC";
+									if (actual == "BTR") goto case "BTR";
+									if (actual == "BTS") goto case "BTS";
+
+									if (actual == "DEC") goto case "DEC";
+									if (actual == "INC") goto case "INC";
+
+									if (actual == "NEG") goto case "NEG";
+									if (actual == "NOT") goto case "NOT";
+									if (actual == "XCHG") goto case "XCHG";
+
+									//if (actual == "CMPXCHG") goto case "CMPXCHG";
+									//if (actual == "CMPXCH8B") goto case "CMPXCH8B";
+									//if (actual == "CMPXCHG16B") goto case "CMPXCHG16B";
+
+									return new AssembleResult(AssembleError.UsageError, $"line {args.line}: LOCK cannot be used with the specified instruction");
+								}
+
+							case "BSF": if (!args.TryProcessBSx(OPCode.BSx, true)) return args.res; break;
+							case "BSR": if (!args.TryProcessBSx(OPCode.BSx, false)) return args.res; break;
+
+							case "TZCNT": if (!args.TryProcessBSx(OPCode.TZCNT, true)) return args.res; break; // forward flag doesn't matter
+
+							case "UD": if (!args.TryProcessNoArgOp(OPCode.UD)) return args.res; break;
+
+							// x87 instructions
+
+							case "FNOP": if (!args.TryProcessNoArgOp(OPCode.NOP)) return args.res; break; // no sense in wasting another opcode on no-op
+
+							case "FWAIT": case "WAIT": if (!args.TryProcessNoArgOp(OPCode.FWAIT)) return args.res; break;
+
+							case "FINIT":
+								if (!args.TryAppendByte((byte)OPCode.FWAIT)) return args.res;
+								goto case "FNINIT"; // c# doesn't allow implicit fallthrough
+							case "FNINIT": if (!args.TryProcessNoArgOp(OPCode.FINIT)) return args.res; break;
+
+							case "FCLEX":
+								if (!args.TryAppendByte((byte)OPCode.FWAIT)) return args.res;
+								goto case "FNCLEX"; // c# doesn't allow implicit fallthrough
+							case "FNCLEX": if (!args.TryProcessNoArgOp(OPCode.FCLEX)) return args.res; break;
+
+							case "FSTSW":
+								if (!args.TryAppendByte((byte)OPCode.FWAIT)) return args.res;
+								goto case "FNSTSW"; // c# doesn't allow implicit fallthrough
+							case "FNSTSW": // handle FNSTSW AX case here since the other forms don't allow it
+								if (args.args.Length == 1 && args.args[0].ToUpper() == "AX")
+								{
+									if (!args.TryAppendByte((byte)OPCode.FSTLD_WORD)) return args.res;
+									if (!args.TryAppendByte(0)) return args.res;
+								}
+								else if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 1, 1)) return args.res;
+								break;
+
+							case "FSTCW":
+								if (!args.TryAppendByte((byte)OPCode.FWAIT)) return args.res;
+								goto case "FNSTCW"; // c# doesn't allow implicit fallthrough
+							case "FNSTCW": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 2, 1)) return args.res; break;
+
+							case "FLDCW": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 3, 1)) return args.res; break;
+
+							case "FLD1": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 0)) return args.res; break;
+							case "FLDL2T": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 1)) return args.res; break;
+							case "FLDL2E": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 2)) return args.res; break;
+							case "FLDPI": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 3)) return args.res; break;
+							case "FLDLG2": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 4)) return args.res; break;
+							case "FLDLN2": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 5)) return args.res; break;
+							case "FLDZ": if (!args.TryProcessNoArgOp(OPCode.FLD_const, true, 6)) return args.res; break;
+
+							case "FLD": if (!args.TryProcessFLD(OPCode.FLD, false)) return args.res; break;
+							case "FILD": if (!args.TryProcessFLD(OPCode.FLD, true)) return args.res; break;
+
+							case "FST": if (!args.TryProcessFST(OPCode.FST, false, false, false)) return args.res; break;
+							case "FIST": if (!args.TryProcessFST(OPCode.FST, true, false, false)) return args.res; break;
+							case "FSTP": if (!args.TryProcessFST(OPCode.FST, false, true, false)) return args.res; break;
+							case "FISTP": if (!args.TryProcessFST(OPCode.FST, true, true, false)) return args.res; break;
+							case "FISTTP": if (!args.TryProcessFST(OPCode.FST, true, true, true)) return args.res; break;
+
+							case "FXCH": // no arg version swaps st0 and st1
+								if (args.args.Length == 0) { if (!args.TryProcessNoArgOp(OPCode.FXCH, true, 1)) return args.res; break; }
+								else { if (!args.TryProcessFPURegisterOp(OPCode.FXCH)) return args.res; break; }
+
+							case "FMOVE": if (!args.TryProcessFMOVcc(OPCode.FMOVcc, 0)) return args.res; break;
+							case "FMOVNE": if (!args.TryProcessFMOVcc(OPCode.FMOVcc, 1)) return args.res; break;
+							case "FMOVB": case "FMOVNAE": if (!args.TryProcessFMOVcc(OPCode.FMOVcc, 2)) return args.res; break;
+							case "FMOVBE": case "FMOVNA": if (!args.TryProcessFMOVcc(OPCode.FMOVcc, 3)) return args.res; break;
+							case "FMOVA": case "FMOVNBE": if (!args.TryProcessFMOVcc(OPCode.FMOVcc, 4)) return args.res; break;
+							case "FMOVAE": case "FMOVNB": if (!args.TryProcessFMOVcc(OPCode.FMOVcc, 5)) return args.res; break;
+							case "FMOVU": if (!args.TryProcessFMOVcc(OPCode.FMOVcc, 6)) return args.res; break;
+							case "FMOVNU": if (!args.TryProcessFMOVcc(OPCode.FMOVcc, 7)) return args.res; break;
+
+							case "FADD": if (!args.TryProcessFPUBinaryOp(OPCode.FADD, false, false)) return args.res; break;
+							case "FADDP": if (!args.TryProcessFPUBinaryOp(OPCode.FADD, false, true)) return args.res; break;
+							case "FIADD": if (!args.TryProcessFPUBinaryOp(OPCode.FADD, true, false)) return args.res; break;
+
+							case "FSUB": if (!args.TryProcessFPUBinaryOp(OPCode.FSUB, false, false)) return args.res; break;
+							case "FSUBP": if (!args.TryProcessFPUBinaryOp(OPCode.FSUB, false, true)) return args.res; break;
+							case "FISUB": if (!args.TryProcessFPUBinaryOp(OPCode.FSUB, true, false)) return args.res; break;
+
+							case "FSUBR": if (!args.TryProcessFPUBinaryOp(OPCode.FSUBR, false, false)) return args.res; break;
+							case "FSUBRP": if (!args.TryProcessFPUBinaryOp(OPCode.FSUBR, false, true)) return args.res; break;
+							case "FISUBR": if (!args.TryProcessFPUBinaryOp(OPCode.FSUBR, true, false)) return args.res; break;
+
+							case "FMUL": if (!args.TryProcessFPUBinaryOp(OPCode.FMUL, false, false)) return args.res; break;
+							case "FMULP": if (!args.TryProcessFPUBinaryOp(OPCode.FMUL, false, true)) return args.res; break;
+							case "FIMUL": if (!args.TryProcessFPUBinaryOp(OPCode.FMUL, true, false)) return args.res; break;
+
+							case "FDIV": if (!args.TryProcessFPUBinaryOp(OPCode.FDIV, false, false)) return args.res; break;
+							case "FDIVP": if (!args.TryProcessFPUBinaryOp(OPCode.FDIV, false, true)) return args.res; break;
+							case "FIDIV": if (!args.TryProcessFPUBinaryOp(OPCode.FDIV, true, false)) return args.res; break;
+
+							case "FDIVR": if (!args.TryProcessFPUBinaryOp(OPCode.FDIVR, false, false)) return args.res; break;
+							case "FDIVRP": if (!args.TryProcessFPUBinaryOp(OPCode.FDIVR, false, true)) return args.res; break;
+							case "FIDIVR": if (!args.TryProcessFPUBinaryOp(OPCode.FDIVR, true, false)) return args.res; break;
+
+							case "F2XM1": if (!args.TryProcessNoArgOp(OPCode.F2XM1)) return args.res; break;
+							case "FABS": if (!args.TryProcessNoArgOp(OPCode.FABS)) return args.res; break;
+							case "FCHS": if (!args.TryProcessNoArgOp(OPCode.FCHS)) return args.res; break;
+							case "FPREM": if (!args.TryProcessNoArgOp(OPCode.FPREM)) return args.res; break;
+							case "FPREM1": if (!args.TryProcessNoArgOp(OPCode.FPREM1)) return args.res; break;
+							case "FRNDINT": if (!args.TryProcessNoArgOp(OPCode.FRNDINT)) return args.res; break;
+							case "FSQRT": if (!args.TryProcessNoArgOp(OPCode.FSQRT)) return args.res; break;
+							case "FYL2X": if (!args.TryProcessNoArgOp(OPCode.FYL2X)) return args.res; break;
+							case "FYL2XP1": if (!args.TryProcessNoArgOp(OPCode.FYL2XP1)) return args.res; break;
+							case "FXTRACT": if (!args.TryProcessNoArgOp(OPCode.FXTRACT)) return args.res; break;
+							case "FSCALE": if (!args.TryProcessNoArgOp(OPCode.FSCALE)) return args.res; break;
+
+							case "FXAM": if (!args.TryProcessNoArgOp(OPCode.FXAM)) return args.res; break;
+							case "FTST": if (!args.TryProcessNoArgOp(OPCode.FTST)) return args.res; break;
+
+							case "FCOM": if (!args.TryProcessFCOM(OPCode.FCOM, false, false, false, false, false)) return args.res; break;
+							case "FCOMP": if (!args.TryProcessFCOM(OPCode.FCOM, false, true, false, false, false)) return args.res; break;
+							case "FCOMPP": if (!args.TryProcessFCOM(OPCode.FCOM, false, false, true, false, false)) return args.res; break;
+
+							case "FUCOM": if (!args.TryProcessFCOM(OPCode.FCOM, false, false, false, false, true)) return args.res; break;
+							case "FUCOMP": if (!args.TryProcessFCOM(OPCode.FCOM, false, true, false, false, true)) return args.res; break;
+							case "FUCOMPP": if (!args.TryProcessFCOM(OPCode.FCOM, false, false, true, false, true)) return args.res; break;
+
+							case "FCOMI": if (!args.TryProcessFCOM(OPCode.FCOM, false, false, false, true, false)) return args.res; break;
+							case "FCOMIP": if (!args.TryProcessFCOM(OPCode.FCOM, false, true, false, true, false)) return args.res; break;
+
+							case "FUCOMI": if (!args.TryProcessFCOM(OPCode.FCOM, false, false, false, true, true)) return args.res; break;
+							case "FUCOMIP": if (!args.TryProcessFCOM(OPCode.FCOM, false, true, false, true, true)) return args.res; break;
+
+							case "FICOM": if (!args.TryProcessFCOM(OPCode.FCOM, true, false, false, false, false)) return args.res; break;
+							case "FICOMP": if (!args.TryProcessFCOM(OPCode.FCOM, true, true, false, false, false)) return args.res; break;
+
+							case "FSIN": if (!args.TryProcessNoArgOp(OPCode.FSIN)) return args.res; break;
+							case "FCOS": if (!args.TryProcessNoArgOp(OPCode.FCOS)) return args.res; break;
+							case "FSINCOS": if (!args.TryProcessNoArgOp(OPCode.FSINCOS)) return args.res; break;
+							case "FPTAN": if (!args.TryProcessNoArgOp(OPCode.FPTAN)) return args.res; break;
+							case "FPATAN": if (!args.TryProcessNoArgOp(OPCode.FPATAN)) return args.res; break;
+
+							case "FINCSTP": if (!args.TryProcessNoArgOp(OPCode.FINCDECSTP, true, 0)) return args.res; break;
+							case "FDECSTP": if (!args.TryProcessNoArgOp(OPCode.FINCDECSTP, true, 1)) return args.res; break;
+
+							case "FFREE": if (!args.TryProcessFPURegisterOp(OPCode.FFREE)) return args.res; break;
+
+							case "FNSAVE": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 6, ~(UInt64)0)) return args.res; break; // sizecode = 0xff.ff to ensure user can't use explicit size (since it's not a standard size)
+							case "FSAVE": if (!args.TryAppendByte((byte)OPCode.FWAIT)) return args.res; goto case "FNSAVE";
+
+							case "FRSTOR": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 7, ~(UInt64)0)) return args.res; break; // sizecode = 0xff.ff to ensure user can't use explicit size (since it's not a standard size)
+
+							case "FNSTENV": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 8, ~(UInt64)0)) return args.res; break; // sizecode = 0xff.ff to ensure user can't use explicit size (since it's not a standard size)
+							case "FSTENV": if (!args.TryAppendByte((byte)OPCode.FWAIT)) return args.res; goto case "FNSTENV";
+
+							case "FLDENV": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 9, ~(UInt64)0)) return args.res; break; // sizecode = 0xff.ff to ensure user can't use explicit size (since it's not a standard size)
+
+							// vpu instructions
+
+							case "MOVQ": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, false, false, true)) return args.res; break;
+							case "MOVD": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 2, false, false, true)) return args.res; break;
+
+							// MOVSD (vec) requires disambiguation
+							case "MOVSS": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 2, false, false, true)) return args.res; break;
+
+							case "MOVDQA": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, false, true, false)) return args.res; break; // size codes for these 2 don't matter
+							case "MOVDQU": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, false, false, false)) return args.res; break;
+
+							case "MOVDQA64": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, true, true, false)) return args.res; break;
+							case "MOVDQA32": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 2, true, true, false)) return args.res; break;
+							case "MOVDQA16": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 1, true, true, false)) return args.res; break;
+							case "MOVDQA8": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 0, true, true, false)) return args.res; break;
+
+							case "MOVDQU64": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, true, false, false)) return args.res; break;
+							case "MOVDQU32": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 2, true, false, false)) return args.res; break;
+							case "MOVDQU16": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 1, true, false, false)) return args.res; break;
+							case "MOVDQU8": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 0, true, false, false)) return args.res; break;
+
+							case "MOVAPD": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, true, true, false)) return args.res; break;
+							case "MOVAPS": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 2, true, true, false)) return args.res; break;
+
+							case "MOVUPD": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, true, false, false)) return args.res; break;
+							case "MOVUPS": if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 2, true, false, false)) return args.res; break;
+
+							case "ADDSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FADD, 3, false, false, true)) return args.res; break;
+							case "SUBSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FSUB, 3, false, false, true)) return args.res; break;
+							case "MULSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FMUL, 3, false, false, true)) return args.res; break;
+							case "DIVSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FDIV, 3, false, false, true)) return args.res; break;
+
+							case "ADDSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FADD, 2, false, false, true)) return args.res; break;
+							case "SUBSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FSUB, 2, false, false, true)) return args.res; break;
+							case "MULSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FMUL, 2, false, false, true)) return args.res; break;
+							case "DIVSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FDIV, 2, false, false, true)) return args.res; break;
+
+							case "ADDPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FADD, 3, true, true, false)) return args.res; break;
+							case "SUBPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FSUB, 3, true, true, false)) return args.res; break;
+							case "MULPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FMUL, 3, true, true, false)) return args.res; break;
+							case "DIVPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FDIV, 3, true, true, false)) return args.res; break;
+
+							case "ADDPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FADD, 2, true, true, false)) return args.res; break;
+							case "SUBPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FSUB, 2, true, true, false)) return args.res; break;
+							case "MULPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FMUL, 2, true, true, false)) return args.res; break;
+							case "DIVPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FDIV, 2, true, true, false)) return args.res; break;
+
+							case "PAND": if (!args.TryProcessVPUBinary(OPCode.VPU_AND, 3, false, true, false)) return args.res; break;
+							case "POR": if (!args.TryProcessVPUBinary(OPCode.VPU_OR, 3, false, true, false)) return args.res; break;
+							case "PXOR": if (!args.TryProcessVPUBinary(OPCode.VPU_XOR, 3, false, true, false)) return args.res; break;
+							case "PANDN": if (!args.TryProcessVPUBinary(OPCode.VPU_ANDN, 3, false, true, false)) return args.res; break;
+
+							case "PANDQ": case "ANDPD": if (!args.TryProcessVPUBinary(OPCode.VPU_AND, 3, true, true, false)) return args.res; break;
+							case "PORQ": case "ORPD": if (!args.TryProcessVPUBinary(OPCode.VPU_OR, 3, true, true, false)) return args.res; break;
+							case "PXORQ": case "XORPD": if (!args.TryProcessVPUBinary(OPCode.VPU_XOR, 3, true, true, false)) return args.res; break;
+							case "PANDNQ": case "ANDNPD": if (!args.TryProcessVPUBinary(OPCode.VPU_ANDN, 3, true, true, false)) return args.res; break;
+
+							case "PANDD": case "ANDPS": if (!args.TryProcessVPUBinary(OPCode.VPU_AND, 2, true, true, false)) return args.res; break;
+							case "PORD": case "ORPS": if (!args.TryProcessVPUBinary(OPCode.VPU_OR, 2, true, true, false)) return args.res; break;
+							case "PXORD": case "XORPS": if (!args.TryProcessVPUBinary(OPCode.VPU_XOR, 2, true, true, false)) return args.res; break;
+							case "PANDND": case "ANDNPS": if (!args.TryProcessVPUBinary(OPCode.VPU_ANDN, 2, true, true, false)) return args.res; break;
+
+							case "PADDQ": if (!args.TryProcessVPUBinary(OPCode.VPU_ADD, 3, true, true, false)) return args.res; break;
+							case "PADDD": if (!args.TryProcessVPUBinary(OPCode.VPU_ADD, 2, true, true, false)) return args.res; break;
+							case "PADDW": if (!args.TryProcessVPUBinary(OPCode.VPU_ADD, 1, true, true, false)) return args.res; break;
+							case "PADDB": if (!args.TryProcessVPUBinary(OPCode.VPU_ADD, 0, true, true, false)) return args.res; break;
+
+							case "PADDSW": if (!args.TryProcessVPUBinary(OPCode.VPU_ADDS, 1, true, true, false)) return args.res; break;
+							case "PADDSB": if (!args.TryProcessVPUBinary(OPCode.VPU_ADDS, 0, true, true, false)) return args.res; break;
+
+							case "PADDUSW": if (!args.TryProcessVPUBinary(OPCode.VPU_ADDUS, 1, true, true, false)) return args.res; break;
+							case "PADDUSB": if (!args.TryProcessVPUBinary(OPCode.VPU_ADDUS, 0, true, true, false)) return args.res; break;
+
+							case "PSUBQ": if (!args.TryProcessVPUBinary(OPCode.VPU_SUB, 3, true, true, false)) return args.res; break;
+							case "PSUBD": if (!args.TryProcessVPUBinary(OPCode.VPU_SUB, 2, true, true, false)) return args.res; break;
+							case "PSUBW": if (!args.TryProcessVPUBinary(OPCode.VPU_SUB, 1, true, true, false)) return args.res; break;
+							case "PSUBB": if (!args.TryProcessVPUBinary(OPCode.VPU_SUB, 0, true, true, false)) return args.res; break;
+
+							case "PSUBSW": if (!args.TryProcessVPUBinary(OPCode.VPU_SUBS, 1, true, true, false)) return args.res; break;
+							case "PSUBSB": if (!args.TryProcessVPUBinary(OPCode.VPU_SUBS, 0, true, true, false)) return args.res; break;
+
+							case "PSUBUSW": if (!args.TryProcessVPUBinary(OPCode.VPU_SUBUS, 1, true, true, false)) return args.res; break;
+							case "PSUBUSB": if (!args.TryProcessVPUBinary(OPCode.VPU_SUBUS, 0, true, true, false)) return args.res; break;
+
+							case "PMULLQ": if (!args.TryProcessVPUBinary(OPCode.VPU_MULL, 3, true, true, false)) return args.res; break;
+							case "PMULLD": if (!args.TryProcessVPUBinary(OPCode.VPU_MULL, 2, true, true, false)) return args.res; break;
+							case "PMULLW": if (!args.TryProcessVPUBinary(OPCode.VPU_MULL, 1, true, true, false)) return args.res; break;
+
+							case "MINSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FMIN, 3, false, false, true)) return args.res; break;
+							case "MINSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FMIN, 2, false, false, true)) return args.res; break;
+
+							case "MINPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FMIN, 3, true, true, false)) return args.res; break;
+							case "MINPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FMIN, 2, true, true, false)) return args.res; break;
+
+							case "MAXSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FMAX, 3, false, false, true)) return args.res; break;
+							case "MAXSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FMAX, 2, false, false, true)) return args.res; break;
+
+							case "MAXPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FMAX, 3, true, true, false)) return args.res; break;
+							case "MAXPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FMAX, 2, true, true, false)) return args.res; break;
+
+							case "PMINUQ": if (!args.TryProcessVPUBinary(OPCode.VPU_UMIN, 3, true, true, false)) return args.res; break;
+							case "PMINUD": if (!args.TryProcessVPUBinary(OPCode.VPU_UMIN, 2, true, true, false)) return args.res; break;
+							case "PMINUW": if (!args.TryProcessVPUBinary(OPCode.VPU_UMIN, 1, true, true, false)) return args.res; break;
+							case "PMINUB": if (!args.TryProcessVPUBinary(OPCode.VPU_UMIN, 0, true, true, false)) return args.res; break;
+
+							case "PMINSQ": if (!args.TryProcessVPUBinary(OPCode.VPU_SMIN, 3, true, true, false)) return args.res; break;
+							case "PMINSD": if (!args.TryProcessVPUBinary(OPCode.VPU_SMIN, 2, true, true, false)) return args.res; break;
+							case "PMINSW": if (!args.TryProcessVPUBinary(OPCode.VPU_SMIN, 1, true, true, false)) return args.res; break;
+							case "PMINSB": if (!args.TryProcessVPUBinary(OPCode.VPU_SMIN, 0, true, true, false)) return args.res; break;
+
+							case "PMAXUQ": if (!args.TryProcessVPUBinary(OPCode.VPU_UMAX, 3, true, true, false)) return args.res; break;
+							case "PMAXUD": if (!args.TryProcessVPUBinary(OPCode.VPU_UMAX, 2, true, true, false)) return args.res; break;
+							case "PMAXUW": if (!args.TryProcessVPUBinary(OPCode.VPU_UMAX, 1, true, true, false)) return args.res; break;
+							case "PMAXUB": if (!args.TryProcessVPUBinary(OPCode.VPU_UMAX, 0, true, true, false)) return args.res; break;
+
+							case "PMAXSQ": if (!args.TryProcessVPUBinary(OPCode.VPU_SMAX, 3, true, true, false)) return args.res; break;
+							case "PMAXSD": if (!args.TryProcessVPUBinary(OPCode.VPU_SMAX, 2, true, true, false)) return args.res; break;
+							case "PMAXSW": if (!args.TryProcessVPUBinary(OPCode.VPU_SMAX, 1, true, true, false)) return args.res; break;
+							case "PMAXSB": if (!args.TryProcessVPUBinary(OPCode.VPU_SMAX, 0, true, true, false)) return args.res; break;
+
+							case "ADDSUBPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FADDSUB, 3, true, true, false)) return args.res; break;
+							case "ADDSUBPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FADDSUB, 2, true, true, false)) return args.res; break;
+
+							case "PAVGW": if (!args.TryProcessVPUBinary(OPCode.VPU_AVG, 1, true, true, false)) return args.res; break;
+							case "PAVGB": if (!args.TryProcessVPUBinary(OPCode.VPU_AVG, 0, true, true, false)) return args.res; break;
+
+							case "CMPPD": if (!args.TryProcessVPU_FCMP(OPCode.VPU_FCMP, 3, true, true, false)) return args.res; break;
+							case "CMPPS": if (!args.TryProcessVPU_FCMP(OPCode.VPU_FCMP, 2, true, true, false)) return args.res; break;
+
+							// CMPSD (vec) requires disambiguation
+							case "CMPSS": if (!args.TryProcessVPU_FCMP(OPCode.VPU_FCMP, 2, false, false, true)) return args.res; break;
+
+							// packed double comparisons
+							case "CMPEQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 0)) return args.res; break;
+							case "CMPLTPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 1)) return args.res; break;
+							case "CMPLEPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 2)) return args.res; break;
+							case "CMPUNORDPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 3)) return args.res; break;
+							case "CMPNEQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 4)) return args.res; break;
+							case "CMPNLTPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 5)) return args.res; break;
+							case "CMPNLEPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 6)) return args.res; break;
+							case "CMPORDPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 7)) return args.res; break;
+							case "CMPEQ_UQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 8)) return args.res; break;
+							case "CMPNGEPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 9)) return args.res; break;
+							case "CMPNGTPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 10)) return args.res; break;
+							case "CMPFALSEPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 11)) return args.res; break;
+							case "CMPNEQ_OQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 12)) return args.res; break;
+							case "CMPGEPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 13)) return args.res; break;
+							case "CMPGTPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 14)) return args.res; break;
+							case "CMPTRUEPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 15)) return args.res; break;
+							case "CMPEQ_OSPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 16)) return args.res; break;
+							case "CMPLT_OQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 17)) return args.res; break;
+							case "CMPLE_OQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 18)) return args.res; break;
+							case "CMPUNORD_SPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 19)) return args.res; break;
+							case "CMPNEQ_USPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 20)) return args.res; break;
+							case "CMPNLT_UQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 21)) return args.res; break;
+							case "CMPNLE_UQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 22)) return args.res; break;
+							case "CMPORD_SPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 23)) return args.res; break;
+							case "CMPEQ_USPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 24)) return args.res; break;
+							case "CMPNGE_UQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 25)) return args.res; break;
+							case "CMPNGT_UQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 26)) return args.res; break;
+							case "CMPFALSE_OSPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 27)) return args.res; break;
+							case "CMPNEQ_OSPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 28)) return args.res; break;
+							case "CMPGE_OQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 29)) return args.res; break;
+							case "CMPGT_OQPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 30)) return args.res; break;
+							case "CMPTRUE_USPD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, true, true, false, true, 31)) return args.res; break;
+
+							// packed single comparisons
+							case "CMPEQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 0)) return args.res; break;
+							case "CMPLTPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 1)) return args.res; break;
+							case "CMPLEPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 2)) return args.res; break;
+							case "CMPUNORDPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 3)) return args.res; break;
+							case "CMPNEQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 4)) return args.res; break;
+							case "CMPNLTPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 5)) return args.res; break;
+							case "CMPNLEPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 6)) return args.res; break;
+							case "CMPORDPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 7)) return args.res; break;
+							case "CMPEQ_UQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 8)) return args.res; break;
+							case "CMPNGEPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 9)) return args.res; break;
+							case "CMPNGTPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 10)) return args.res; break;
+							case "CMPFALSEPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 11)) return args.res; break;
+							case "CMPNEQ_OQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 12)) return args.res; break;
+							case "CMPGEPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 13)) return args.res; break;
+							case "CMPGTPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 14)) return args.res; break;
+							case "CMPTRUEPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 15)) return args.res; break;
+							case "CMPEQ_OSPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 16)) return args.res; break;
+							case "CMPLT_OQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 17)) return args.res; break;
+							case "CMPLE_OQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 18)) return args.res; break;
+							case "CMPUNORD_SPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 19)) return args.res; break;
+							case "CMPNEQ_USPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 20)) return args.res; break;
+							case "CMPNLT_UQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 21)) return args.res; break;
+							case "CMPNLE_UQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 22)) return args.res; break;
+							case "CMPORD_SPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 23)) return args.res; break;
+							case "CMPEQ_USPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 24)) return args.res; break;
+							case "CMPNGE_UQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 25)) return args.res; break;
+							case "CMPNGT_UQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 26)) return args.res; break;
+							case "CMPFALSE_OSPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 27)) return args.res; break;
+							case "CMPNEQ_OSPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 28)) return args.res; break;
+							case "CMPGE_OQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 29)) return args.res; break;
+							case "CMPGT_OQPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 30)) return args.res; break;
+							case "CMPTRUE_USPS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, true, true, false, true, 31)) return args.res; break;
+
+							// scalar double comparisons
+							case "CMPEQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 0)) return args.res; break;
+							case "CMPLTSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 1)) return args.res; break;
+							case "CMPLESD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 2)) return args.res; break;
+							case "CMPUNORDSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 3)) return args.res; break;
+							case "CMPNEQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 4)) return args.res; break;
+							case "CMPNLTSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 5)) return args.res; break;
+							case "CMPNLESD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 6)) return args.res; break;
+							case "CMPORDSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 7)) return args.res; break;
+							case "CMPEQ_UQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 8)) return args.res; break;
+							case "CMPNGESD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 9)) return args.res; break;
+							case "CMPNGTSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 10)) return args.res; break;
+							case "CMPFALSESD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 11)) return args.res; break;
+							case "CMPNEQ_OQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 12)) return args.res; break;
+							case "CMPGESD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 13)) return args.res; break;
+							case "CMPGTSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 14)) return args.res; break;
+							case "CMPTRUESD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 15)) return args.res; break;
+							case "CMPEQ_OSSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 16)) return args.res; break;
+							case "CMPLT_OQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 17)) return args.res; break;
+							case "CMPLE_OQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 18)) return args.res; break;
+							case "CMPUNORD_SSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 19)) return args.res; break;
+							case "CMPNEQ_USSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 20)) return args.res; break;
+							case "CMPNLT_UQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 21)) return args.res; break;
+							case "CMPNLE_UQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 22)) return args.res; break;
+							case "CMPORD_SSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 23)) return args.res; break;
+							case "CMPEQ_USSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 24)) return args.res; break;
+							case "CMPNGE_UQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 25)) return args.res; break;
+							case "CMPNGT_UQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 26)) return args.res; break;
+							case "CMPFALSE_OSSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 27)) return args.res; break;
+							case "CMPNEQ_OSSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 28)) return args.res; break;
+							case "CMPGE_OQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 29)) return args.res; break;
+							case "CMPGT_OQSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 30)) return args.res; break;
+							case "CMPTRUE_USSD": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 3, false, false, true, true, 31)) return args.res; break;
+
+							// scalar single comparisons
+							case "CMPEQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 0)) return args.res; break;
+							case "CMPLTSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 1)) return args.res; break;
+							case "CMPLESS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 2)) return args.res; break;
+							case "CMPUNORDSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 3)) return args.res; break;
+							case "CMPNEQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 4)) return args.res; break;
+							case "CMPNLTSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 5)) return args.res; break;
+							case "CMPNLESS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 6)) return args.res; break;
+							case "CMPORDSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 7)) return args.res; break;
+							case "CMPEQ_UQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 8)) return args.res; break;
+							case "CMPNGESS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 9)) return args.res; break;
+							case "CMPNGTSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 10)) return args.res; break;
+							case "CMPFALSESS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 11)) return args.res; break;
+							case "CMPNEQ_OQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 12)) return args.res; break;
+							case "CMPGESS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 13)) return args.res; break;
+							case "CMPGTSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 14)) return args.res; break;
+							case "CMPTRUESS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 15)) return args.res; break;
+							case "CMPEQ_OSSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 16)) return args.res; break;
+							case "CMPLT_OQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 17)) return args.res; break;
+							case "CMPLE_OQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 18)) return args.res; break;
+							case "CMPUNORD_SSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 19)) return args.res; break;
+							case "CMPNEQ_USSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 20)) return args.res; break;
+							case "CMPNLT_UQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 21)) return args.res; break;
+							case "CMPNLE_UQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 22)) return args.res; break;
+							case "CMPORD_SSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 23)) return args.res; break;
+							case "CMPEQ_USSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 24)) return args.res; break;
+							case "CMPNGE_UQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 25)) return args.res; break;
+							case "CMPNGT_UQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 26)) return args.res; break;
+							case "CMPFALSE_OSSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 27)) return args.res; break;
+							case "CMPNEQ_OSSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 28)) return args.res; break;
+							case "CMPGE_OQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 29)) return args.res; break;
+							case "CMPGT_OQSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 30)) return args.res; break;
+							case "CMPTRUE_USSS": if (!args.TryProcessVPUBinary(OPCode.VPU_FCMP, 2, false, false, true, true, 31)) return args.res; break;
+
+							case "COMISD": if (!args.TryProcessVPUBinary_2arg(OPCode.VPU_FCOMI, 3, false, false, true)) return args.res; break;
+							case "COMISS": if (!args.TryProcessVPUBinary_2arg(OPCode.VPU_FCOMI, 2, false, false, true)) return args.res; break;
+
+							case "SQRTPD": if (!args.TryProcessVPUUnary(OPCode.VPU_FSQRT, 3, true, true, false)) return args.res; break;
+							case "SQRTPS": if (!args.TryProcessVPUUnary(OPCode.VPU_FSQRT, 2, true, true, false)) return args.res; break;
+
+							case "SQRTSD": if (!args.TryProcessVPUUnary(OPCode.VPU_FSQRT, 3, false, false, true)) return args.res; break;
+							case "SQRTSS": if (!args.TryProcessVPUUnary(OPCode.VPU_FSQRT, 2, false, false, true)) return args.res; break;
+
+							case "RSQRTPD": if (!args.TryProcessVPUUnary(OPCode.VPU_FRSQRT, 3, true, true, false)) return args.res; break;
+							case "RSQRTPS": if (!args.TryProcessVPUUnary(OPCode.VPU_FRSQRT, 2, true, true, false)) return args.res; break;
+
+							case "RSQRTSD": if (!args.TryProcessVPUUnary(OPCode.VPU_FRSQRT, 3, false, false, true)) return args.res; break;
+							case "RSQRTSS": if (!args.TryProcessVPUUnary(OPCode.VPU_FRSQRT, 2, false, false, true)) return args.res; break;
+
+							case "STMXCSR": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 4, 2)) return args.res; break;
+							case "LDMXCSR": if (!args.TryProcessFSTLD_WORD(OPCode.FSTLD_WORD, 5, 2)) return args.res; break;
+
+							case "CVTSD2SI": if (!args.TryProcessVPUCVT_scalar_f2i(OPCode.VPU_CVT, false, false)) return args.res; break;
+							case "CVTSS2SI": if (!args.TryProcessVPUCVT_scalar_f2i(OPCode.VPU_CVT, false, true)) return args.res; break;
+							case "CVTTSD2SI": if (!args.TryProcessVPUCVT_scalar_f2i(OPCode.VPU_CVT, true, false)) return args.res; break;
+							case "CVTTSS2SI": if (!args.TryProcessVPUCVT_scalar_f2i(OPCode.VPU_CVT, true, true)) return args.res; break;
+
+							case "CVTSI2SD": if (!args.TryProcessVPUCVT_scalar_i2f(OPCode.VPU_CVT, false)) return args.res; break;
+							case "CVTSI2SS": if (!args.TryProcessVPUCVT_scalar_i2f(OPCode.VPU_CVT, true)) return args.res; break;
+
+							case "CVTSD2SS": if (!args.TryProcessVPUCVT_scalar_f2f(OPCode.VPU_CVT, false)) return args.res; break;
+							case "CVTSS2SD": if (!args.TryProcessVPUCVT_scalar_f2f(OPCode.VPU_CVT, true)) return args.res; break;
+
+							case "CVTPD2DQ": if (!args.TryProcessVPUCVT_packed_f2i(OPCode.VPU_CVT, false, false)) return args.res; break;
+							case "CVTPS2DQ": if (!args.TryProcessVPUCVT_packed_f2i(OPCode.VPU_CVT, false, true)) return args.res; break;
+							case "CVTTPD2DQ": if (!args.TryProcessVPUCVT_packed_f2i(OPCode.VPU_CVT, true, false)) return args.res; break;
+							case "CVTTPS2DQ": if (!args.TryProcessVPUCVT_packed_f2i(OPCode.VPU_CVT, true, true)) return args.res; break;
+
+							case "CVTDQ2PD": if (!args.TryProcessVPUCVT_packed_i2f(OPCode.VPU_CVT, false)) return args.res; break;
+							case "CVTDQ2PS": if (!args.TryProcessVPUCVT_packed_i2f(OPCode.VPU_CVT, true)) return args.res; break;
+
+							case "CVTPD2PS": if (!args.TryProcessVPUCVT_packed_f2f(OPCode.VPU_CVT, false)) return args.res; break;
+							case "CVTPS2PD": if (!args.TryProcessVPUCVT_packed_f2f(OPCode.VPU_CVT, true)) return args.res; break;
+
+
+							// misc instructions
+
+							case "DEBUG_CPU": if (!args.TryProcessNoArgOp(OPCode.DEBUG, true, 0)) return args.res; break;
+							case "DEBUG_VPU": if (!args.TryProcessNoArgOp(OPCode.DEBUG, true, 1)) return args.res; break;
+							case "DEBUG_FULL": if (!args.TryProcessNoArgOp(OPCode.DEBUG, true, 2)) return args.res; break;
+
+							// disambiguation
+
+							case "MOVS":
+								// MOVS (string) has 2 memory operands
+								if (args.args.Length == 2 && args.args[0].EndsWith(']') && args.args[1].EndsWith(']'))
+								{
+									if (!args.TryProcessMOVS_string(OPCode.string_ops, false)) return args.res;
+								}
+								// otherwise is MOVS (mov)
+								else
+								{
+									if (!args.TryProcessBinaryOp(OPCode.MOVcc, true, 2)) return args.res;
+								}
+								break;
+							case "MOVSD":
+								// MOVSD (string) takes no operands
+								if (args.args.Length == 0)
+								{
+									if (!args.TryProcessNoArgOp(OPCode.string_ops, true, 2)) return args.res;
+								}
+								// otherwise is MOVSD (vec)
+								else
+								{
+									if (!args.TryProcessVPUMove(OPCode.VPU_MOV, 3, false, false, true)) return args.res;
+								}
+								break;
+							case "CMPSD":
+								// CMPSD (string) takes no operands
+								if (args.args.Length == 0)
+								{
+									if (!args.TryProcessNoArgOp(OPCode.string_ops, true, (2 << 2) | 2)) return args.res;
+								}
+								// otherwise is CMPSD(vec)
+								else
+								{
+									if (!args.TryProcessVPU_FCMP(OPCode.VPU_FCMP, 3, false, false, true)) return args.res;
+								}
+								break;
+
+							default: return new AssembleResult(AssembleError.UnknownOp, $"line {args.line}: Unknown operation \"{args.op}\"");
+						}
+					}
+
+					op_done:;
+				}
             }
 
             // -- minimize symbols and holes -- //

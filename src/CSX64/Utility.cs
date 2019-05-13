@@ -129,6 +129,14 @@ namespace CSX64
             return (DoubleAsUInt64(val) & 0x7ff0000000000000ul) == 0;
         }
 
+		/// <summary>
+		/// Returns true if the value is zero (int or floating)
+		/// </summary>
+		/// <param name="val">the value to test</param>
+		/// <param name="floating">marks that val should be treated as a floating-point value (specifically, double)</param>
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static bool IsZero(UInt64 val, bool floating) { return floating ? AsDouble(val) == 0 : val == 0; }
+
         /// <summary>
         /// Gets a random UInt64 value
         /// </summary>
