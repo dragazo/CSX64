@@ -611,6 +611,33 @@ namespace CSX64
             RIP += size;
             return true;
         }
+
+		/// <summary>
+		/// Gets a compact imm and advances the execution pointer. Returns true on success.
+		/// </summary>
+		/// <param name="res">the read value</param>
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		private bool GetCompactImmAdv(out UInt64 res)
+		{
+			// [1: fill][5:][2: size]   [size: imm]
+
+			res = 0; // to appease compiler
+
+			// read the prefix byte
+			if (!GetMemAdv(1, out UInt64 prefix)) return false;
+
+			// read the (raw) imm and handle sign extension
+			switch (prefix & 3)
+			{
+				case 0: if (!GetMemAdv(1, out res)) return false; if ((prefix & 0x80) != 0) res |= (UInt64)0xffffffffffffff00; break;
+				case 1: if (!GetMemAdv(2, out res)) return false; if ((prefix & 0x80) != 0) res |= (UInt64)0xffffffffffff0000; break;
+				case 2: if (!GetMemAdv(4, out res)) return false; if ((prefix & 0x80) != 0) res |= (UInt64)0xffffffff00000000; break;
+				case 3: if (!GetMemAdv(8, out res)) return false; break;
+			}
+
+			return true;
+		}
+
         /// <summary>
         /// Gets an address and advances the execution pointer
         /// </summary>

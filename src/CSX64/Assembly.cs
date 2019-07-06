@@ -2347,25 +2347,55 @@ namespace CSX64
 				return true;
 			}
 
-			public bool TryParseImm(string token, out Expr expr, out UInt64 sizecode, out bool explicit_size)
+			public bool TryParseImm(string token, out Expr expr, out UInt64 sizecode, out bool explicit_size, out bool strict)
 			{
-				sizecode = 3; explicit_size = false; // initially no explicit size
+				// (STRICT) (BYTE/WORD/DWORD/QWORD) expr
 
-				// handle explicit sizes directives
-				string utoken = token.ToUpper();
-				if (utoken.StartsWithToken("BYTE")) { sizecode = 0; explicit_size = true; token = token.Substring(4).TrimStart(); }
-				else if (utoken.StartsWithToken("WORD")) { sizecode = 1; explicit_size = true; token = token.Substring(4).TrimStart(); }
-				else if (utoken.StartsWithToken("DWORD")) { sizecode = 2; explicit_size = true; token = token.Substring(5).TrimStart(); }
-				else if (utoken.StartsWithToken("QWORD")) { sizecode = 3; explicit_size = true; token = token.Substring(5).TrimStart(); }
+				int pos, end;
 
-				// refer to helper
-				return TryExtractExpr(token, out expr);
+				// get the first white space delimited token
+				for (pos = 0; pos < token.Length && char.IsWhiteSpace(token[pos]); ++pos) ;
+				for (end = pos; end < token.Length && !char.IsWhiteSpace(token[end]); ++end) ;
+
+				// if that's a STRICT specifier
+				if (token.Substring(pos, end - pos).ToUpper() == "STRICT")
+				{
+					strict = true;
+
+					// get the next white space delimited token
+					for (pos = end; pos < token.Length && char.IsWhiteSpace(token[pos]); ++pos) ;
+					for (end = pos; end < token.Length && !char.IsWhiteSpace(token[end]); ++end) ;
+				}
+				// otherwise no STRICT specifier
+				else strict = false;
+
+				// handle explicit size specifiers
+				switch (token.Substring(pos, end - pos).ToUpper())
+				{
+					case "BYTE": sizecode = 0; explicit_size = true; break;
+					case "WORD": sizecode = 1; explicit_size = true; break;
+					case "DWORD": sizecode = 2; explicit_size = true; break;
+					case "QWORD": sizecode = 3; explicit_size = true; break;
+
+					// otherwise no explicit size specifier
+					default: sizecode = 3; explicit_size = false; break;
+				}
+
+				// if there was a size specifier, wind pos up to the next non-white char after the (size) token
+				if (explicit_size) for (pos = end; pos < token.Length && char.IsWhiteSpace(token[pos]) ; ++pos);
+
+				// parse the rest of the string as an expression - rest of string starts at index pos - place aft index into end
+				if (!TryExtractExpr(token, pos, token.Length, out expr, out end)) return false;
+				// make sure the entire rest of the string was consumed
+				if (end != token.Length) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse as an expression: {token.Substring(pos)}"); return false; }
+
+				return true;
 			}
-			public bool TryParseInstantImm(string token, out UInt64 val, out bool floating, out UInt64 sizecode, out bool explicit_size)
+			public bool TryParseInstantImm(string token, out UInt64 val, out bool floating, out UInt64 sizecode, out bool explicit_size, out bool strict)
 			{
 				string err = null; // error location for evaluation
 
-				if (!TryParseImm(token, out Expr hole, out sizecode, out explicit_size)) { val = 0; floating = false; return false; }
+				if (!TryParseImm(token, out Expr hole, out sizecode, out explicit_size, out strict)) { val = 0; floating = false; return false; }
 				if (!hole.Evaluate(file.Symbols, out val, out floating, ref err)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to evaluate instant imm: {token}\n-> {err}"); return false; }
 
 				return true;
@@ -2470,10 +2500,10 @@ namespace CSX64
 			/// <param name="prefix">the prefix the imm is required to have</param>
 			/// <param name="val">resulting value</param>
 			/// <param name="floating">results in true if val is floating-point</param>
-			public bool TryParseInstantPrefixedImm(string token, string prefix, out UInt64 val, out bool floating, out UInt64 sizecode, out bool explicit_size)
+			public bool TryParseInstantPrefixedImm(string token, string prefix, out UInt64 val, out bool floating, out UInt64 sizecode, out bool explicit_size, out bool strict)
 			{
 				val = sizecode = 0;
-				floating = explicit_size = false;
+				floating = explicit_size = strict = false;
 
 				// must begin with prefix
 				if (!token.StartsWith(prefix)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Token did not start with \"{prefix}\" prefix: \"{token}\""); return false; }
@@ -2508,7 +2538,7 @@ namespace CSX64
 				if (end != token.Length) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Compound expressions used as prefixed expressions must be parenthesized \"{token}\""); return false; }
 
 				// prefix index must be instant imm
-				if (!TryParseInstantImm(token.Substring(prefix.Length), out val, out floating, out sizecode, out explicit_size)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to parse instant prefixed imm \"{token}\"\n-> {res.ErrorMsg}"); return false; }
+				if (!TryParseInstantImm(token.Substring(prefix.Length), out val, out floating, out sizecode, out explicit_size, out strict)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to parse instant prefixed imm \"{token}\"\n-> {res.ErrorMsg}"); return false; }
 
 				return true;
 			}
@@ -2734,12 +2764,13 @@ namespace CSX64
 
 				UInt64 m1 = 0, r1 = UInt64.MaxValue, r2 = UInt64.MaxValue, sz; // final register info - maxval denotes no value - m1 must default to 0 - sz defaults to 64-bit in the case that there's only an imm ptr_base
 				bool explicit_sz; // denotes that the ptr_base sizecode is explicit
+				bool strict; // denotes that the ptr_base has a STRICT specifier (inhibit compact imm size optimization)
 
 				// extract the address internals
 				token = token.Substring(1, token.Length - 2);
 
 				// turn into an expression
-				if (!TryParseImm(token, out ptr_base, out sz, out explicit_sz)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse address expression\n-> {res.ErrorMsg}"); return false; }
+				if (!TryParseImm(token, out ptr_base, out sz, out explicit_sz, out strict)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse address expression\n-> {res.ErrorMsg}"); return false; }
 
 				// look through all the register names
 				foreach (var entry in CPURegisterInfo)
@@ -2892,10 +2923,16 @@ namespace CSX64
 			{
 				if (args.Length != 1) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected 1 operand"); return false; }
 
-				if (!TryParseInstantImm(args[0], out UInt64 val, out bool floating, out UInt64 sizecode, out bool explicit_size)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Alignment value must be instant\n-> {res.ErrorMsg}"); return false; }
+				// parse the alignment value (critical expression)
+				if (!TryParseInstantImm(args[0], out UInt64 val, out bool floating, out UInt64 sizecode, out bool explicit_size, out bool strict)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Alignment value must be instant\n-> {res.ErrorMsg}"); return false; }
+
+				// it doesn't really make sense to give size information to an alignment value
+				if (explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A size directive in this context is not allowed"); return false; }
+				if (strict) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A STRICT specifier in this context is not allowed"); return false; }
+
+				// alignment must be an integer power of 2
 				if (floating) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Alignment value cannot be floating-point"); return false; }
 				if (val == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Attempt to align to a multiple of zero"); return false; }
-
 				if (!val.IsPowerOf2()) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Alignment value must be a power of 2. Got {val}"); return false; }
 
 				return TryAlign(val);
@@ -2958,7 +2995,7 @@ namespace CSX64
 				Expr expr;
 				string chars, err = null;
 				UInt64 sizecode;
-				bool explicit_size;
+				bool explicit_size, strict;
 
 				// for each argument (not using foreach because order is incredibly important and i'm paranoid)
 				for (int i = 0; i < args.Length; ++i)
@@ -2972,13 +3009,14 @@ namespace CSX64
 						if (!TryPad(AlignOffset((UInt64)chars.Length, size))) return false;
 					}
 					// otherwise it's a value
-					else if (TryParseImm(args[i], out expr, out sizecode, out explicit_size))
+					else if (TryParseImm(args[i], out expr, out sizecode, out explicit_size, out strict))
 					{
 						// can only use standard sizes
 						if (size > 8) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to write a numeric value in an unsuported format"); return false; }
-
 						// we're given a size we have to use, so don't allow explicit operand sizes as well
 						if (explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A size directive in this context is not allowed"); return false; }
+						// in this context, we're writing user-readable binary data, so compacting is not allowed, so explicitly using a STRICT specifier should not be allowed either
+						if (strict) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A STRICT specifier in this context is not allowed"); return false; }
 
 						// write the value
 						if (!TryAppendExpr(size, expr)) return false;
@@ -2993,9 +3031,14 @@ namespace CSX64
 				if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Reserve expected one arg"); return false; }
 
 				// parse the number to reserve
-				if (!TryParseInstantImm(args[0], out UInt64 count, out bool floating, out UInt64 sizecode, out bool explicit_size)) return false;
-				if (floating) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Reserve count cannot be floating-point"); return false; }
+				if (!TryParseInstantImm(args[0], out UInt64 count, out bool floating, out UInt64 sizecode, out bool explicit_size, out bool strict)) return false;
+
+				// it doesn't really make sense to give size information to the length of an array
 				if (explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A size directive in this context is not allowed"); return false; }
+				if (strict) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A STRICT specifier in this context is not allowed"); return false; }
+
+				// must be an integer
+				if (floating) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Reserve count cannot be floating-point"); return false; }
 
 				// reserve the space
 				if (!TryReserve(count * size)) return false;
@@ -3011,8 +3054,9 @@ namespace CSX64
 				if (label_def == null) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected a label declaration to link to the value"); return false; }
 
 				// get the expression
-				if (!TryParseImm(args[0], out Expr expr, out UInt64 sizecode, out bool explicit_size)) return false;
+				if (!TryParseImm(args[0], out Expr expr, out UInt64 sizecode, out bool explicit_size, out bool strict)) return false;
 				if (explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A size directive in this context is not allowed"); return false; }
+				if (strict) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A STRICT specifier in this context is not allowed"); return false; }
 
 				// make sure the symbol isn't already defined (this could be the case for a TIMES prefix on an EQU directive)
 				if (file.Symbols.ContainsKey(label_def)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Symbol {label_def} was already defined"); return false; }
@@ -3027,8 +3071,9 @@ namespace CSX64
 				if (args.Length != 1 && args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected an expression and an optional assertion message"); return false; }
 
 				// get the expression
-				if (!TryParseImm(args[0], out Expr expr, out UInt64 sizecode, out bool explicit_size)) return false;
+				if (!TryParseImm(args[0], out Expr expr, out UInt64 sizecode, out bool explicit_size, out bool strict)) return false;
 				if (explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A size directive in this context is not allowed"); return false; }
+				if (strict) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A STRICT specifier in this context is not allowed"); return false; }
 
 				// it must be a critical expression - get its value
 				string err = null;
@@ -3090,9 +3135,13 @@ namespace CSX64
 				// if there was a second argument, parse it as bin_pos
 				if (args.Length > 1)
 				{
-					if (!TryParseInstantImm(args[1], out UInt64 val, out bool floating, out UInt64 sizecode, out bool explicit_size)) return false;
+					if (!TryParseInstantImm(args[1], out UInt64 val, out bool floating, out UInt64 sizecode, out bool explicit_size, out bool strict)) return false;
 
+					// it doesn't really make sense to give size information to a file position
 					if (explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: An explicit sizecode in this context is not allowed"); return false; }
+					if (strict) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A STRICT specifier in this context is not allowed"); return false; }
+
+					// must be an integer
 					if (floating) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Expected an integer expression as second arg"); return false; }
 
 					bin_pos = (long)val;
@@ -3102,9 +3151,13 @@ namespace CSX64
 				// if there was a third argument, parse it as bin_maxlen
 				if (args.Length > 2)
 				{
-					if (!TryParseInstantImm(args[1], out UInt64 val, out bool floating, out UInt64 sizecode, out bool explicit_size)) return false;
+					if (!TryParseInstantImm(args[1], out UInt64 val, out bool floating, out UInt64 sizecode, out bool explicit_size, out bool strict)) return false;
 
+					// it doesn't really make sense to give size information to the size of an array
 					if (explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: An explicit sizecode in this context is not allowed"); return false; }
+					if (strict) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A STRICT specifier in this context is not allowed"); return false; }
+
+					// must be an integer
 					if (floating) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Expected an integer expression as third arg"); return false; }
 
 					bin_maxlen = (long)val;
@@ -3178,7 +3231,7 @@ namespace CSX64
                 if (has_ext_op) { if (!TryAppendByte(ext_op)) return false; }
 
                 if (!TryParseCPURegister(args[0], out UInt64 dest, out UInt64 a_sizecode, out bool dest_high)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected cpu register as first operand"); return false; }
-                if (!TryParseImm(args[2], out Expr imm, out UInt64 imm_sz, out bool imm_sz_explicit)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected imm as third operand"); return false; }
+                if (!TryParseImm(args[2], out Expr imm, out UInt64 imm_sz, out bool imm_sz_explicit, out bool strict)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected imm as third operand"); return false; }
 
                 if (imm_sz_explicit && imm_sz != a_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Operand size mismatch"); return false; }
                 if ((Size(a_sizecode) & sizemask) == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size is not supported"); return false; }
@@ -3243,7 +3296,7 @@ namespace CSX64
                     // reg, imm
                     else
                     {
-                        if (!TryParseImm(args[1], out Expr imm, out b_sizecode, out bool explicit_size)) return false;
+                        if (!TryParseImm(args[1], out Expr imm, out b_sizecode, out bool explicit_size, out bool strict)) return false;
 
                         // fix up size codes
                         if (_force_b_imm_sizecode == -1)
@@ -3279,7 +3332,7 @@ namespace CSX64
                     // mem, imm
                     else
                     {
-                        if (!TryParseImm(args[1], out Expr imm, out b_sizecode, out bool b_explicit)) return false;
+                        if (!TryParseImm(args[1], out Expr imm, out b_sizecode, out bool b_explicit, out bool strict)) return false;
 
                         // fix up the size codes
                         if (_force_b_imm_sizecode == -1)
@@ -3369,7 +3422,7 @@ namespace CSX64
                 // imm
                 else
                 {
-                    if (!TryParseImm(args[0], out Expr imm, out a_sizecode, out bool explicit_size)) return false;
+                    if (!TryParseImm(args[0], out Expr imm, out a_sizecode, out bool explicit_size, out bool strict)) return false;
 
                     if (!explicit_size)
                     {
@@ -3578,7 +3631,11 @@ namespace CSX64
                 // reg/mem, imm
                 else
                 {
-                    if (!TryParseImm(args[1], out Expr imm, out b_sizecode, out bool explicit_size)) return false;
+                    if (!TryParseImm(args[1], out Expr imm, out b_sizecode, out bool explicit_size, out bool strict)) return false;
+
+					// we're forcing this to be encoded in 1 byte, so don't allow explicit size or strict specifiers (for the imm we just parsed)
+					if (explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A size directive in this context is not allowed"); return false; }
+					if (strict) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A STRICT specifier in this context is not allowed"); return false; }
 
                     // mask the shift count to 6 bits (we just need to make sure it can't set the CL flag)
                     imm = new Expr() { OP = Expr.OPs.BitAnd, Left = imm, Right = new Expr() { IntResult = 0x3f } };
@@ -4230,8 +4287,12 @@ namespace CSX64
                     arg = arg.Substring(0, pos).TrimEnd();
 
                     // parse the mask expression
-                    if (!TryParseImm(innards, out mask, out UInt64 sizecode, out bool explicit_size)) return false;
-                }
+                    if (!TryParseImm(innards, out mask, out UInt64 sizecode, out bool explicit_size, out bool strict)) return false;
+
+					// depending on the cpu register size being used, we're locked into a mask size, so don't allow size directives or strict specifiers
+					if (explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A size directive in this context is not allowed"); return false; }
+					if (strict) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A STRICT specifier in this context is not allowed"); return false; }
+				}
 
                 return true;
             }
@@ -4489,8 +4550,14 @@ namespace CSX64
                 if (args.Length != 3 && args.Length != 4) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected 3 or 4 operands"); return false; }
 
                 // last arg must be the comarison predicate imm - instant integral imm [0-31]
-                if (!TryParseInstantImm(args[args.Length - 1], out UInt64 pred, out bool floating, out UInt64 sizecode, out bool explicit_sizecode)) return false;
-                if (floating) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Comparison predicate must be an integer"); return false; }
+                if (!TryParseInstantImm(args[args.Length - 1], out UInt64 pred, out bool floating, out UInt64 sizecode, out bool explicit_sizecode, out bool strict)) return false;
+
+				// we're forcing this quantity to be of a specific encoding format, so it doesn't make sense to allow specifying size information to the predicate expression
+				if (explicit_sizecode) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A size directive in this context is not allowed"); return false; }
+				if (strict) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A STRICT specifier in this context is not allowed"); return false; }
+
+				// must be integral (and in bounds)
+				if (floating) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Comparison predicate must be an integer"); return false; }
                 if (pred >= 32) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Comparison predicate out of range"); return false; }
 
                 // remove the comparison predicate arg
@@ -4995,7 +5062,7 @@ namespace CSX64
 
             // potential parsing args for an instruction
             UInt64 a = 0, b = 0;
-            bool floating, btemp;
+            bool floating, btemp, strict;
 
             string err = null; // error location for evaluation
 
@@ -5250,8 +5317,8 @@ namespace CSX64
 							case "NOT": if (!args.TryProcessUnaryOp(OPCode.NOT)) return args.res; break;
 
 							case "CMP":
-								// if there are 2 args and the second one is an instant 0, we can make this a CMPZ instruction
-								if (args.args.Length == 2 && args.TryParseInstantImm(args.args[1], out a, out floating, out b, out btemp) && a == 0)
+								// if there are 2 args and the second one is an instant imm 0 and it doesn't have a strict specifier, we can make this a CMPZ instruction
+								if (args.args.Length == 2 && args.TryParseInstantImm(args.args[1], out a, out floating, out b, out btemp, out strict) && a == 0 && !strict)
 								{
 									// set new args for the unary version
 									args.args = new string[] { args.args[0] };

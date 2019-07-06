@@ -30,11 +30,9 @@ namespace CSX64
 
         /*
         [4: dest][2: size][1:dh][1: mem]   [size: imm]
-            mem = 0: [1: sh][3:][4: src]
-                dest <- f(reg, imm)
-            mem = 1: [address]
-                dest <- f(M[address], imm)
-            (dh and sh mark AH, BH, CH, or DH for dest or src)
+        mem = 0: [1: sh][3:][4: src]    dest <- f(reg, imm)
+        mem = 1: [address]              dest <- f(M[address], imm)
+        (dh and sh mark AH, BH, CH, or DH for dest or src)
         */
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool FetchTernaryOpFormat(out UInt64 s, out UInt64 a, out UInt64 b)
