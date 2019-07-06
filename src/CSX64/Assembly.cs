@@ -15,7 +15,7 @@ namespace CSX64
 {
     public enum AssembleError
     {
-        None, ArgCount, MissingSize, ArgError, FormatError, UsageError, UnknownOp, EmptyFile, InvalidLabel, SymbolRedefinition, UnknownSymbol, NotImplemented, Assertion
+        None, ArgCount, MissingSize, ArgError, FormatError, UsageError, UnknownOp, EmptyFile, InvalidLabel, SymbolRedefinition, UnknownSymbol, NotImplemented, Assertion, Failure
     }
     public enum LinkError
     {
@@ -1259,6 +1259,7 @@ namespace CSX64
 
         private const string CurrentLineMacro = "$";
         private const string StartOfSegMacro = "$$";
+		private const string TimesIterIdMacro = "$i";
 
         private static readonly Dictionary<Expr.OPs, int> Precedence = new Dictionary<Expr.OPs, int>()
         {
@@ -1656,29 +1657,29 @@ namespace CSX64
             foreach (var entry in file.DataHoles) entry.Expr.Resolve(from, to);
         }
 
-        /// <summary>
-        /// Holds all the variables used during assembly
-        /// </summary>
-        private class AssembleArgs
-        {
-            // -- data -- //
+		/// <summary>
+		/// Holds all the variables used during assembly
+		/// </summary>
+		private class AssembleArgs
+		{
+			// -- data -- //
 
-            public ObjectFile file;
+			public ObjectFile file;
 
 			public AsmSegment current_seg = AsmSegment.INVALID;
-            public AsmSegment done_segs = AsmSegment.INVALID;
+			public AsmSegment done_segs = AsmSegment.INVALID;
 
-            public int line = 0;
-            public UInt64 line_pos_in_seg = 0;
+			public int line = 0;
+			public UInt64 line_pos_in_seg = 0;
 
-            public string last_nonlocal_label = null;
+			public string last_nonlocal_label = null;
 
-            public string label_def;
-			public Int64 times;
-            public string op;
-            public string[] args; // must be array for ref params
+			public string label_def;
+			public Int64 times, times_i; // the TIMES upper bound and current loop index (i)
+			public string op;
+			public string[] args; // must be array for ref params
 
-            public AssembleResult res;
+			public AssembleResult res;
 
 			// -- construction -- //
 
@@ -1703,7 +1704,7 @@ namespace CSX64
 					case AsmSegment.DATA: line_pos_in_seg = (UInt64)file.Data.Count; break;
 					case AsmSegment.BSS: line_pos_in_seg = file.BssLen; break;
 
-					// default does nothing - (nothing to update)
+						// default does nothing - (nothing to update)
 				}
 			}
 
@@ -1723,8 +1724,8 @@ namespace CSX64
 				// -- parse label prefix -- //
 
 				// find the first white space delimited token
-				for (pos = 0; pos < rawline.Length && char.IsWhiteSpace(rawline[pos]) ; ++pos);
-				for (end = pos; end < rawline.Length && !char.IsWhiteSpace(rawline[end]) ; ++end);
+				for (pos = 0; pos < rawline.Length && char.IsWhiteSpace(rawline[pos]); ++pos) ;
+				for (end = pos; end < rawline.Length && !char.IsWhiteSpace(rawline[end]); ++end) ;
 
 				// if we got a label
 				if (pos < rawline.Length && rawline[end - 1] == LabelDefChar)
@@ -1733,8 +1734,8 @@ namespace CSX64
 					label_def = rawline.Substring(pos, end - pos - 1);
 
 					// get another white space delimited token
-					for (pos = end; pos < rawline.Length && char.IsWhiteSpace(rawline[pos]) ; ++pos);
-					for (end = pos; end < rawline.Length && !char.IsWhiteSpace(rawline[end]) ; ++end);
+					for (pos = end; pos < rawline.Length && char.IsWhiteSpace(rawline[pos]); ++pos) ;
+					for (end = pos; end < rawline.Length && !char.IsWhiteSpace(rawline[end]); ++end) ;
 				}
 				// otherwise there's no label for this line
 				else label_def = null;
@@ -1760,8 +1761,8 @@ namespace CSX64
 					if (end == rawline.Length) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Encountered TIMES/IF prefix with no instruction to augment"); return false; }
 
 					// get the next white space delimited token
-					for (pos = end; pos < (int)rawline.Length && char.IsWhiteSpace(rawline[pos]) ; ++pos);
-					for (end = pos; end < (int)rawline.Length && !char.IsWhiteSpace(rawline[end]) ; ++end);
+					for (pos = end; pos < (int)rawline.Length && char.IsWhiteSpace(rawline[pos]); ++pos) ;
+					for (end = pos; end < (int)rawline.Length && !char.IsWhiteSpace(rawline[end]); ++end) ;
 				}
 				// otherwise there's no times prefix for this line
 				else times = 1;
@@ -1820,270 +1821,270 @@ namespace CSX64
 				return true;
 			}
 
-            /// <summary>
-            /// Splits the raw line into its separate components. The raw line should not have a comment section.
-            /// </summary>
-            /// <param name="rawline">the raw line to parse</param>
-            public bool SplitLine(string rawline)
-            {
-                // (label:) (op (arg, arg, ...))
+			/// <summary>
+			/// Splits the raw line into its separate components. The raw line should not have a comment section.
+			/// </summary>
+			/// <param name="rawline">the raw line to parse</param>
+			public bool SplitLine(string rawline)
+			{
+				// (label:) (op (arg, arg, ...))
 
-                int pos = 0, end; // position in line parsing
-                int quote;        // index of openning quote in args
+				int pos = 0, end; // position in line parsing
+				int quote;        // index of openning quote in args
 
-                List<string> args = new List<string>();
+				List<string> args = new List<string>();
 
-                // -- parse op -- //
+				// -- parse op -- //
 
-                // get the first white space delimited token
-                for (; pos < rawline.Length && char.IsWhiteSpace(rawline[pos]); ++pos) ;
-                for (end = pos; end < rawline.Length && !char.IsWhiteSpace(rawline[end]); ++end) ;
+				// get the first white space delimited token
+				for (; pos < rawline.Length && char.IsWhiteSpace(rawline[pos]); ++pos) ;
+				for (end = pos; end < rawline.Length && !char.IsWhiteSpace(rawline[end]); ++end) ;
 
-                // if we got something, record as op, otherwise is empty string
-                op = pos < rawline.Length ? rawline.Substring(pos, end - pos) : string.Empty;
+				// if we got something, record as op, otherwise is empty string
+				op = pos < rawline.Length ? rawline.Substring(pos, end - pos) : string.Empty;
 
-                // -- parse args -- //
+				// -- parse args -- //
 
-                // parse the rest of the line as comma-separated tokens
-                while (true)
-                {
-                    // skip leading white space
-                    for (pos = end + 1; pos < rawline.Length && char.IsWhiteSpace(rawline[pos]); ++pos) ;
-                    // when pos reaches end of token, we're done parsing
-                    if (pos >= rawline.Length) break;
+				// parse the rest of the line as comma-separated tokens
+				while (true)
+				{
+					// skip leading white space
+					for (pos = end + 1; pos < rawline.Length && char.IsWhiteSpace(rawline[pos]); ++pos) ;
+					// when pos reaches end of token, we're done parsing
+					if (pos >= rawline.Length) break;
 
-                    // find the next terminator (comma-separated)
-                    for (end = pos, quote = -1; end < rawline.Length; ++end)
-                    {
-                        if (rawline[end] == '"' || rawline[end] == '\'' || rawline[end] == '`') quote = quote < 0 ? end : rawline[end] == rawline[quote] ? -1 : quote;
-                        else if (quote < 0 && rawline[end] == ',') break; // comma marks end of token
-                    }
-                    // make sure we closed any quotations
-                    if (quote >= 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Unmatched quotation encountered in argument list"); return false; }
+					// find the next terminator (comma-separated)
+					for (end = pos, quote = -1; end < rawline.Length; ++end)
+					{
+						if (rawline[end] == '"' || rawline[end] == '\'' || rawline[end] == '`') quote = quote < 0 ? end : rawline[end] == rawline[quote] ? -1 : quote;
+						else if (quote < 0 && rawline[end] == ',') break; // comma marks end of token
+					}
+					// make sure we closed any quotations
+					if (quote >= 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Unmatched quotation encountered in argument list"); return false; }
 
-                    // get the arg (remove leading/trailing white space - some logic requires them not be there e.g. address parser)
-                    string arg = rawline.Substring(pos, end - pos).Trim();
-                    // make sure arg isn't empty
-                    if (arg.Length == 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Empty operation argument encountered"); return false; }
-                    // add this token
-                    args.Add(arg);
-                }
-                // output tokens to assemble args
-                this.args = args.ToArray();
+					// get the arg (remove leading/trailing white space - some logic requires them not be there e.g. address parser)
+					string arg = rawline.Substring(pos, end - pos).Trim();
+					// make sure arg isn't empty
+					if (arg.Length == 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Empty operation argument encountered"); return false; }
+					// add this token
+					args.Add(arg);
+				}
+				// output tokens to assemble args
+				this.args = args.ToArray();
 
-                // successfully parsed line
-                return true;
-            }
+				// successfully parsed line
+				return true;
+			}
 
-            public static bool IsValidName(string token, ref string err)
-            {
-                // can't be empty string
-                if (token.Length == 0) { err = $"Symbol name was empty string"; return false; }
+			public static bool IsValidName(string token, ref string err)
+			{
+				// can't be empty string
+				if (token.Length == 0) { err = $"Symbol name was empty string"; return false; }
 
-                // first char is underscore or letter
-                if (token[0] != '_' && !char.IsLetter(token[0])) { err = $"Symbol contained an illegal character: {token}"; return false; }
-                // all other chars may additionally be numbers or periods
-                for (int i = 1; i < token.Length; ++i)
-                    if (token[i] != '_' && token[i] != '.' && !char.IsLetterOrDigit(token[i])) { err = $"Symbol contained an illegal character: {token}"; return false; }
+				// first char is underscore or letter
+				if (token[0] != '_' && !char.IsLetter(token[0])) { err = $"Symbol contained an illegal character: {token}"; return false; }
+				// all other chars may additionally be numbers or periods
+				for (int i = 1; i < token.Length; ++i)
+					if (token[i] != '_' && token[i] != '.' && !char.IsLetterOrDigit(token[i])) { err = $"Symbol contained an illegal character: {token}"; return false; }
 
-                return true;
-            }
-            public bool MutateName(ref string label)
-            {
-                // if defining a local label
-                if (label[0] == '.')
-                {
-                    string sub = label.Substring(1); // local symbol name
-                    string err = null;
+				return true;
+			}
+			public bool MutateName(ref string label)
+			{
+				// if defining a local label
+				if (label[0] == '.')
+				{
+					string sub = label.Substring(1); // local symbol name
+					string err = null;
 
-                    // local name can't be empty
-                    if (!IsValidName(sub, ref err)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: {err}"); return false; }
-                    // can't make a local symbol before any non-local ones exist
-                    if (last_nonlocal_label == null) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: Local symbol encountered before any non-local declarations"); return false; }
+					// local name can't be empty
+					if (!IsValidName(sub, ref err)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: {err}"); return false; }
+					// can't make a local symbol before any non-local ones exist
+					if (last_nonlocal_label == null) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: Local symbol encountered before any non-local declarations"); return false; }
 
-                    // mutate the label
-                    label = last_nonlocal_label + label;
-                }
+					// mutate the label
+					label = last_nonlocal_label + label;
+				}
 
-                return true;
-            }
+				return true;
+			}
 
-            public bool TryReserve(UInt64 size)
-            {
-                // reserve only works in the bss segment
-                if (current_seg != AsmSegment.BSS) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to reserve space outside of the BSS segment"); return false; }
+			public bool TryReserve(UInt64 size)
+			{
+				// reserve only works in the bss segment
+				if (current_seg != AsmSegment.BSS) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to reserve space outside of the BSS segment"); return false; }
 
-                // reserve the space
-                file.BssLen += (UInt32)size;
-                return true;
-            }
-            public bool TryAppendVal(UInt64 size, UInt64 val)
-            {
-                switch (current_seg)
-                {
-                    // text and ro/data segments are writable
-                    case AsmSegment.TEXT: file.Text.Append(size, val); return true;
-                    case AsmSegment.RODATA: file.Rodata.Append(size, val); return true;
-                    case AsmSegment.DATA: file.Data.Append(size, val); return true;
+				// reserve the space
+				file.BssLen += (UInt32)size;
+				return true;
+			}
+			public bool TryAppendVal(UInt64 size, UInt64 val)
+			{
+				switch (current_seg)
+				{
+					// text and ro/data segments are writable
+					case AsmSegment.TEXT: file.Text.Append(size, val); return true;
+					case AsmSegment.RODATA: file.Rodata.Append(size, val); return true;
+					case AsmSegment.DATA: file.Data.Append(size, val); return true;
 
-                    // others are not
-                    default: res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to write to the {current_seg} segment"); return false;
-                }
-            }
-            public bool TryAppendByte(byte val)
-            {
-                switch (current_seg)
-                {
-                    // text and ro/data segments are writable
-                    case AsmSegment.TEXT: file.Text.Add(val); return true;
-                    case AsmSegment.RODATA: file.Rodata.Add(val); return true;
-                    case AsmSegment.DATA: file.Data.Add(val); return true;
+					// others are not
+					default: res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to write to the {current_seg} segment"); return false;
+				}
+			}
+			public bool TryAppendByte(byte val)
+			{
+				switch (current_seg)
+				{
+					// text and ro/data segments are writable
+					case AsmSegment.TEXT: file.Text.Add(val); return true;
+					case AsmSegment.RODATA: file.Rodata.Add(val); return true;
+					case AsmSegment.DATA: file.Data.Add(val); return true;
 
-                    // others are not
-                    default: res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to write to the {current_seg} segment"); return false;
-                }
-            }
+					// others are not
+					default: res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to write to the {current_seg} segment"); return false;
+				}
+			}
 
-            private bool TryAppendExpr(UInt64 size, Expr expr, List<HoleData> holes, List<byte> segment)
-            {
-                string err = null; // evaluation error parsing location
+			private bool TryAppendExpr(UInt64 size, Expr expr, List<HoleData> holes, List<byte> segment)
+			{
+				string err = null; // evaluation error parsing location
 
-                // create the hole data
-                HoleData data = new HoleData() { Address = (UInt32)segment.Count, Size = (byte)size, Line = line, Expr = expr };
-                // write a dummy (all 1's for easy manual identification)
-                if (!TryAppendVal(size, 0xffffffffffffffff)) return false;
+				// create the hole data
+				HoleData data = new HoleData() { Address = (UInt32)segment.Count, Size = (byte)size, Line = line, Expr = expr };
+				// write a dummy (all 1's for easy manual identification)
+				if (!TryAppendVal(size, 0xffffffffffffffff)) return false;
 
-                // try to patch it
-                switch (TryPatchHole(segment, file.Symbols, data, ref err))
-                {
-                    case PatchError.None: break;
-                    case PatchError.Unevaluated: holes.Add(data); break;
-                    case PatchError.Error: res = new AssembleResult(AssembleError.ArgError, $"line {line}: {err}"); return false;
+				// try to patch it
+				switch (TryPatchHole(segment, file.Symbols, data, ref err))
+				{
+					case PatchError.None: break;
+					case PatchError.Unevaluated: holes.Add(data); break;
+					case PatchError.Error: res = new AssembleResult(AssembleError.ArgError, $"line {line}: {err}"); return false;
 
-                    default: throw new ArgumentException("Unknown patch error encountered");
-                }
+					default: throw new ArgumentException("Unknown patch error encountered");
+				}
 
-                return true;
-            }
-            public bool TryAppendExpr(UInt64 size, Expr expr)
-            {
-                switch (current_seg)
-                {
-                    case AsmSegment.TEXT: return TryAppendExpr(size, expr, file.TextHoles, file.Text);
-                    case AsmSegment.RODATA: return TryAppendExpr(size, expr, file.RodataHoles, file.Rodata);
-                    case AsmSegment.DATA: return TryAppendExpr(size, expr, file.DataHoles, file.Data);
+				return true;
+			}
+			public bool TryAppendExpr(UInt64 size, Expr expr)
+			{
+				switch (current_seg)
+				{
+					case AsmSegment.TEXT: return TryAppendExpr(size, expr, file.TextHoles, file.Text);
+					case AsmSegment.RODATA: return TryAppendExpr(size, expr, file.RodataHoles, file.Rodata);
+					case AsmSegment.DATA: return TryAppendExpr(size, expr, file.DataHoles, file.Data);
 
-                    default: res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to write to the {current_seg} segment"); return false;
-                }
-            }
-            public bool TryAppendAddress(UInt64 a, UInt64 b, Expr hole)
-            {
-                if (!TryAppendVal(1, a)) return false;
-                if ((a & 3) != 0) { if (!TryAppendVal(1, b)) return false; }
-                if ((a & 0x80) != 0) { if (!TryAppendExpr(Size((a >> 2) & 3), hole)) return false; }
+					default: res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to write to the {current_seg} segment"); return false;
+				}
+			}
+			public bool TryAppendAddress(UInt64 a, UInt64 b, Expr hole)
+			{
+				if (!TryAppendVal(1, a)) return false;
+				if ((a & 3) != 0) { if (!TryAppendVal(1, b)) return false; }
+				if ((a & 0x80) != 0) { if (!TryAppendExpr(Size((a >> 2) & 3), hole)) return false; }
 
-                return true;
-            }
+				return true;
+			}
 
-            public bool TryAlign(UInt64 size)
-            {
-                // it's really important that size is a power of 2, so do a (hopefully redundant) check
-                if (!size.IsPowerOf2()) throw new ArgumentException("alignment size must be a power of 2");
+			public bool TryAlign(UInt64 size)
+			{
+				// it's really important that size is a power of 2, so do a (hopefully redundant) check
+				if (!size.IsPowerOf2()) throw new ArgumentException("alignment size must be a power of 2");
 
-                switch (current_seg)
-                {
-                    case AsmSegment.TEXT:
-                        file.Text.Align(size);
-                        file.TextAlign = (UInt32)Math.Max(file.TextAlign, size);
-                        return true;
-                    case AsmSegment.RODATA:
-                        file.Rodata.Align(size);
-                        file.RodataAlign = (UInt32)Math.Max(file.RodataAlign, size);
-                        return true;
-                    case AsmSegment.DATA:
-                        file.Data.Align(size);
-                        file.DataAlign = (UInt32)Math.Max(file.DataAlign, size);
-                        return true;
-                    case AsmSegment.BSS:
-                        file.BssLen = (UInt32)Align(file.BssLen, size);
-                        file.BSSAlign = (UInt32)Math.Max(file.BSSAlign, size);
-                        return true;
+				switch (current_seg)
+				{
+					case AsmSegment.TEXT:
+						file.Text.Align(size);
+						file.TextAlign = (UInt32)Math.Max(file.TextAlign, size);
+						return true;
+					case AsmSegment.RODATA:
+						file.Rodata.Align(size);
+						file.RodataAlign = (UInt32)Math.Max(file.RodataAlign, size);
+						return true;
+					case AsmSegment.DATA:
+						file.Data.Align(size);
+						file.DataAlign = (UInt32)Math.Max(file.DataAlign, size);
+						return true;
+					case AsmSegment.BSS:
+						file.BssLen = (UInt32)Align(file.BssLen, size);
+						file.BSSAlign = (UInt32)Math.Max(file.BSSAlign, size);
+						return true;
 
-                    default: res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to align the {current_seg} segment"); return false;
-                }
-            }
-            public bool TryPad(UInt64 size)
-            {
-                switch (current_seg)
-                {
-                    case AsmSegment.TEXT: file.Text.Pad(size); return true;
-                    case AsmSegment.RODATA: file.Rodata.Pad(size); return true;
-                    case AsmSegment.DATA: file.Data.Pad(size); return true;
-                    case AsmSegment.BSS: file.BssLen += (UInt32)size; return true;
+					default: res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to align the {current_seg} segment"); return false;
+				}
+			}
+			public bool TryPad(UInt64 size)
+			{
+				switch (current_seg)
+				{
+					case AsmSegment.TEXT: file.Text.Pad(size); return true;
+					case AsmSegment.RODATA: file.Rodata.Pad(size); return true;
+					case AsmSegment.DATA: file.Data.Pad(size); return true;
+					case AsmSegment.BSS: file.BssLen += (UInt32)size; return true;
 
-                    default: res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to pad the {current_seg} segment"); return false;
-                }
-            }
+					default: res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to pad the {current_seg} segment"); return false;
+				}
+			}
 
-            public static bool TryGetOp(string token, int pos, out Expr.OPs op, out int oplen)
-            {
-                // default to invalid op
-                op = Expr.OPs.None;
-                oplen = 0;
+			public static bool TryGetOp(string token, int pos, out Expr.OPs op, out int oplen)
+			{
+				// default to invalid op
+				op = Expr.OPs.None;
+				oplen = 0;
 
-                // try to take as many characters as possible (greedy)
-                if (pos + 2 <= token.Length)
-                {
-                    oplen = 2; // record oplen
-                    switch (token.Substring(pos, 2))
-                    {
-                        case "//": op = Expr.OPs.SDiv; return true;
-                        case "%%": op = Expr.OPs.SMod; return true;
+				// try to take as many characters as possible (greedy)
+				if (pos + 2 <= token.Length)
+				{
+					oplen = 2; // record oplen
+					switch (token.Substring(pos, 2))
+					{
+						case "//": op = Expr.OPs.SDiv; return true;
+						case "%%": op = Expr.OPs.SMod; return true;
 
-                        case "<<": op = Expr.OPs.SL; return true;
-                        case ">>": op = Expr.OPs.SR; return true;
+						case "<<": op = Expr.OPs.SL; return true;
+						case ">>": op = Expr.OPs.SR; return true;
 
-                        case "<=": op = Expr.OPs.LessE; return true;
-                        case ">=": op = Expr.OPs.GreatE; return true;
+						case "<=": op = Expr.OPs.LessE; return true;
+						case ">=": op = Expr.OPs.GreatE; return true;
 
-                        case "==": op = Expr.OPs.Eq; return true;
-                        case "!=": op = Expr.OPs.Neq; return true;
+						case "==": op = Expr.OPs.Eq; return true;
+						case "!=": op = Expr.OPs.Neq; return true;
 
-                        case "&&": op = Expr.OPs.LogAnd; return true;
-                        case "||": op = Expr.OPs.LogOr; return true;
+						case "&&": op = Expr.OPs.LogAnd; return true;
+						case "||": op = Expr.OPs.LogOr; return true;
 
-                        case "??": op = Expr.OPs.NullCoalesce; return true;
-                    }
-                }
-                if (pos + 1 <= token.Length)
-                {
-                    oplen = 1; // record oplen
-                    switch (token[pos])
-                    {
-                        case '*': op = Expr.OPs.Mul; return true;
+						case "??": op = Expr.OPs.NullCoalesce; return true;
+					}
+				}
+				if (pos + 1 <= token.Length)
+				{
+					oplen = 1; // record oplen
+					switch (token[pos])
+					{
+						case '*': op = Expr.OPs.Mul; return true;
 
-                        case '/': op = Expr.OPs.UDiv; return true;
-                        case '%': op = Expr.OPs.UMod; return true;
+						case '/': op = Expr.OPs.UDiv; return true;
+						case '%': op = Expr.OPs.UMod; return true;
 
-                        case '+': op = Expr.OPs.Add; return true;
-                        case '-': op = Expr.OPs.Sub; return true;
+						case '+': op = Expr.OPs.Add; return true;
+						case '-': op = Expr.OPs.Sub; return true;
 
-                        case '<': op = Expr.OPs.Less; return true;
-                        case '>': op = Expr.OPs.Great; return true;
+						case '<': op = Expr.OPs.Less; return true;
+						case '>': op = Expr.OPs.Great; return true;
 
-                        case '&': op = Expr.OPs.BitAnd; return true;
-                        case '^': op = Expr.OPs.BitXor; return true;
-                        case '|': op = Expr.OPs.BitOr; return true;
+						case '&': op = Expr.OPs.BitAnd; return true;
+						case '^': op = Expr.OPs.BitXor; return true;
+						case '|': op = Expr.OPs.BitOr; return true;
 
-                        case '?': op = Expr.OPs.Condition; return true;
-                        case ':': op = Expr.OPs.Pair; return true;
-                    }
-                }
+						case '?': op = Expr.OPs.Condition; return true;
+						case ':': op = Expr.OPs.Pair; return true;
+					}
+				}
 
-                // if nothing found, fail
-                return false;
-            }
-			
+				// if nothing found, fail
+				return false;
+			}
+
 			/// <summary>
 			/// Attempts to extract an expression from str.
 			/// </summary>
@@ -2092,238 +2093,243 @@ namespace CSX64
 			/// <param name="str_end">one past the last index character under consideration (e.g. use string len to fetch the longest contiguous expression)</param>
 			/// <param name="expr">the extracted expression (on success)</param>
 			/// <param name="aft">the index immediately after the parsed expression (on success)</param>
-            public bool TryExtractExpr(string str, int str_begin, int str_end, out Expr expr, out int aft)
-            {
+			public bool TryExtractExpr(string str, int str_begin, int str_end, out Expr expr, out int aft)
+			{
 				// give default values to out params
-                expr = null;
+				expr = null;
 				aft = str_begin;
 
-                Expr temp; // temporary for node creation
+				Expr temp; // temporary for node creation
 
-                int pos = str_begin, end; // position in token
+				int pos = str_begin, end; // position in token
 
-                bool binPair = false;          // marker if tree contains complete binary pairs (i.e. N+1 values and N binary ops)
-                int unpaired_conditionals = 0; // number of unpaired conditional ops
+				bool binPair = false;          // marker if tree contains complete binary pairs (i.e. N+1 values and N binary ops)
+				int unpaired_conditionals = 0; // number of unpaired conditional ops
 
-                Expr.OPs op = Expr.OPs.None; // extracted binary op (initialized so compiler doesn't complain)
-                int oplen = 0;               // length of operator found (in characters)
+				Expr.OPs op = Expr.OPs.None; // extracted binary op (initialized so compiler doesn't complain)
+				int oplen = 0;               // length of operator found (in characters)
 
-                string err = null; // error location for hole evaluation
+				string err = null; // error location for hole evaluation
 
-                Stack<char> unaryOps = new Stack<char>(8); // holds unary ops for processing
-                Stack<Expr> stack = new Stack<Expr>();     // the stack used to manage operator precedence rules
+				Stack<char> unaryOps = new Stack<char>(8); // holds unary ops for processing
+				Stack<Expr> stack = new Stack<Expr>();     // the stack used to manage operator precedence rules
 
-                // top of stack shall be refered to as current
+				// top of stack shall be refered to as current
 
-                stack.Push(null); // stack will always have a null at its base (simplifies code slightly)
+				stack.Push(null); // stack will always have a null at its base (simplifies code slightly)
 
-                // skip white space
-                for (; pos < str_end && char.IsWhiteSpace(str[pos]); ++pos) ;
-                // if we're past the end, str was empty
-                if (pos >= str_end) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Empty expression encountered"); return false; }
+				// skip white space
+				for (; pos < str_end && char.IsWhiteSpace(str[pos]); ++pos) ;
+				// if we're past the end, str was empty
+				if (pos >= str_end) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Empty expression encountered"); return false; }
 
-                while (true)
-                {
-                    // -- read (unary op...)[operand](binary op) -- //
+				while (true)
+				{
+					// -- read (unary op...)[operand](binary op) -- //
 
-                    // consume unary ops (allows white space)
-                    for (; pos < str_end; ++pos)
-                    {
-                        if (UnaryOps.Contains(str[pos])) unaryOps.Push(str[pos]); // absorb unary ops
-                        else if (!char.IsWhiteSpace(str[pos])) break; // non-white is start of operand
-                    }
-                    // if we're past the end, there were unary ops with no operand
-                    if (pos >= str_end) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Unary ops encountered without an operand"); return false; }
+					// consume unary ops (allows white space)
+					for (; pos < str_end; ++pos)
+					{
+						if (UnaryOps.Contains(str[pos])) unaryOps.Push(str[pos]); // absorb unary ops
+						else if (!char.IsWhiteSpace(str[pos])) break; // non-white is start of operand
+					}
+					// if we're past the end, there were unary ops with no operand
+					if (pos >= str_end) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Unary ops encountered without an operand"); return false; }
 
-                    int depth = 0;  // parens depth - initially 0
-                    int quote = -1; // index of current quote char - initially not in one
+					int depth = 0;  // parens depth - initially 0
+					int quote = -1; // index of current quote char - initially not in one
 
-                    bool numeric = char.IsDigit(str[pos]); // flag if this is a numeric literal
+					bool numeric = char.IsDigit(str[pos]); // flag if this is a numeric literal
 
-                    // move end to next logical separator (white space or binary op)
-                    for (end = pos; end < str_end; ++end)
-                    {
-                        // if we're not in a quote
-                        if (quote < 0)
-                        {
-                            // account for important characters
-                            if (str[end] == '(') ++depth;
-                            else if (str[end] == ')') --depth; // depth control
-                            else if (numeric && (str[end] == 'e' || str[end] == 'E') && end + 1 < str.Length && (str[end + 1] == '+' || str[end + 1] == '-')) ++end; // make sure an exponent sign won't be parsed as binary + or - by skipping it
-                            else if (str[end] == '"' || str[end] == '\'' || str[end] == '`') quote = end; // quotes mark start of a string
-                            else if (depth == 0 && (char.IsWhiteSpace(str[end]) || TryGetOp(str, end, out op, out oplen))) break; // break on white space or binary op
+					// move end to next logical separator (white space or binary op)
+					for (end = pos; end < str_end; ++end)
+					{
+						// if we're not in a quote
+						if (quote < 0)
+						{
+							// account for important characters
+							if (str[end] == '(') ++depth;
+							else if (str[end] == ')') --depth; // depth control
+							else if (numeric && (str[end] == 'e' || str[end] == 'E') && end + 1 < str.Length && (str[end + 1] == '+' || str[end + 1] == '-')) ++end; // make sure an exponent sign won't be parsed as binary + or - by skipping it
+							else if (str[end] == '"' || str[end] == '\'' || str[end] == '`') quote = end; // quotes mark start of a string
+							else if (depth == 0 && (char.IsWhiteSpace(str[end]) || TryGetOp(str, end, out op, out oplen))) break; // break on white space or binary op
 
-                            // can't ever have negative depth
-                            if (depth < 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched parenthesis in expression"); return false; }
-                        }
-                        // otherwise we're in a quote
-                        else
-                        {
-                            // if we have a matching quote, break out of quote mode
-                            if (str[end] == str[quote]) quote = -1;
-                        }
-                    }
-                    // if depth isn't back to 0, there was a parens mismatch
-                    if (depth != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched parenthesis in expression"); return false; }
-                    // if quote isn't back to -1, there was a quote mismatch
-                    if (quote >= 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched quotation in expression"); return false; }
-                    // if pos == end we'll have an empty token (e.g. expression was just a binary op)
-                    if (pos == end) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Empty token encountered in expression"); return false; }
+							// can't ever have negative depth
+							if (depth < 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched parenthesis in expression"); return false; }
+						}
+						// otherwise we're in a quote
+						else
+						{
+							// if we have a matching quote, break out of quote mode
+							if (str[end] == str[quote]) quote = -1;
+						}
+					}
+					// if depth isn't back to 0, there was a parens mismatch
+					if (depth != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched parenthesis in expression"); return false; }
+					// if quote isn't back to -1, there was a quote mismatch
+					if (quote >= 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched quotation in expression"); return false; }
+					// if pos == end we'll have an empty token (e.g. expression was just a binary op)
+					if (pos == end) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Empty token encountered in expression"); return false; }
 
-                    // -- convert to expression tree -- //
+					// -- convert to expression tree -- //
 
-                    // if sub-expression
-                    if (str[pos] == '(')
-                    {
+					// if sub-expression
+					if (str[pos] == '(')
+					{
 						// parse the inside into temp
 						if (!TryExtractExpr(str, pos + 1, end - 1, out temp, out int sub_aft)) return false;
 
 						// if the sub expression didn't capture the entire parenthetical region then the interior was not a (single) expression
 						if (sub_aft != end - 1) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Interior of parenthesis is not an expression"); return false; }
-                    }
-                    // otherwise is value
-                    else
-                    {
-                        // get the value to insert
-                        string val = str.Substring(pos, end - pos);
+					}
+					// otherwise is value
+					else
+					{
+						// get the value to insert
+						string val = str.Substring(pos, end - pos);
 
-                        // mutate it
-                        if (!MutateName(ref val)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse expression\n-> {res.ErrorMsg}"); return false; }
+						// mutate it
+						if (!MutateName(ref val)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse expression\n-> {res.ErrorMsg}"); return false; }
 
-                        // if it's the current line macro
-                        if (val == CurrentLineMacro)
-                        {
-                            // must be in a segment
-                            if (current_seg == AsmSegment.INVALID) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to take an address outside of a segment"); return false; }
+						// if it's the current line macro
+						if (val == CurrentLineMacro)
+						{
+							// must be in a segment
+							if (current_seg == AsmSegment.INVALID) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to take an address outside of a segment"); return false; }
 
-                            temp = new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Token = SegOffsets[current_seg] }, Right = new Expr() { IntResult = line_pos_in_seg } };
-                        }
-                        // if it's the start of segment macro
-                        else if (val == StartOfSegMacro)
-                        {
-                            // must be in a segment
-                            if (current_seg == AsmSegment.INVALID) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to take an address outside of a segment"); return false; }
+							temp = new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Token = SegOffsets[current_seg] }, Right = new Expr() { IntResult = line_pos_in_seg } };
+						}
+						// if it's the start of segment macro
+						else if (val == StartOfSegMacro)
+						{
+							// must be in a segment
+							if (current_seg == AsmSegment.INVALID) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to take an address outside of a segment"); return false; }
 
-                            temp = new Expr() { Token = SegOrigins[current_seg] };
-                        }
-                        // otherwise it's a normal value/symbol
-                        else
-                        {
-                            // create the hole for it
-                            temp = new Expr() { Token = val };
+							temp = new Expr() { Token = SegOrigins[current_seg] };
+						}
+						// if it's the TIMES iter id macro
+						else if (val == TimesIterIdMacro)
+						{
+							temp = new Expr() { IntResult = (UInt64)times_i };
+						}
+						// otherwise it's a normal value/symbol
+						else
+						{
+							// create the hole for it
+							temp = new Expr() { Token = val };
 
-                            // it either needs to be evaluatable or a valid label name
-                            if (!temp.Evaluatable(file.Symbols) && !IsValidName(val, ref err)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to resolve token as a valid expression or symbol name: {val}\n-> {err}"); return false; }
-                        }
-                    }
+							// it either needs to be evaluatable or a valid label name
+							if (!temp.Evaluatable(file.Symbols) && !IsValidName(val, ref err)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to resolve token as a valid expression or symbol name: {val}\n-> {err}"); return false; }
+						}
+					}
 
-                    // handle parsed unary ops (stack provides right-to-left evaluation)
-                    while (unaryOps.Count > 0)
-                    {
-                        char uop = unaryOps.Pop();
-                        switch (uop)
-                        {
-                            case '+': break; // unary plus does nothing
-                            case '-': temp = new Expr() { OP = Expr.OPs.Neg, Left = temp }; break;
-                            case '~': temp = new Expr() { OP = Expr.OPs.BitNot, Left = temp }; break;
-                            case '!': temp = new Expr() { OP = Expr.OPs.LogNot, Left = temp }; break;
-                            case '*': temp = new Expr() { OP = Expr.OPs.Float, Left = temp }; break;
-                            case '/': temp = new Expr() { OP = Expr.OPs.Int, Left = temp }; break;
+					// handle parsed unary ops (stack provides right-to-left evaluation)
+					while (unaryOps.Count > 0)
+					{
+						char uop = unaryOps.Pop();
+						switch (uop)
+						{
+							case '+': break; // unary plus does nothing
+							case '-': temp = new Expr() { OP = Expr.OPs.Neg, Left = temp }; break;
+							case '~': temp = new Expr() { OP = Expr.OPs.BitNot, Left = temp }; break;
+							case '!': temp = new Expr() { OP = Expr.OPs.LogNot, Left = temp }; break;
+							case '*': temp = new Expr() { OP = Expr.OPs.Float, Left = temp }; break;
+							case '/': temp = new Expr() { OP = Expr.OPs.Int, Left = temp }; break;
 
-                            default: throw new NotImplementedException($"unary op \'{uop}\' not implemented");
-                        }
-                    }
+							default: throw new NotImplementedException($"unary op \'{uop}\' not implemented");
+						}
+					}
 
-                    // -- append subtree to main tree --
+					// -- append subtree to main tree --
 
-                    // if no tree yet, use this one
-                    if (expr == null) expr = temp;
-                    // otherwise append to current (guaranteed to be defined by second pass)
-                    else
-                    {
-                        // put it in the right (guaranteed by this algorithm to be empty)
-                        stack.Peek().Right = temp;
-                    }
+					// if no tree yet, use this one
+					if (expr == null) expr = temp;
+					// otherwise append to current (guaranteed to be defined by second pass)
+					else
+					{
+						// put it in the right (guaranteed by this algorithm to be empty)
+						stack.Peek().Right = temp;
+					}
 
-                    // flag as a valid binary pair (i.e. every binary op now has 2 operands)
-                    binPair = true;
+					// flag as a valid binary pair (i.e. every binary op now has 2 operands)
+					binPair = true;
 
-                    // -- get binary op -- //
+					// -- get binary op -- //
 
-                    // we may have stopped token parsing on white space, so wind up to find a binary op
-                    for (; end < str_end; ++end)
-                    {
+					// we may have stopped token parsing on white space, so wind up to find a binary op
+					for (; end < str_end; ++end)
+					{
 						if (TryGetOp(str, end, out op, out oplen)) break; // break when we find an op
-						// if we hit a non-white character, there are tokens with no binary ops between them - that's the end of the expression
+																		  // if we hit a non-white character, there are tokens with no binary ops between them - that's the end of the expression
 						else if (!char.IsWhiteSpace(str[end])) goto stop_parsing;
-                    }
-                    // if we didn't find any binary ops, we're done
-                    if (end >= str_end) break;
+					}
+					// if we didn't find any binary ops, we're done
+					if (end >= str_end) break;
 
-                    // -- process binary op -- //
+					// -- process binary op -- //
 
-                    // ternary conditional has special rules
-                    if (op == Expr.OPs.Pair)
-                    {
-                        // seek out nearest conditional without a pair
-                        for (; stack.Peek() != null && (stack.Peek().OP != Expr.OPs.Condition || stack.Peek().Right.OP == Expr.OPs.Pair); stack.Pop()) ;
-                        // if we didn't find anywhere to put it, this is an error
-                        if (stack.Peek() == null) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expression contained a ternary conditional pair without a corresponding condition"); return false; }
-                    }
-                    // right-to-left operators
-                    else if (op == Expr.OPs.Condition)
-                    {
-                        // wind current up to correct precedence (right-to-left evaluation, so don't skip equal precedence)
-                        for (; stack.Peek() != null && Precedence[stack.Peek().OP] < Precedence[op]; stack.Pop()) ;
-                    }
-                    // left-to-right operators
-                    else
-                    {
-                        // wind current up to correct precedence (left-to-right evaluation, so also skip equal precedence)
-                        for (; stack.Peek() != null && Precedence[stack.Peek().OP] <= Precedence[op]; stack.Pop()) ;
-                    }
+					// ternary conditional has special rules
+					if (op == Expr.OPs.Pair)
+					{
+						// seek out nearest conditional without a pair
+						for (; stack.Peek() != null && (stack.Peek().OP != Expr.OPs.Condition || stack.Peek().Right.OP == Expr.OPs.Pair); stack.Pop()) ;
+						// if we didn't find anywhere to put it, this is an error
+						if (stack.Peek() == null) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expression contained a ternary conditional pair without a corresponding condition"); return false; }
+					}
+					// right-to-left operators
+					else if (op == Expr.OPs.Condition)
+					{
+						// wind current up to correct precedence (right-to-left evaluation, so don't skip equal precedence)
+						for (; stack.Peek() != null && Precedence[stack.Peek().OP] < Precedence[op]; stack.Pop()) ;
+					}
+					// left-to-right operators
+					else
+					{
+						// wind current up to correct precedence (left-to-right evaluation, so also skip equal precedence)
+						for (; stack.Peek() != null && Precedence[stack.Peek().OP] <= Precedence[op]; stack.Pop()) ;
+					}
 
-                    // if we have a valid current
-                    if (stack.Peek() != null)
-                    {
-                        // splice in the new operator, moving current's right sub-tree to left of new node
-                        stack.Push(stack.Peek().Right = new Expr() { OP = op, Left = stack.Peek().Right });
-                    }
-                    // otherwise we'll have to move the root
-                    else
-                    {
-                        // splice in the new operator, moving entire tree to left of new node
-                        stack.Push(expr = new Expr() { OP = op, Left = expr });
-                    }
+					// if we have a valid current
+					if (stack.Peek() != null)
+					{
+						// splice in the new operator, moving current's right sub-tree to left of new node
+						stack.Push(stack.Peek().Right = new Expr() { OP = op, Left = stack.Peek().Right });
+					}
+					// otherwise we'll have to move the root
+					else
+					{
+						// splice in the new operator, moving entire tree to left of new node
+						stack.Push(expr = new Expr() { OP = op, Left = expr });
+					}
 
-                    binPair = false; // flag as invalid binary pair
+					binPair = false; // flag as invalid binary pair
 
-                    // update unpaired conditionals
-                    if (op == Expr.OPs.Condition) ++unpaired_conditionals;
-                    else if (op == Expr.OPs.Pair) --unpaired_conditionals;
+					// update unpaired conditionals
+					if (op == Expr.OPs.Condition) ++unpaired_conditionals;
+					else if (op == Expr.OPs.Pair) --unpaired_conditionals;
 
 					// pass last delimeter and skip white space (end + oplen points just after the binary op)
 					for (pos = end + oplen; pos < str_end && char.IsWhiteSpace(str[pos]); ++pos) ;
 
 					// if pos is now out of bounds, there was a binary op with no second operand
 					if (pos >= str_end) { res = new AssembleResult(AssembleError.UsageError, $"Binary op encountered without a second operand"); return false; }
-                }
+				}
 
 				stop_parsing:
 
-                // handle binary pair mismatch
-                if (!binPair) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expression contained a mismatched binary op"); return false; }
-                // make sure all conditionals were matched
-                if (unpaired_conditionals != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expression contained {unpaired_conditionals} incomplete ternary {(unpaired_conditionals == 1 ? "conditional" : "conditionals")}"); return false; }
+				// handle binary pair mismatch
+				if (!binPair) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expression contained a mismatched binary op"); return false; }
+				// make sure all conditionals were matched
+				if (unpaired_conditionals != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expression contained {unpaired_conditionals} incomplete ternary {(unpaired_conditionals == 1 ? "conditional" : "conditionals")}"); return false; }
 
-                // run ptrdiff logic on result
-                expr = Ptrdiff(expr);
+				// run ptrdiff logic on result
+				expr = Ptrdiff(expr);
 
 				// update the aft index (most recent end index during parsing)
 				aft = end;
 
-                return true;
-            }
+				return true;
+			}
 			/// <summary>
 			/// Attempts to extract an expression from str.
 			/// Equivalent to calling <see cref="TryExtractExpr(string, int, int, out Expr, out int)"/> from 0,len and guaranteeing aft==len.
@@ -2341,682 +2347,681 @@ namespace CSX64
 				return true;
 			}
 
-            public bool TryParseImm(string token, out Expr expr, out UInt64 sizecode, out bool explicit_size)
-            {
-                sizecode = 3; explicit_size = false; // initially no explicit size
-
-                // handle explicit sizes directives
-                string utoken = token.ToUpper();
-                if (utoken.StartsWithToken("BYTE")) { sizecode = 0; explicit_size = true; token = token.Substring(4).TrimStart(); }
-                else if (utoken.StartsWithToken("WORD")) { sizecode = 1; explicit_size = true; token = token.Substring(4).TrimStart(); }
-                else if (utoken.StartsWithToken("DWORD")) { sizecode = 2; explicit_size = true; token = token.Substring(5).TrimStart(); }
-                else if (utoken.StartsWithToken("QWORD")) { sizecode = 3; explicit_size = true; token = token.Substring(5).TrimStart(); }
-
-                // refer to helper
-                return TryExtractExpr(token, out expr);
-            }
-            public bool TryParseInstantImm(string token, out UInt64 val, out bool floating, out UInt64 sizecode, out bool explicit_size)
-            {
-                string err = null; // error location for evaluation
-
-                if (!TryParseImm(token, out Expr hole, out sizecode, out explicit_size)) { val = 0; floating = false; return false; }
-                if (!hole.Evaluate(file.Symbols, out val, out floating, ref err)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to evaluate instant imm: {token}\n-> {err}"); return false; }
-
-                return true;
-            }
-
-            /// <summary>
-            /// Attempts to extract the numeric portion of a standard label: val in (#base + val). Returns true on success
-            /// </summary>
-            /// <param name="expr">the expression representing the label (either the label itself or a token expression reference to it)</param>
-            /// <param name="val">the resulting value portion</param>
-            private bool TryExtractPtrVal(Expr expr, out Expr val, string _base)
-            {
-                // if this is a leaf
-                if (expr.OP == Expr.OPs.None)
-                {
-                    // if there's no token, fail (not a pointer)
-                    if (expr.Token == null) { val = null; return false; }
-
-                    // if this is the #base offset itself, value is zero (this can happen with the current line macro)
-                    if (expr.Token == _base) { val = new Expr(); return true; }
-
-                    // otherwise get the symbol
-                    if (!file.Symbols.TryGetValue(expr.Token, out expr)) { val = null; return false; }
-                }
-
-                // must be of standard label form
-                if (expr.OP != Expr.OPs.Add || expr.Left.Token != _base) { val = null; return false; }
-
-                // return the value portion
-                val = expr.Right;
-                return true;
-            }
-            /// <summary>
-            /// Performs pointer difference arithmetic on the expression tree and returns the result
-            /// </summary>
-            /// <param name="expr">the expression tree to operate on</param>
-            private Expr Ptrdiff(Expr expr)
-            {
-                // on null, return null as well
-                if (expr == null) return null;
-
-                List<Expr> add = new List<Expr>(); // list of added terms
-                List<Expr> sub = new List<Expr>(); // list of subtracted terms
-
-                Expr a = null, b = null; // expression temporaries (initiailzed so compiler won't complain)
-
-                // populate lists
-                expr.PopulateAddSub(add, sub);
-
-                // perform ptrdiff reduction on anything defined by the linker
-                foreach (string seg_name in PtrdiffIDs)
-                {
-                    for (int i = 0, j = 0; ; ++i, ++j)
-                    {
-                        // wind i up to next add label
-                        for (; i < add.Count && !TryExtractPtrVal(add[i], out a, seg_name); ++i) ;
-                        // if this exceeds bounds, break
-                        if (i == add.Count) break;
-
-                        // wind j up to next sub label
-                        for (; j < sub.Count && !TryExtractPtrVal(sub[j], out b, seg_name); ++j) ;
-                        // if this exceeds bounds, break
-                        if (j == sub.Count) break;
-
-                        // we got a pair: replace items in add/sub with their pointer values
-                        add[i] = a;
-                        sub[j] = b;
-                    }
-                }
-
-                // for each add item
-                for (int i = 0; i < add.Count; ++i)
-                {
-                    // if it's not a leaf
-                    if (!add[i].IsLeaf)
-                    {
-                        // recurse on children
-                        add[i] = new Expr() { OP = add[i].OP, Left = Ptrdiff(add[i].Left), Right = Ptrdiff(add[i].Right) };
-                    }
-                }
-                // for each sub item
-                for (int i = 0; i < sub.Count; ++i)
-                {
-                    // if it's not a leaf
-                    if (!sub[i].IsLeaf)
-                    {
-                        // recurse on children
-                        sub[i] = new Expr() { OP = sub[i].OP, Left = Ptrdiff(sub[i].Left), Right = Ptrdiff(sub[i].Right) };
-                    }
-                }
-
-                // stitch together the new tree
-                if (sub.Count == 0) return Expr.ChainAddition(add);
-                else if (add.Count == 0) return new Expr() { OP = Expr.OPs.Neg, Left = Expr.ChainAddition(sub) };
-                else return new Expr() { OP = Expr.OPs.Sub, Left = Expr.ChainAddition(add), Right = Expr.ChainAddition(sub) };
-            }
-
-            /// <summary>
-            /// Attempts to parse an imm that has a prefix. If the imm is a compound expression, it must be parenthesized
-            /// </summary>
-            /// <param name="token">token to parse</param>
-            /// <param name="prefix">the prefix the imm is required to have</param>
-            /// <param name="val">resulting value</param>
-            /// <param name="floating">results in true if val is floating-point</param>
-            public bool TryParseInstantPrefixedImm(string token, string prefix, out UInt64 val, out bool floating, out UInt64 sizecode, out bool explicit_size)
-            {
-                val = sizecode = 0;
-                floating = explicit_size = false;
-
-                // must begin with prefix
-                if (!token.StartsWith(prefix)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Token did not start with \"{prefix}\" prefix: \"{token}\""); return false; }
-                // aside from the prefix, must not be empty
-                if (token.Length == prefix.Length) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Empty token encountered after \"{prefix}\" prefix: \"{token}\""); return false; }
-
-                int end; // ending of expression token
-
-                // if this starts parenthetical region
-                if (token[prefix.Length] == '(')
-                {
-                    int depth = 1; // depth of 1
-
-                    // start searching for ending parens after first parens
-                    for (end = prefix.Length + 1; end < token.Length && depth > 0; ++end)
-                    {
-                        if (token[end] == '(') ++depth;
-                        else if (token[end] == ')') --depth;
-                    }
-
-                    // make sure we reached zero depth
-                    if (depth != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched parenthesis in prefixed expression \"{token}\""); return false; }
-                }
-                // otherwise normal symbol
-                else
-                {
-                    // take all legal chars
-                    for (end = prefix.Length; end < token.Length && (char.IsLetterOrDigit(token[end]) || token[end] == '_' || token[end] == '.'); ++end) ;
-                }
-
-                // make sure we consumed the entire string
-                if (end != token.Length) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Compound expressions used as prefixed expressions must be parenthesized \"{token}\""); return false; }
-
-                // prefix index must be instant imm
-                if (!TryParseInstantImm(token.Substring(prefix.Length), out val, out floating, out sizecode, out explicit_size)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to parse instant prefixed imm \"{token}\"\n-> {res.ErrorMsg}"); return false; }
-
-                return true;
-            }
-
-            public bool TryParseCPURegister(string token, out UInt64 reg, out UInt64 sizecode, out bool high)
-            {
-                // copy data if we can parse it
-                if (CPURegisterInfo.TryGetValue(token.ToUpper(), out var info))
-                {
-                    reg = info.Item1;
-                    sizecode = info.Item2;
-                    high = info.Item3;
-                    return true;
-                }
-                // otherwise it's not a cpu register
-                else
-                {
-                    res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse as cpu register: {token}");
-                    reg = sizecode = 0;
-                    high = false;
-                    return false;
-                }
-            }
-            public bool TryParseFPURegister(string token, out UInt64 reg)
-            {
-                if (FPURegisterInfo.TryGetValue(token.ToUpper(), out var info))
-                {
-                    reg = info;
-                    return true;
-                }
-                else
-                {
-                    res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse as fpu register: {token}");
-                    reg = 0;
-                    return false;
-                }
-            }
-            public bool TryParseVPURegister(string token, out UInt64 reg, out UInt64 sizecode)
-            {
-                // copy data if we can parse it
-                if (VPURegisterInfo.TryGetValue(token.ToUpper(), out var info))
-                {
-                    reg = info.Item1;
-                    sizecode = info.Item2;
-                    return true;
-                }
-                // otherwise it's not a vpu register
-                else
-                {
-                    res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse as vpu register: {token}");
-                    reg = sizecode = 0;
-                    return false;
-                }
-            }
-
-            private bool TryGetRegMult(string label, ref Expr hole, out UInt64 mult_res)
-            {
-                mult_res = 0; // mult_res starts at zero (for logic below)
-
-                Stack<Expr> path = new Stack<Expr>();
-                List<Expr> list = new List<Expr>();
-
-                string err = string.Empty; // evaluation error
-
-                // while we can find this symbol
-                while (hole.FindPath(label, path, true))
-                {
-                    // move path into list
-                    while (path.Count > 0) list.Add(path.Pop());
-
-                    // if it doesn't have a mult section
-                    if (list.Count == 1 || list.Count > 1 && list[1].OP != Expr.OPs.Mul)
-                    {
-                        // add in a multiplier of 1
-                        list[0].OP = Expr.OPs.Mul;
-                        list[0].Left = new Expr() { IntResult = 1 };
-                        list[0].Right = new Expr() { Token = list[0].Token };
-
-                        // insert new register location as beginning of path
-                        list.Insert(0, list[0].Right);
-                    }
-
-                    // start 2 above (just above regular mult code)
-                    for (int i = 2; i < list.Count;)
-                    {
-                        switch (list[i].OP)
-                        {
-                            case Expr.OPs.Add: case Expr.OPs.Sub: case Expr.OPs.Neg: ++i; break;
-
-                            case Expr.OPs.Mul:
-                                {
-                                    // toward leads to register, mult leads to mult value
-                                    Expr toward = list[i - 1], mult = list[i].Left == list[i - 1] ? list[i].Right : list[i].Left;
-
-                                    // if pos is add/sub, we need to distribute
-                                    if (toward.OP == Expr.OPs.Add || toward.OP == Expr.OPs.Sub)
-                                    {
-                                        // swap operators with toward
-                                        list[i].OP = toward.OP;
-                                        toward.OP = Expr.OPs.Mul;
-
-                                        // create the distribution node
-                                        Expr temp = new Expr() { OP = Expr.OPs.Mul, Left = mult };
-
-                                        // compute right and transfer mult to toward
-                                        if (toward.Left == list[i - 2]) { temp.Right = toward.Right; toward.Right = mult; }
-                                        else { temp.Right = toward.Left; toward.Left = mult; }
-
-                                        // add it in
-                                        if (list[i].Left == mult) list[i].Left = temp; else list[i].Right = temp;
-                                    }
-                                    // if pos is mul, we need to combine with pre-existing mult code
-                                    else if (toward.OP == Expr.OPs.Mul)
-                                    {
-                                        // create the combination node
-                                        Expr temp = new Expr() { OP = Expr.OPs.Mul, Left = mult, Right = toward.Left == list[i - 2] ? toward.Right : toward.Left };
-
-                                        // add it in
-                                        if (list[i].Left == mult)
-                                        {
-                                            list[i].Left = temp; // replace mult with combination
-                                            list[i].Right = list[i - 2]; // bump up toward
-                                        }
-                                        else
-                                        {
-                                            list[i].Right = temp;
-                                            list[i].Left = list[i - 2];
-                                        }
-
-                                        // remove the skipped list[i - 1]
-                                        list.RemoveAt(i - 1);
-                                    }
-                                    // if pos is neg, we need to put the negative on the mult
-                                    else if (toward.OP == Expr.OPs.Neg)
-                                    {
-                                        // create the combinartion node
-                                        Expr temp = new Expr() { OP = Expr.OPs.Neg, Left = mult };
-
-                                        // add it in
-                                        if (list[i].Left == mult)
-                                        {
-                                            list[i].Left = temp; // replace mult with combination
-                                            list[i].Right = list[i - 2]; // bump up toward
-                                        }
-                                        else
-                                        {
-                                            list[i].Right = temp;
-                                            list[i].Left = list[i - 2];
-                                        }
-
-                                        // remove the skipped list[i - 1]
-                                        list.RemoveAt(i - 1);
-                                    }
-                                    // otherwise something horrible happened (this should never happen, but is left in for sanity-checking and future-proofing)
-                                    else throw new ArgumentException($"Unknown address simplification step: {toward.OP}");
-
-                                    --i; // decrement i to follow the multiplication all the way down the rabbit hole
-                                    if (i < 2) i = 2; // but if it gets under the starting point, reset it
-
-                                    break;
-                                }
-
-                            default: res = new AssembleResult(AssembleError.FormatError, $"line {line}: Register may not be connected by {list[i].OP}"); return false;
-                        }
-                    }
-
-                    // -- finally done with all the algebra -- //
-
-                    // extract mult code fragment
-                    if (!(list[1].Left == list[0] ? list[1].Right : list[1].Left).Evaluate(file.Symbols, out UInt64 val, out bool floating, ref err))
-                    { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to evaluate register multiplier as an instant imm\n-> {err}"); return false; }
-                    // make sure it's not floating-point
-                    if (floating) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Register multiplier may not be floating-point"); return false; }
-
-                    // look through from top to bottom
-                    for (int i = list.Count - 1; i >= 2; --i)
-                    {
-                        // if this will negate the register
-                        if (list[i].OP == Expr.OPs.Neg || list[i].OP == Expr.OPs.Sub && list[i].Right == list[i - 1])
-                        {
-                            // negate found partial mult
-                            val = ~val + 1;
-                        }
-                    }
-
-                    // remove the register section from the expression (replace with integral 0)
-                    list[1].IntResult = 0;
-
-                    mult_res += val; // add extracted mult to total mult
-                    list.Clear(); // clear list for next pass
-                }
-
-                // register successfully parsed
-                return true;
-            }
-            public bool TryParseAddress(string token, out UInt64 a, out UInt64 b, out Expr ptr_base, out UInt64 sizecode, out bool explicit_size)
-            {
-                a = b = 0; ptr_base = null;
-                sizecode = 0; explicit_size = false;
-
-                // account for exlicit sizecode prefix
-                string utoken = token.ToUpper();
-                if (utoken.StartsWithToken("BYTE")) { sizecode = 0; explicit_size = true; utoken = utoken.Substring(4).TrimStart(); }
-                else if (utoken.StartsWithToken("WORD")) { sizecode = 1; explicit_size = true; utoken = utoken.Substring(4).TrimStart(); }
-                else if (utoken.StartsWithToken("DWORD")) { sizecode = 2; explicit_size = true; utoken = utoken.Substring(5).TrimStart(); }
-                else if (utoken.StartsWithToken("QWORD")) { sizecode = 3; explicit_size = true; utoken = utoken.Substring(5).TrimStart(); }
-                else if (utoken.StartsWithToken("XMMWORD")) { sizecode = 4; explicit_size = true; utoken = utoken.Substring(7).TrimStart(); }
-                else if (utoken.StartsWithToken("YMMWORD")) { sizecode = 5; explicit_size = true; utoken = utoken.Substring(7).TrimStart(); }
-                else if (utoken.StartsWithToken("ZMMWORD")) { sizecode = 6; explicit_size = true; utoken = utoken.Substring(7).TrimStart(); }
-
-                // if there was an explicit size
-                if (explicit_size)
-                {
-                    // CSX64 uses the DWORD PTR syntax, so now we need to start with PTR
-                    if (!utoken.StartsWith("PTR")) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Explicit memory operand size encountered without the PTR designator"); return false; }
-
-                    // take all of that stuff off of token
-                    token = token.Substring(token.Length - utoken.Length + 3).TrimStart();
-                }
-
-                // must be of [*] format
-                if (token.Length < 3 || token[0] != '[' || token[token.Length - 1] != ']') { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Invalid address format encountered: {token}"); return false; }
-
-                UInt64 m1 = 0, r1 = UInt64.MaxValue, r2 = UInt64.MaxValue, sz; // final register info - maxval denotes no value - m1 must default to 0 - sz defaults to 64-bit in the case that there's only an imm ptr_base
-                bool explicit_sz; // denotes that the ptr_base sizecode is explicit
-
-                // extract the address internals
-                token = token.Substring(1, token.Length - 2);
-
-                // turn into an expression
-                if (!TryParseImm(token, out ptr_base, out sz, out explicit_sz)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse address expression\n-> {res.ErrorMsg}"); return false; }
-
-                // look through all the register names
-                foreach (var entry in CPURegisterInfo)
-                {
-                    // extract the register data
-                    if (!TryGetRegMult(entry.Key, ref ptr_base, out UInt64 mult)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to extract register data\n-> {res.ErrorMsg}"); return false; }
-
-                    // if the register is present we need to do something with it
-                    if (mult != 0)
-                    {
-                        // if we have an explicit address component size to enforce
-                        if (explicit_sz)
-                        {
-                            // if this conflicts with the current one, it's an error
-                            if (sz != entry.Value.Item2) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Encountered address components of conflicting sizes"); return false; }
-                        }
-                        // otherwise record this as the size to enforce
-                        else { sz = entry.Value.Item2; explicit_sz = true; }
-                    }
-
-                    // if the multiplier is trivial or has a trivial component
-                    if ((mult & 1) != 0)
-                    {
-                        mult &= ~(UInt64)1; // remove the trivial component
-
-                        // if r2 is empty, put it there
-                        if (r2 == UInt64.MaxValue) r2 = entry.Value.Item1;
-                        // then try r1
-                        else if (r1 == UInt64.MaxValue) r1 = entry.Value.Item1;
-                        // otherwise we ran out of registers to use
-                        else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: An address expression may use up to 2 registers"); return false; }
-                    }
-
-                    // if a non-trivial multiplier is present
-                    if (mult != 0)
-                    {
-                        // decode the mult code into m1
-                        switch (mult)
-                        {
-                            // (mult 1 is trivial and thus handled above)
-                            case 2: m1 = 1; break;
-                            case 4: m1 = 2; break;
-                            case 8: m1 = 3; break;
-
-                            default: res = new AssembleResult(AssembleError.UsageError, $"line {line}: Register multiplier must be 1, 2, 4, or 8. Got {(Int64)mult}*{entry.Key}"); return false;
-                        }
-
-                        // if r1 is empty, put it there
-                        if (r1 == UInt64.MaxValue) r1 = entry.Value.Item1;
-                        // otherwise we don't have anywhere to put it
-                        else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: An address expression may only use one non-trivial multiplier"); return false; }
-                    }
-                }
-
-                // -- apply final touches -- //
-
-                // if we still don't have an explicit address size code, use 64-bit
-                if (!explicit_sz) sz = 3;
-                // 8-bit addressing is not allowed
-                else if (sz == 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: 8-bit addressing is not allowed"); return false; }
-
-                // if we can evaluate the hole to zero, there is no hole (null it)
-                if (ptr_base.Evaluate(file.Symbols, out UInt64 _temp, out bool _btemp, ref utoken) && _temp == 0) ptr_base = null;
-
-                // [1: imm][1:][2: mult_1][2: size][1: r1][1: r2]   ([4: r1][4: r2])   ([size: imm])
-
-                a = (ptr_base != null ? 0x80 : 0ul) | (m1 << 4) | (sz << 2) | (r1 != UInt64.MaxValue ? 2 : 0ul) | (r2 != UInt64.MaxValue ? 1 : 0ul);
-                b = (r1 != UInt64.MaxValue ? r1 << 4 : 0ul) | (r2 != UInt64.MaxValue ? r2 : 0ul);
-
-                // address successfully parsed
-                return true;
-            }
-
-            public bool VerifyLegalExpression(Expr expr)
-            {
-                // if it's a leaf, it must be something that is defined
-                if (expr.IsLeaf)
-                {
-                    // if it's already been evaluated or we know about it somehow, we're good
-                    if (expr.IsEvaluated || file.Symbols.ContainsKey(expr.Token) || file.ExternalSymbols.Contains(expr.Token)
-                        || SegOffsets.ContainsValue(expr.Token) || SegOrigins.ContainsValue(expr.Token)
-                        || VerifyLegalExpressionIgnores.Contains(expr.Token))
-                        return true;
-                    // otherwise we don't know what it is
-                    else { res = new AssembleResult(AssembleError.UnknownSymbol, $"Unknown symbol: {expr.Token}"); return false; }
-                }
-                // otherwise children must be legal
-                else return VerifyLegalExpression(expr.Left) && (expr.Right == null || VerifyLegalExpression(expr.Right));
-            }
-            /// <summary>
-            /// Ensures that all is good in the hood. Returns true if the hood is good
-            /// </summary>
-            public bool VerifyIntegrity()
-            {
-                // make sure all global symbols were actually defined prior to link-time
-                foreach (string global in file.GlobalSymbols)
-                    if (!file.Symbols.ContainsKey(global)) { res = new AssembleResult(AssembleError.UnknownSymbol, $"Global symbol was never defined: {global}"); return false; }
-
-                // make sure all symbol expressions were valid
-                foreach (var entry in file.Symbols) if (!VerifyLegalExpression(entry.Value)) return false;
-
-                // make sure all hole expressions were valid
-                foreach (HoleData hole in file.TextHoles) if (!VerifyLegalExpression(hole.Expr)) return false;
-                foreach (HoleData hole in file.RodataHoles) if (!VerifyLegalExpression(hole.Expr)) return false;
-                foreach (HoleData hole in file.DataHoles) if (!VerifyLegalExpression(hole.Expr)) return false;
-
-                // the hood is good
-                return true;
-            }
-
-            // -- misc -- //
-
-            public bool IsReservedSymbol(string symbol)
-            {
-                // make the symbol uppercase (all reserved symbols are case insensitive)
-                symbol = symbol.ToUpper();
-
-                // check against register dictionaries
-                if (CPURegisterInfo.ContainsKey(symbol) || FPURegisterInfo.ContainsKey(symbol) || VPURegisterInfo.ContainsKey(symbol)) return true;
-
-                // check against special tokens
-                switch (symbol)
-                {
-                    // size directives
-                    case "BYTE":
-                    case "WORD":
-                    case "DWORD":
-                    case "QWORD":
-                    case "XMMWORD":
-                    case "YMMWORD":
-                    case "ZMMWORD":
-
-                    // potential future size directives
-                    case "OWORD":
-                    case "TWORD":
-
-                        return true;
-
-                    default: return false;
-                }
-            }
-            
-            public bool TryProcessAlignXX(UInt64 size)
-            {
-                if (args.Length != 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected no operands"); return false; }
-
-                return TryAlign(size);
-            }
-            public bool TryProcessAlign()
-            {
-                if (args.Length != 1) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected 1 operand"); return false; }
-
-                if (!TryParseInstantImm(args[0], out UInt64 val, out bool floating, out UInt64 sizecode, out bool explicit_size)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Alignment value must be instant\n-> {res.ErrorMsg}"); return false; }
-                if (floating) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Alignment value cannot be floating-point"); return false; }
-                if (val == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Attempt to align to a multiple of zero"); return false; }
-
-                if (!val.IsPowerOf2()) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Alignment value must be a power of 2. Got {val}"); return false; }
-
-                return TryAlign(val);
-            }
-
-            public bool TryProcessGlobal()
-            {
-                if (args.Length == 0) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected at least one symbol to export"); return false; }
-
-                string err = null;
-                foreach (string symbol in args)
-                {
-                    // special error message for using global on local labels
-                    if (symbol[0] == '.') { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Cannot export local symbols without their full declaration"); return false; }
-                    // test name for legality
-                    if (!IsValidName(symbol, ref err)) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: {err}"); return false; }
-
-                    // don't add to global list twice
-                    if (file.GlobalSymbols.Contains(symbol)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Attempt to export \"{symbol}\" multiple times"); return false; }
-                    // ensure we don't global an external
-                    if (file.ExternalSymbols.Contains(symbol)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Cannot define external \"{symbol}\" as global"); return false; }
-
-                    // add it to the globals list
-                    file.GlobalSymbols.Add(symbol);
-                }
-
-                return true;
-            }
-            public bool TryProcessExtern()
-            {
-                if (args.Length == 0) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected at least one symbol to import"); return false; }
-
-                string err = null;
-                foreach (string symbol in args)
-                {
-                    // special error message for using extern on local labels
-                    if (symbol[0] == '.') { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Cannot import local symbols"); return false; }
-                    // test name for legality
-                    if (!IsValidName(symbol, ref err)) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: {err}"); return false; }
-
-                    // ensure we don't extern a symbol that already exists
-                    if (file.Symbols.ContainsKey(symbol)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Cannot define symbol \"{symbol}\" (defined internally) as external"); return false; }
-
-                    // don't add to external list twice
-                    if (file.ExternalSymbols.Contains(symbol)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Attempt to import \"{symbol}\" multiple times"); return false; }
-                    // ensure we don't extern a global
-                    if (file.GlobalSymbols.Contains(symbol)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Cannot define global \"{symbol}\" as external"); return false; }
-
-                    // add it to the external list
-                    file.ExternalSymbols.Add(symbol);
-                }
-
-                return true;
-            }
-
-            public bool TryProcessDeclare(UInt64 size)
-            {
-                if (args.Length == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected at least 1 value to write"); return false; }
-
-                Expr expr;
-                string chars, err = null;
-
-                // for each argument (not using foreach because order is incredibly important and i'm paranoid)
-                for (int i = 0; i < args.Length; ++i)
-                {
-                    // if it's a string
-                    if (args[i][0] == '"' || args[i][0] == '\'' || args[i][0] == '`')
-                    {
-                        // get its chars
-                        if (!TryExtractStringChars(args[i], out chars, ref err)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Invalid string literal: {args[i]}\n-> {err}"); return false; }
-
-                        // dump into memory (one byte each)
-                        for (int j = 0; j < chars.Length; ++j) if (!TryAppendByte((byte)chars[j])) return false;
-                        // make sure we write a multiple of size
-                        if (!TryPad(AlignOffset((UInt64)chars.Length, size))) return false;
-                    }
-                    // otherwise it's a value
-                    else
-                    {
-                        // can only use standard sizes
-                        if (size > 8) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to write a numeric value in an unsuported format"); return false; }
-
-                        // get the value
-                        if (!TryParseImm(args[i], out expr, out UInt64 sizecode, out bool explicit_size)) return false;
-                        if (explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A size directive in this context is not allowed"); return false; }
-
-                        // write the value
-                        if (!TryAppendExpr(size, expr)) return false;
-                    }
-                }
-
-                return true;
-            }
-            public bool TryProcessReserve(UInt64 size)
-            {
-                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Reserve expected one arg"); return false; }
-
-                // parse the number to reserve
-                if (!TryParseInstantImm(args[0], out UInt64 count, out bool floating, out UInt64 sizecode, out bool explicit_size)) return false;
-                if (floating) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Reserve count cannot be floating-point"); return false; }
-                if (explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A size directive in this context is not allowed"); return false; }
-
-                // reserve the space
-                if (!TryReserve(count * size)) return false;
-
-                return true;
-            }
-
-            public bool TryProcessEQU()
-            {
-                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 1 operand"); return false; }
-
-                // make sure we have a label on this line
-                if (label_def == null) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected a label declaration to link to the value"); return false; }
-
-                // get the expression
-                if (!TryParseImm(args[0], out Expr expr, out UInt64 sizecode, out bool explicit_size)) return false;
-                if (explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A size directive in this context is not allowed"); return false; }
+			public bool TryParseImm(string token, out Expr expr, out UInt64 sizecode, out bool explicit_size)
+			{
+				sizecode = 3; explicit_size = false; // initially no explicit size
+
+				// handle explicit sizes directives
+				string utoken = token.ToUpper();
+				if (utoken.StartsWithToken("BYTE")) { sizecode = 0; explicit_size = true; token = token.Substring(4).TrimStart(); }
+				else if (utoken.StartsWithToken("WORD")) { sizecode = 1; explicit_size = true; token = token.Substring(4).TrimStart(); }
+				else if (utoken.StartsWithToken("DWORD")) { sizecode = 2; explicit_size = true; token = token.Substring(5).TrimStart(); }
+				else if (utoken.StartsWithToken("QWORD")) { sizecode = 3; explicit_size = true; token = token.Substring(5).TrimStart(); }
+
+				// refer to helper
+				return TryExtractExpr(token, out expr);
+			}
+			public bool TryParseInstantImm(string token, out UInt64 val, out bool floating, out UInt64 sizecode, out bool explicit_size)
+			{
+				string err = null; // error location for evaluation
+
+				if (!TryParseImm(token, out Expr hole, out sizecode, out explicit_size)) { val = 0; floating = false; return false; }
+				if (!hole.Evaluate(file.Symbols, out val, out floating, ref err)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to evaluate instant imm: {token}\n-> {err}"); return false; }
+
+				return true;
+			}
+
+			/// <summary>
+			/// Attempts to extract the numeric portion of a standard label: val in (#base + val). Returns true on success
+			/// </summary>
+			/// <param name="expr">the expression representing the label (either the label itself or a token expression reference to it)</param>
+			/// <param name="val">the resulting value portion</param>
+			private bool TryExtractPtrVal(Expr expr, out Expr val, string _base)
+			{
+				// if this is a leaf
+				if (expr.OP == Expr.OPs.None)
+				{
+					// if there's no token, fail (not a pointer)
+					if (expr.Token == null) { val = null; return false; }
+
+					// if this is the #base offset itself, value is zero (this can happen with the current line macro)
+					if (expr.Token == _base) { val = new Expr(); return true; }
+
+					// otherwise get the symbol
+					if (!file.Symbols.TryGetValue(expr.Token, out expr)) { val = null; return false; }
+				}
+
+				// must be of standard label form
+				if (expr.OP != Expr.OPs.Add || expr.Left.Token != _base) { val = null; return false; }
+
+				// return the value portion
+				val = expr.Right;
+				return true;
+			}
+			/// <summary>
+			/// Performs pointer difference arithmetic on the expression tree and returns the result
+			/// </summary>
+			/// <param name="expr">the expression tree to operate on</param>
+			private Expr Ptrdiff(Expr expr)
+			{
+				// on null, return null as well
+				if (expr == null) return null;
+
+				List<Expr> add = new List<Expr>(); // list of added terms
+				List<Expr> sub = new List<Expr>(); // list of subtracted terms
+
+				Expr a = null, b = null; // expression temporaries (initiailzed so compiler won't complain)
+
+				// populate lists
+				expr.PopulateAddSub(add, sub);
+
+				// perform ptrdiff reduction on anything defined by the linker
+				foreach (string seg_name in PtrdiffIDs)
+				{
+					for (int i = 0, j = 0; ; ++i, ++j)
+					{
+						// wind i up to next add label
+						for (; i < add.Count && !TryExtractPtrVal(add[i], out a, seg_name); ++i) ;
+						// if this exceeds bounds, break
+						if (i == add.Count) break;
+
+						// wind j up to next sub label
+						for (; j < sub.Count && !TryExtractPtrVal(sub[j], out b, seg_name); ++j) ;
+						// if this exceeds bounds, break
+						if (j == sub.Count) break;
+
+						// we got a pair: replace items in add/sub with their pointer values
+						add[i] = a;
+						sub[j] = b;
+					}
+				}
+
+				// for each add item
+				for (int i = 0; i < add.Count; ++i)
+				{
+					// if it's not a leaf
+					if (!add[i].IsLeaf)
+					{
+						// recurse on children
+						add[i] = new Expr() { OP = add[i].OP, Left = Ptrdiff(add[i].Left), Right = Ptrdiff(add[i].Right) };
+					}
+				}
+				// for each sub item
+				for (int i = 0; i < sub.Count; ++i)
+				{
+					// if it's not a leaf
+					if (!sub[i].IsLeaf)
+					{
+						// recurse on children
+						sub[i] = new Expr() { OP = sub[i].OP, Left = Ptrdiff(sub[i].Left), Right = Ptrdiff(sub[i].Right) };
+					}
+				}
+
+				// stitch together the new tree
+				if (sub.Count == 0) return Expr.ChainAddition(add);
+				else if (add.Count == 0) return new Expr() { OP = Expr.OPs.Neg, Left = Expr.ChainAddition(sub) };
+				else return new Expr() { OP = Expr.OPs.Sub, Left = Expr.ChainAddition(add), Right = Expr.ChainAddition(sub) };
+			}
+
+			/// <summary>
+			/// Attempts to parse an imm that has a prefix. If the imm is a compound expression, it must be parenthesized
+			/// </summary>
+			/// <param name="token">token to parse</param>
+			/// <param name="prefix">the prefix the imm is required to have</param>
+			/// <param name="val">resulting value</param>
+			/// <param name="floating">results in true if val is floating-point</param>
+			public bool TryParseInstantPrefixedImm(string token, string prefix, out UInt64 val, out bool floating, out UInt64 sizecode, out bool explicit_size)
+			{
+				val = sizecode = 0;
+				floating = explicit_size = false;
+
+				// must begin with prefix
+				if (!token.StartsWith(prefix)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Token did not start with \"{prefix}\" prefix: \"{token}\""); return false; }
+				// aside from the prefix, must not be empty
+				if (token.Length == prefix.Length) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Empty token encountered after \"{prefix}\" prefix: \"{token}\""); return false; }
+
+				int end; // ending of expression token
+
+				// if this starts parenthetical region
+				if (token[prefix.Length] == '(')
+				{
+					int depth = 1; // depth of 1
+
+					// start searching for ending parens after first parens
+					for (end = prefix.Length + 1; end < token.Length && depth > 0; ++end)
+					{
+						if (token[end] == '(') ++depth;
+						else if (token[end] == ')') --depth;
+					}
+
+					// make sure we reached zero depth
+					if (depth != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched parenthesis in prefixed expression \"{token}\""); return false; }
+				}
+				// otherwise normal symbol
+				else
+				{
+					// take all legal chars
+					for (end = prefix.Length; end < token.Length && (char.IsLetterOrDigit(token[end]) || token[end] == '_' || token[end] == '.'); ++end) ;
+				}
+
+				// make sure we consumed the entire string
+				if (end != token.Length) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Compound expressions used as prefixed expressions must be parenthesized \"{token}\""); return false; }
+
+				// prefix index must be instant imm
+				if (!TryParseInstantImm(token.Substring(prefix.Length), out val, out floating, out sizecode, out explicit_size)) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to parse instant prefixed imm \"{token}\"\n-> {res.ErrorMsg}"); return false; }
+
+				return true;
+			}
+
+			public bool TryParseCPURegister(string token, out UInt64 reg, out UInt64 sizecode, out bool high)
+			{
+				// copy data if we can parse it
+				if (CPURegisterInfo.TryGetValue(token.ToUpper(), out var info))
+				{
+					reg = info.Item1;
+					sizecode = info.Item2;
+					high = info.Item3;
+					return true;
+				}
+				// otherwise it's not a cpu register
+				else
+				{
+					res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse as cpu register: {token}");
+					reg = sizecode = 0;
+					high = false;
+					return false;
+				}
+			}
+			public bool TryParseFPURegister(string token, out UInt64 reg)
+			{
+				if (FPURegisterInfo.TryGetValue(token.ToUpper(), out var info))
+				{
+					reg = info;
+					return true;
+				}
+				else
+				{
+					res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse as fpu register: {token}");
+					reg = 0;
+					return false;
+				}
+			}
+			public bool TryParseVPURegister(string token, out UInt64 reg, out UInt64 sizecode)
+			{
+				// copy data if we can parse it
+				if (VPURegisterInfo.TryGetValue(token.ToUpper(), out var info))
+				{
+					reg = info.Item1;
+					sizecode = info.Item2;
+					return true;
+				}
+				// otherwise it's not a vpu register
+				else
+				{
+					res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse as vpu register: {token}");
+					reg = sizecode = 0;
+					return false;
+				}
+			}
+
+			private bool TryGetRegMult(string label, ref Expr hole, out UInt64 mult_res)
+			{
+				mult_res = 0; // mult_res starts at zero (for logic below)
+
+				Stack<Expr> path = new Stack<Expr>();
+				List<Expr> list = new List<Expr>();
+
+				string err = string.Empty; // evaluation error
+
+				// while we can find this symbol
+				while (hole.FindPath(label, path, true))
+				{
+					// move path into list
+					while (path.Count > 0) list.Add(path.Pop());
+
+					// if it doesn't have a mult section
+					if (list.Count == 1 || list.Count > 1 && list[1].OP != Expr.OPs.Mul)
+					{
+						// add in a multiplier of 1
+						list[0].OP = Expr.OPs.Mul;
+						list[0].Left = new Expr() { IntResult = 1 };
+						list[0].Right = new Expr() { Token = list[0].Token };
+
+						// insert new register location as beginning of path
+						list.Insert(0, list[0].Right);
+					}
+
+					// start 2 above (just above regular mult code)
+					for (int i = 2; i < list.Count;)
+					{
+						switch (list[i].OP)
+						{
+							case Expr.OPs.Add: case Expr.OPs.Sub: case Expr.OPs.Neg: ++i; break;
+
+							case Expr.OPs.Mul:
+								{
+									// toward leads to register, mult leads to mult value
+									Expr toward = list[i - 1], mult = list[i].Left == list[i - 1] ? list[i].Right : list[i].Left;
+
+									// if pos is add/sub, we need to distribute
+									if (toward.OP == Expr.OPs.Add || toward.OP == Expr.OPs.Sub)
+									{
+										// swap operators with toward
+										list[i].OP = toward.OP;
+										toward.OP = Expr.OPs.Mul;
+
+										// create the distribution node
+										Expr temp = new Expr() { OP = Expr.OPs.Mul, Left = mult };
+
+										// compute right and transfer mult to toward
+										if (toward.Left == list[i - 2]) { temp.Right = toward.Right; toward.Right = mult; }
+										else { temp.Right = toward.Left; toward.Left = mult; }
+
+										// add it in
+										if (list[i].Left == mult) list[i].Left = temp; else list[i].Right = temp;
+									}
+									// if pos is mul, we need to combine with pre-existing mult code
+									else if (toward.OP == Expr.OPs.Mul)
+									{
+										// create the combination node
+										Expr temp = new Expr() { OP = Expr.OPs.Mul, Left = mult, Right = toward.Left == list[i - 2] ? toward.Right : toward.Left };
+
+										// add it in
+										if (list[i].Left == mult)
+										{
+											list[i].Left = temp; // replace mult with combination
+											list[i].Right = list[i - 2]; // bump up toward
+										}
+										else
+										{
+											list[i].Right = temp;
+											list[i].Left = list[i - 2];
+										}
+
+										// remove the skipped list[i - 1]
+										list.RemoveAt(i - 1);
+									}
+									// if pos is neg, we need to put the negative on the mult
+									else if (toward.OP == Expr.OPs.Neg)
+									{
+										// create the combinartion node
+										Expr temp = new Expr() { OP = Expr.OPs.Neg, Left = mult };
+
+										// add it in
+										if (list[i].Left == mult)
+										{
+											list[i].Left = temp; // replace mult with combination
+											list[i].Right = list[i - 2]; // bump up toward
+										}
+										else
+										{
+											list[i].Right = temp;
+											list[i].Left = list[i - 2];
+										}
+
+										// remove the skipped list[i - 1]
+										list.RemoveAt(i - 1);
+									}
+									// otherwise something horrible happened (this should never happen, but is left in for sanity-checking and future-proofing)
+									else throw new ArgumentException($"Unknown address simplification step: {toward.OP}");
+
+									--i; // decrement i to follow the multiplication all the way down the rabbit hole
+									if (i < 2) i = 2; // but if it gets under the starting point, reset it
+
+									break;
+								}
+
+							default: res = new AssembleResult(AssembleError.FormatError, $"line {line}: Register may not be connected by {list[i].OP}"); return false;
+						}
+					}
+
+					// -- finally done with all the algebra -- //
+
+					// extract mult code fragment
+					if (!(list[1].Left == list[0] ? list[1].Right : list[1].Left).Evaluate(file.Symbols, out UInt64 val, out bool floating, ref err))
+					{ res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to evaluate register multiplier as an instant imm\n-> {err}"); return false; }
+					// make sure it's not floating-point
+					if (floating) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Register multiplier may not be floating-point"); return false; }
+
+					// look through from top to bottom
+					for (int i = list.Count - 1; i >= 2; --i)
+					{
+						// if this will negate the register
+						if (list[i].OP == Expr.OPs.Neg || list[i].OP == Expr.OPs.Sub && list[i].Right == list[i - 1])
+						{
+							// negate found partial mult
+							val = ~val + 1;
+						}
+					}
+
+					// remove the register section from the expression (replace with integral 0)
+					list[1].IntResult = 0;
+
+					mult_res += val; // add extracted mult to total mult
+					list.Clear(); // clear list for next pass
+				}
+
+				// register successfully parsed
+				return true;
+			}
+			public bool TryParseAddress(string token, out UInt64 a, out UInt64 b, out Expr ptr_base, out UInt64 sizecode, out bool explicit_size)
+			{
+				a = b = 0; ptr_base = null;
+				sizecode = 0; explicit_size = false;
+
+				// account for exlicit sizecode prefix
+				string utoken = token.ToUpper();
+				if (utoken.StartsWithToken("BYTE")) { sizecode = 0; explicit_size = true; utoken = utoken.Substring(4).TrimStart(); }
+				else if (utoken.StartsWithToken("WORD")) { sizecode = 1; explicit_size = true; utoken = utoken.Substring(4).TrimStart(); }
+				else if (utoken.StartsWithToken("DWORD")) { sizecode = 2; explicit_size = true; utoken = utoken.Substring(5).TrimStart(); }
+				else if (utoken.StartsWithToken("QWORD")) { sizecode = 3; explicit_size = true; utoken = utoken.Substring(5).TrimStart(); }
+				else if (utoken.StartsWithToken("XMMWORD")) { sizecode = 4; explicit_size = true; utoken = utoken.Substring(7).TrimStart(); }
+				else if (utoken.StartsWithToken("YMMWORD")) { sizecode = 5; explicit_size = true; utoken = utoken.Substring(7).TrimStart(); }
+				else if (utoken.StartsWithToken("ZMMWORD")) { sizecode = 6; explicit_size = true; utoken = utoken.Substring(7).TrimStart(); }
+
+				// if there was an explicit size
+				if (explicit_size)
+				{
+					// CSX64 uses the DWORD PTR syntax, so now we need to start with PTR
+					if (!utoken.StartsWith("PTR")) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Explicit memory operand size encountered without the PTR designator"); return false; }
+
+					// take all of that stuff off of token
+					token = token.Substring(token.Length - utoken.Length + 3).TrimStart();
+				}
+
+				// must be of [*] format
+				if (token.Length < 3 || token[0] != '[' || token[token.Length - 1] != ']') { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Invalid address format encountered: {token}"); return false; }
+
+				UInt64 m1 = 0, r1 = UInt64.MaxValue, r2 = UInt64.MaxValue, sz; // final register info - maxval denotes no value - m1 must default to 0 - sz defaults to 64-bit in the case that there's only an imm ptr_base
+				bool explicit_sz; // denotes that the ptr_base sizecode is explicit
+
+				// extract the address internals
+				token = token.Substring(1, token.Length - 2);
+
+				// turn into an expression
+				if (!TryParseImm(token, out ptr_base, out sz, out explicit_sz)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse address expression\n-> {res.ErrorMsg}"); return false; }
+
+				// look through all the register names
+				foreach (var entry in CPURegisterInfo)
+				{
+					// extract the register data
+					if (!TryGetRegMult(entry.Key, ref ptr_base, out UInt64 mult)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to extract register data\n-> {res.ErrorMsg}"); return false; }
+
+					// if the register is present we need to do something with it
+					if (mult != 0)
+					{
+						// if we have an explicit address component size to enforce
+						if (explicit_sz)
+						{
+							// if this conflicts with the current one, it's an error
+							if (sz != entry.Value.Item2) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Encountered address components of conflicting sizes"); return false; }
+						}
+						// otherwise record this as the size to enforce
+						else { sz = entry.Value.Item2; explicit_sz = true; }
+					}
+
+					// if the multiplier is trivial or has a trivial component
+					if ((mult & 1) != 0)
+					{
+						mult &= ~(UInt64)1; // remove the trivial component
+
+						// if r2 is empty, put it there
+						if (r2 == UInt64.MaxValue) r2 = entry.Value.Item1;
+						// then try r1
+						else if (r1 == UInt64.MaxValue) r1 = entry.Value.Item1;
+						// otherwise we ran out of registers to use
+						else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: An address expression may use up to 2 registers"); return false; }
+					}
+
+					// if a non-trivial multiplier is present
+					if (mult != 0)
+					{
+						// decode the mult code into m1
+						switch (mult)
+						{
+							// (mult 1 is trivial and thus handled above)
+							case 2: m1 = 1; break;
+							case 4: m1 = 2; break;
+							case 8: m1 = 3; break;
+
+							default: res = new AssembleResult(AssembleError.UsageError, $"line {line}: Register multiplier must be 1, 2, 4, or 8. Got {(Int64)mult}*{entry.Key}"); return false;
+						}
+
+						// if r1 is empty, put it there
+						if (r1 == UInt64.MaxValue) r1 = entry.Value.Item1;
+						// otherwise we don't have anywhere to put it
+						else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: An address expression may only use one non-trivial multiplier"); return false; }
+					}
+				}
+
+				// -- apply final touches -- //
+
+				// if we still don't have an explicit address size code, use 64-bit
+				if (!explicit_sz) sz = 3;
+				// 8-bit addressing is not allowed
+				else if (sz == 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: 8-bit addressing is not allowed"); return false; }
+
+				// if we can evaluate the hole to zero, there is no hole (null it)
+				if (ptr_base.Evaluate(file.Symbols, out UInt64 _temp, out bool _btemp, ref utoken) && _temp == 0) ptr_base = null;
+
+				// [1: imm][1:][2: mult_1][2: size][1: r1][1: r2]   ([4: r1][4: r2])   ([size: imm])
+
+				a = (ptr_base != null ? 0x80 : 0ul) | (m1 << 4) | (sz << 2) | (r1 != UInt64.MaxValue ? 2 : 0ul) | (r2 != UInt64.MaxValue ? 1 : 0ul);
+				b = (r1 != UInt64.MaxValue ? r1 << 4 : 0ul) | (r2 != UInt64.MaxValue ? r2 : 0ul);
+
+				// address successfully parsed
+				return true;
+			}
+
+			public bool VerifyLegalExpression(Expr expr)
+			{
+				// if it's a leaf, it must be something that is defined
+				if (expr.IsLeaf)
+				{
+					// if it's already been evaluated or we know about it somehow, we're good
+					if (expr.IsEvaluated || file.Symbols.ContainsKey(expr.Token) || file.ExternalSymbols.Contains(expr.Token)
+						|| SegOffsets.ContainsValue(expr.Token) || SegOrigins.ContainsValue(expr.Token)
+						|| VerifyLegalExpressionIgnores.Contains(expr.Token))
+						return true;
+					// otherwise we don't know what it is
+					else { res = new AssembleResult(AssembleError.UnknownSymbol, $"Unknown symbol: {expr.Token}"); return false; }
+				}
+				// otherwise children must be legal
+				else return VerifyLegalExpression(expr.Left) && (expr.Right == null || VerifyLegalExpression(expr.Right));
+			}
+			/// <summary>
+			/// Ensures that all is good in the hood. Returns true if the hood is good
+			/// </summary>
+			public bool VerifyIntegrity()
+			{
+				// make sure all global symbols were actually defined prior to link-time
+				foreach (string global in file.GlobalSymbols)
+					if (!file.Symbols.ContainsKey(global)) { res = new AssembleResult(AssembleError.UnknownSymbol, $"Global symbol was never defined: {global}"); return false; }
+
+				// make sure all symbol expressions were valid
+				foreach (var entry in file.Symbols) if (!VerifyLegalExpression(entry.Value)) return false;
+
+				// make sure all hole expressions were valid
+				foreach (HoleData hole in file.TextHoles) if (!VerifyLegalExpression(hole.Expr)) return false;
+				foreach (HoleData hole in file.RodataHoles) if (!VerifyLegalExpression(hole.Expr)) return false;
+				foreach (HoleData hole in file.DataHoles) if (!VerifyLegalExpression(hole.Expr)) return false;
+
+				// the hood is good
+				return true;
+			}
+
+			// -- misc -- //
+
+			public bool IsReservedSymbol(string symbol)
+			{
+				// make the symbol uppercase (all reserved symbols are case insensitive)
+				symbol = symbol.ToUpper();
+
+				// check against register dictionaries
+				if (CPURegisterInfo.ContainsKey(symbol) || FPURegisterInfo.ContainsKey(symbol) || VPURegisterInfo.ContainsKey(symbol)) return true;
+
+				// check against special tokens
+				switch (symbol)
+				{
+					// size directives
+					case "BYTE":
+					case "WORD":
+					case "DWORD":
+					case "QWORD":
+					case "XMMWORD":
+					case "YMMWORD":
+					case "ZMMWORD":
+
+					// potential future size directives
+					case "OWORD":
+					case "TWORD":
+
+						return true;
+
+					default: return false;
+				}
+			}
+
+			public bool TryProcessAlignXX(UInt64 size)
+			{
+				if (args.Length != 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected no operands"); return false; }
+
+				return TryAlign(size);
+			}
+			public bool TryProcessAlign()
+			{
+				if (args.Length != 1) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected 1 operand"); return false; }
+
+				if (!TryParseInstantImm(args[0], out UInt64 val, out bool floating, out UInt64 sizecode, out bool explicit_size)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Alignment value must be instant\n-> {res.ErrorMsg}"); return false; }
+				if (floating) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Alignment value cannot be floating-point"); return false; }
+				if (val == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Attempt to align to a multiple of zero"); return false; }
+
+				if (!val.IsPowerOf2()) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Alignment value must be a power of 2. Got {val}"); return false; }
+
+				return TryAlign(val);
+			}
+
+			public bool TryProcessGlobal()
+			{
+				if (args.Length == 0) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected at least one symbol to export"); return false; }
+
+				string err = null;
+				foreach (string symbol in args)
+				{
+					// special error message for using global on local labels
+					if (symbol[0] == '.') { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Cannot export local symbols without their full declaration"); return false; }
+					// test name for legality
+					if (!IsValidName(symbol, ref err)) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: {err}"); return false; }
+
+					// don't add to global list twice
+					if (file.GlobalSymbols.Contains(symbol)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Attempt to export \"{symbol}\" multiple times"); return false; }
+					// ensure we don't global an external
+					if (file.ExternalSymbols.Contains(symbol)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Cannot define external \"{symbol}\" as global"); return false; }
+
+					// add it to the globals list
+					file.GlobalSymbols.Add(symbol);
+				}
+
+				return true;
+			}
+			public bool TryProcessExtern()
+			{
+				if (args.Length == 0) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected at least one symbol to import"); return false; }
+
+				string err = null;
+				foreach (string symbol in args)
+				{
+					// special error message for using extern on local labels
+					if (symbol[0] == '.') { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Cannot import local symbols"); return false; }
+					// test name for legality
+					if (!IsValidName(symbol, ref err)) { res = new AssembleResult(AssembleError.InvalidLabel, $"line {line}: {err}"); return false; }
+
+					// ensure we don't extern a symbol that already exists
+					if (file.Symbols.ContainsKey(symbol)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Cannot define symbol \"{symbol}\" (defined internally) as external"); return false; }
+
+					// don't add to external list twice
+					if (file.ExternalSymbols.Contains(symbol)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Attempt to import \"{symbol}\" multiple times"); return false; }
+					// ensure we don't extern a global
+					if (file.GlobalSymbols.Contains(symbol)) { res = new AssembleResult(AssembleError.SymbolRedefinition, $"line {line}: Cannot define global \"{symbol}\" as external"); return false; }
+
+					// add it to the external list
+					file.ExternalSymbols.Add(symbol);
+				}
+
+				return true;
+			}
+
+			public bool TryProcessDeclare(UInt64 size)
+			{
+				if (args.Length == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected at least 1 value to write"); return false; }
+
+				Expr expr;
+				string chars, err = null;
+				UInt64 sizecode;
+				bool explicit_size;
+
+				// for each argument (not using foreach because order is incredibly important and i'm paranoid)
+				for (int i = 0; i < args.Length; ++i)
+				{
+					// if it's a string
+					if (TryExtractStringChars(args[i], out chars, ref err))
+					{
+						// dump into memory (one byte each)
+						for (int j = 0; j < chars.Length; ++j) if (!TryAppendByte((byte)chars[j])) return false;
+						// make sure we write a multiple of size
+						if (!TryPad(AlignOffset((UInt64)chars.Length, size))) return false;
+					}
+					// otherwise it's a value
+					else if (TryParseImm(args[i], out expr, out sizecode, out explicit_size))
+					{
+						// can only use standard sizes
+						if (size > 8) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to write a numeric value in an unsuported format"); return false; }
+
+						// we're given a size we have to use, so don't allow explicit operand sizes as well
+						if (explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A size directive in this context is not allowed"); return false; }
+
+						// write the value
+						if (!TryAppendExpr(size, expr)) return false;
+					}
+					else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse operand as a string or imm: {args[i]}\n-> {res.ErrorMsg}"); return false; }
+				}
+
+				return true;
+			}
+			public bool TryProcessReserve(UInt64 size)
+			{
+				if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Reserve expected one arg"); return false; }
+
+				// parse the number to reserve
+				if (!TryParseInstantImm(args[0], out UInt64 count, out bool floating, out UInt64 sizecode, out bool explicit_size)) return false;
+				if (floating) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Reserve count cannot be floating-point"); return false; }
+				if (explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A size directive in this context is not allowed"); return false; }
+
+				// reserve the space
+				if (!TryReserve(count * size)) return false;
+
+				return true;
+			}
+
+			public bool TryProcessEQU()
+			{
+				if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 1 operand"); return false; }
+
+				// make sure we have a label on this line
+				if (label_def == null) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected a label declaration to link to the value"); return false; }
+
+				// get the expression
+				if (!TryParseImm(args[0], out Expr expr, out UInt64 sizecode, out bool explicit_size)) return false;
+				if (explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A size directive in this context is not allowed"); return false; }
 
 				// make sure the symbol isn't already defined (this could be the case for a TIMES prefix on an EQU directive)
 				if (file.Symbols.ContainsKey(label_def)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Symbol {label_def} was already defined"); return false; }
 
-                // inject the symbol
-                file.Symbols.Add(label_def, expr);
+				// inject the symbol
+				file.Symbols.Add(label_def, expr);
 
-                return true;
-            }
+				return true;
+			}
 			public bool TryProcessStaticAssert()
 			{
 				if (args.Length != 1 && args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected an expression and an optional assertion message"); return false; }
@@ -3039,31 +3044,90 @@ namespace CSX64
 				return true;
 			}
 
-            public bool TryProcessSegment()
-            {
-                if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 1 operand"); return false; }
+			public bool TryProcessSegment()
+			{
+				if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 1 operand"); return false; }
 
-                // get the segment we're going to
-                switch (args[0].ToUpper())
-                {
-                    case ".TEXT": current_seg = AsmSegment.TEXT; break;
-                    case ".RODATA": current_seg = AsmSegment.RODATA; break;
-                    case ".DATA": current_seg = AsmSegment.DATA; break;
-                    case ".BSS": current_seg = AsmSegment.BSS; break;
+				// get the segment we're going to
+				switch (args[0].ToUpper())
+				{
+					case ".TEXT": current_seg = AsmSegment.TEXT; break;
+					case ".RODATA": current_seg = AsmSegment.RODATA; break;
+					case ".DATA": current_seg = AsmSegment.DATA; break;
+					case ".BSS": current_seg = AsmSegment.BSS; break;
 
-                    default: res = new AssembleResult(AssembleError.ArgError, $"line {line}: Unknown segment: {args[0]}"); return false;
-                }
+					default: res = new AssembleResult(AssembleError.ArgError, $"line {line}: Unknown segment: {args[0]}"); return false;
+				}
 
-                // if this segment has already been done, fail
-                if ((done_segs & current_seg) != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to redeclare segment {current_seg}"); return false; }
-                // add to list of completed segments
-                done_segs |= current_seg;
+				// if this segment has already been done, fail
+				if ((done_segs & current_seg) != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to redeclare segment {current_seg}"); return false; }
+				// add to list of completed segments
+				done_segs |= current_seg;
 
-                // we don't want to have cross-segment local symbols
-                last_nonlocal_label = null;
+				// we don't want to have cross-segment local symbols
+				last_nonlocal_label = null;
 
-                return true;
-            }
+				return true;
+			}
+
+			public bool TryProcessINCBIN()
+			{
+				if (args.Length == 0) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected one or more binaries to inject"); return false; }
+
+				string path;
+				string err = null;
+
+				List<byte> seg; // the segment to append to
+
+				// get the current segment
+				switch (current_seg)
+				{
+					case AsmSegment.TEXT: seg = file.Text; break;
+					case AsmSegment.RODATA: seg = file.Rodata; break;
+					case AsmSegment.DATA: seg = file.Data; break;
+					case AsmSegment.BSS: res = new AssembleResult(AssembleError.UsageError, $"line {line}: Attempt to write initialized data to the BSS segment"); return false;
+
+					default: res = new AssembleResult(AssembleError.UsageError, $"line {line}: Attempt to write outside of a segment"); return false;
+				}
+
+				// for each argument
+				for (int i = 0; i < args.Length; ++i)
+				{
+					// ensure it's a string
+					if (!TryExtractStringChars(args[i], out path, ref err)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Failed to parse {args[i]} as a string\n-> {err}"); return false; }
+
+					byte[] buf;
+
+					try
+					{
+						// open the binary
+						using (FileStream bin = File.OpenRead(path))
+						{
+							// get its size and mark current segment position
+							long sz = bin.Length;
+							int seglen = seg.Count;
+
+							// make room for the entire binary in the current segment
+							try { seg.Capacity = seg.Count + (int)sz; }
+							catch (Exception) { res = new AssembleResult(AssembleError.Failure, $"line {line}: Failed to allocate space for binary {args[i]}"); return false; }
+
+							// read the binary
+							try
+							{
+								buf = new byte[sz];
+								if (bin.Read(buf, 0, buf.Length) != buf.Length) { res = new AssembleResult(AssembleError.Failure, $"line {line}: Failed to read binary {args[i]}"); return false; }
+							}
+							catch (Exception) { res = new AssembleResult(AssembleError.Failure, $"line {line}: Failed to read binary {args[i]}"); return false; }
+						}
+					}
+					catch (Exception) { res = new AssembleResult(AssembleError.ArgError, $"line {line}: Failed to open {path} for reading"); return false; }
+
+					// copy the binary into the segment
+					seg.AddRange(buf);
+				}
+
+				return true;
+			}
 
             // -- x86 op formats -- //
             
@@ -4930,7 +4994,7 @@ namespace CSX64
 				if (!args.TryExtractLineHeader(ref rawline)) return args.res;
 
 				// assemble this line a number of times equal to args.times (updated by callng TryExtractLineHeader() above)
-				for (Int64 times_i = 0; times_i < args.times; ++times_i)
+				for (args.times_i = 0; args.times_i < args.times; ++args.times_i)
 				{
 					// must update current line pos before each TIMES assembly iteration (because each TIMES iteration is like a new line)
 					args.UpdateLinePos();
@@ -4979,6 +5043,8 @@ namespace CSX64
 							case "STATIC_ASSERT": if (!args.TryProcessStaticAssert()) return args.res; goto op_done;
 
 							case "SEGMENT": case "SECTION": if (!args.TryProcessSegment()) return args.res; goto op_done;
+
+							case "INCBIN": if (!args.TryProcessINCBIN()) return args.res; goto op_done;
 						}
 
 						// if it wasn't a directive it's about to be an instruction: make sure we're in the text segment
