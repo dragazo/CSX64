@@ -400,7 +400,17 @@ namespace CSX64
 
             // unary ops
 
-            Neg, BitNot, LogNot, Int, Float,
+            Neg,
+			BitNot, LogNot,
+
+			// function-like operators
+
+			Int, Float, // convert int <-> float
+			Floor, Ceil, Round, Trunc,
+
+			Repr64, Repr32,   // interpret float as IEEE-754 encoded int
+			Float64, Float32, // interpret IEEE-754 encoded int as float
+			Prec64, Prec32,   // explicit precision truncations
 
             // special
 
@@ -467,6 +477,27 @@ namespace CSX64
         {
             set => CacheResult(DoubleAsUInt64(value), true);
         }
+
+		/// <summary>
+		/// Sets this expr node to be a (stolen) copy of other (in-place). Other is left in an unspecified but usable state. Does nothing if self-stealing.
+		/// </summary>
+		/// <param name="other">the node to copy</param>
+		public void Steal(Expr other)
+		{
+			if (this != other)
+			{
+				// steal everything from other
+				OP = other.OP;
+				Left = other.Left;
+				Right = other.Right;
+				_Token = other._Token;
+				_Result = other._Result;
+				_Floating = other._Floating;
+
+				// don't let other alias the same resources after this operation (just for safety)
+				other.IntResult = 0;
+			}
+		}
 
         /// <summary>
         /// Caches the specified result
@@ -820,18 +851,98 @@ namespace CSX64
                 case OPs.Int:
                     if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
 
+					// float converts to int, otherwise pass-through
                     res = LF ? (UInt64)(Int64)AsDouble(L) : L;
                     break;
                 case OPs.Float:
                     if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
 
+					// intconverts to float, otherwise pass-through
                     res = LF ? L : DoubleAsUInt64((double)(Int64)L);
                     floating = true;
                     break;
 
-                // -- misc operators -- //
+				case OPs.Floor:
+					if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
 
-                case OPs.NullCoalesce:
+					// floor the result - results in a float
+					res = DoubleAsUInt64(Math.Floor(LF ? AsDouble(L) : (double)(Int64)L));
+					floating = true;
+					break;
+				case OPs.Ceil:
+					if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
+
+					// ceil the result - results in a float
+					res = DoubleAsUInt64(Math.Ceiling(LF ? AsDouble(L) : (double)(Int64)L));
+					floating = true;
+					break;
+				case OPs.Round:
+					if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
+
+					// round the result - results in a float
+					res = DoubleAsUInt64(Math.Round(LF ? AsDouble(L) : (double)(Int64)L));
+					floating = true;
+					break;
+				case OPs.Trunc:
+					if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
+
+					// trunc the result - results in a float
+					res = DoubleAsUInt64(Math.Truncate(LF ? AsDouble(L) : (double)(Int64)L));
+					floating = true;
+					break;
+
+				case OPs.Repr64:
+					if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
+					if (!LF) { err = "REPR64 requires a floating-point argument"; return false; }
+
+					// convert the float to a 64-bit representation (already storing as 64-bit representation)
+					res = L;
+					break;
+				case OPs.Repr32:
+					if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
+					if (!LF) { err = "REPR32 requires a floating-point argument"; return false; }
+
+					// convert the float to a 32-bit representation
+					res = FloatAsUInt64((float)AsDouble(L));
+					break;
+
+				case OPs.Float64:
+					if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
+					if (LF) { err = "FLOAT64 requires an integer argument"; return false; }
+
+					// convert the 64-bit representation to a float
+					res = L;
+					floating = true;
+					break;
+				case OPs.Float32:
+					if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
+					if (LF) { err = "FLOAT32 requires an integer argument"; return false; }
+
+					// convert the 32-bit representation to a float
+					res = DoubleAsUInt64((double)AsFloat((UInt32)L));
+					floating = true;
+					break;
+
+				case OPs.Prec64:
+					if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
+					if (!LF) { err = "PREC64 requires a floating-point argument"; return false; }
+
+					// truncate the precision to 64 bits (already storing in 64-bit floating point, so that would be no-op)
+					res = L;
+					floating = true;
+					break;
+				case OPs.Prec32:
+					if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) return false;
+					if (!LF) { err = "PREC32 requires a floating-point argument"; return false; }
+
+					// truncate the precision to 32 bits (stored as a 64-bit floating, just chop off some precision from the end)
+					res = L & (UInt64)0xffffffffe0000000;
+					floating = true;
+					break;
+
+				// -- misc operators -- //
+
+				case OPs.NullCoalesce:
                     if (!Left.__Evaluate__(symbols, out L, out LF, ref err, visited)) ret = false;
                     if (!Right.__Evaluate__(symbols, out R, out RF, ref err, visited)) ret = false;
                     if (ret == false) return false;
@@ -1295,7 +1406,26 @@ namespace CSX64
             { Expr.OPs.Pair, 100 },
             { Expr.OPs.Condition, 100 }
         };
-        private static readonly HashSet<char> UnaryOps = new HashSet<char>() { '+', '-', '~', '!', '*', '/' };
+
+		private static readonly Dictionary<string, Expr.OPs> FunctionOperator_to_OP = new Dictionary<string, Expr.OPs>()
+		{
+			{ "INT", Expr.OPs.Int },
+			{ "FLOAT", Expr.OPs.Float },
+
+			{ "FLOOR", Expr.OPs.Floor },
+			{ "CEIL", Expr.OPs.Ceil },
+			{ "ROUND", Expr.OPs.Round },
+			{ "TRUNC", Expr.OPs.Trunc },
+
+			{ "REPR64", Expr.OPs.Repr64 },
+			{ "REPR32", Expr.OPs.Repr32 },
+
+			{ "FLOAT64", Expr.OPs.Float64 },
+			{ "FLOAT32", Expr.OPs.Float32 },
+
+			{ "PREC64", Expr.OPs.Prec64 },
+			{ "PREC32", Expr.OPs.Prec32 },
+		};
 
         private static readonly Dictionary<AsmSegment, string> SegOffsets = new Dictionary<AsmSegment, string>()
         {
@@ -1945,6 +2075,46 @@ namespace CSX64
 				}
 			}
 
+			public static byte GetCompactImmPrefix(UInt64 val)
+			{
+				if ((val & (UInt64)0xffffffffffffff00) == 0) return (byte)0x00;
+				if ((~val & (UInt64)0xffffffffffffff00) == 0) return (byte)0x10;
+
+				if ((val & (UInt64)0xffffffffffff0000) == 0) return (byte)0x01;
+				if ((~val & (UInt64)0xffffffffffff0000) == 0) return (byte)0x11;
+
+				if ((val & (UInt64)0xffffffff00000000) == 0) return (byte)0x02;
+				if ((~val & (UInt64)0xffffffff00000000) == 0) return (byte)0x12;
+
+				return (byte)0x03;
+			}
+
+			/// <summary>
+			/// attempts to append a compact imm to the current segment
+			/// </summary>
+			/// <param name="expr">the value to append in the compact imm format</param>
+			/// <param name="sizecode">if strict is true, this is the size to use, otherwise is the default size if expr cannot be immediately evaluated</param>
+			/// <param name="strict">denotes if sizecode MUST be obeyed - inhibits further compactness optimizations</param>
+			public bool TryAppendCompactImm(Expr expr, UInt64 sizecode, bool strict)
+			{
+				string err = null;
+
+				// if we can evaluate it immediately
+				if (expr.Evaluate(file.Symbols, out UInt64 res, out bool floating, ref err))
+				{
+					// get the prefix byte - taking into account strict flag and potentially-default sizecode
+					byte prefix = strict ? (byte)(sizecode) : GetCompactImmPrefix(res);
+
+					// write the prefix byte and its appropriately-sized compact imm
+					return TryAppendByte(prefix) && TryAppendVal(Size(prefix & 3ul), res);
+				}
+				// otherwise it'll need to be a dynamic hole
+				else
+				{
+					throw new NotImplementedException("dynamic holes not implemented yet");
+				}
+			}
+
 			private bool TryAppendExpr(UInt64 size, Expr expr, List<HoleData> holes, List<byte> segment)
 			{
 				string err = null; // evaluation error parsing location
@@ -2095,31 +2265,30 @@ namespace CSX64
 			/// <param name="aft">the index immediately after the parsed expression (on success)</param>
 			public bool TryExtractExpr(string str, int str_begin, int str_end, out Expr expr, out int aft)
 			{
-				// give default values to out params
-				expr = null;
-				aft = str_begin;
+				int pos, end; // position in str
 
-				Expr temp; // temporary for node creation
+				Expr term_root; // holds the root of the current term tree
+				Expr term_leaf; // holds the leaf of the current term tree (a valid Expr node to be filled out)
 
-				int pos = str_begin, end; // position in token
-
-				bool binPair = false;          // marker if tree contains complete binary pairs (i.e. N+1 values and N binary ops)
-				int unpaired_conditionals = 0; // number of unpaired conditional ops
+				Stack<Expr> stack = new Stack<Expr>(); // the stack used to manage operator precedence rules
+													   // top of stack shall be refered to as current
 
 				Expr.OPs op = Expr.OPs.None; // extracted binary op (initialized so compiler doesn't complain)
 				int oplen = 0;               // length of operator found (in characters)
 
+				int unpaired_conditionals = 0; // number of unpaired conditional ops
+
 				string err = null; // error location for hole evaluation
 
-				Stack<char> unaryOps = new Stack<char>(8); // holds unary ops for processing
-				Stack<Expr> stack = new Stack<Expr>();     // the stack used to manage operator precedence rules
+				// ----------------------------------------------------------------------------------
 
-				// top of stack shall be refered to as current
+				expr = null;     // null expr so we know it's currently empty
+				aft = str_begin; // initialize this so that compiler doesn't complain (value is not meaningfull unless we return true)
 
 				stack.Push(null); // stack will always have a null at its base (simplifies code slightly)
 
 				// skip white space
-				for (; pos < str_end && char.IsWhiteSpace(str[pos]); ++pos) ;
+				for (pos = str_begin; pos < str_end && char.IsWhiteSpace(str[pos]); ++pos) ;
 				// if we're past the end, str was empty
 				if (pos >= str_end) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Empty expression encountered"); return false; }
 
@@ -2127,12 +2296,25 @@ namespace CSX64
 				{
 					// -- read (unary op...)[operand](binary op) -- //
 
+					// create a new term tree and mark its root/leaf
+					term_leaf = term_root = new Expr();
+
 					// consume unary ops (allows white space)
 					for (; pos < str_end; ++pos)
 					{
-						if (UnaryOps.Contains(str[pos])) unaryOps.Push(str[pos]); // absorb unary ops
-						else if (!char.IsWhiteSpace(str[pos])) break; // non-white is start of operand
+						switch (str[pos])
+						{
+							case '+': break; // unary plus does nothing - don't even store it
+							case '-': term_leaf.OP = Expr.OPs.Neg; term_leaf = term_leaf.Left = new Expr(); break;
+							case '~': term_leaf.OP = Expr.OPs.BitNot; term_leaf = term_leaf.Left = new Expr(); break;
+							case '!': term_leaf.OP = Expr.OPs.LogNot; term_leaf = term_leaf.Left = new Expr(); break;
+
+							default:
+								if (char.IsWhiteSpace(str[pos])) break; // allow white space
+								goto unary_op_loop_aft; // unrecognized non-white is start of operand
+						}
 					}
+					unary_op_loop_aft:
 					// if we're past the end, there were unary ops with no operand
 					if (pos >= str_end) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Unary ops encountered without an operand"); return false; }
 
@@ -2176,11 +2358,30 @@ namespace CSX64
 					// if sub-expression
 					if (str[pos] == '(')
 					{
-						// parse the inside into temp
-						if (!TryExtractExpr(str, pos + 1, end - 1, out temp, out int sub_aft)) return false;
+						// parse the inside into the term leaf
+						if (!TryExtractExpr(str, pos + 1, end - 1, out Expr sub_expr, out int sub_aft)) return false;
+						term_leaf.Steal(sub_expr); // this must go in-place into term_leaf because otherwise we'd break the referential chain set up by unary op parsing
 
 						// if the sub expression didn't capture the entire parenthetical region then the interior was not a (single) expression
 						if (sub_aft != end - 1) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Interior of parenthesis is not an expression"); return false; }
+					}
+					// if it's a function call (uses the fact that the above case failed)
+					else if (str[end - 1] == ')')
+					{
+						// get the index of the first paren (we're guaranteed one exists because there's one at the end and it already passed the paren mismatch test)
+						int first_paren;
+						for (first_paren = pos; str[first_paren] != '('; ++first_paren) ;
+
+						// the string [pos, first_paren) represents the function name - extract it (uppercase since we're case invariant)
+						string fn_name = str.Substring(pos, first_paren - pos).ToUpper();
+
+						// the interior of the parenthesis (first_paren, end - 1) represents the function argument (expression) - extract it into tem's left branch
+						if (!TryExtractExpr(str, first_paren + 1, end - 1, out term_leaf.Left, out int fn_arg_aft)) { res = new AssembleResult(AssembleError.UsageError, $"list {line}: Failed to parse function-like-operator argument: {str.Substring(first_paren+1, (end-1)-(first_paren+1))}\n-> {res.ErrorMsg}"); return false; }
+						// make sure we consumed the entire parenthesis interior
+						if (fn_arg_aft != end - 1) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Interior of function-like-operator was not an expression"); return false; }
+
+						// get the op to apply to said argument - all we need to do is set it in term_leaf - everything else is already done
+						if (!FunctionOperator_to_OP.TryGetValue(fn_name, out term_leaf.OP)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Unknown function-like-operator: {fn_name}"); return false; }
 					}
 					// otherwise is value
 					else
@@ -2197,7 +2398,9 @@ namespace CSX64
 							// must be in a segment
 							if (current_seg == AsmSegment.INVALID) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to take an address outside of a segment"); return false; }
 
-							temp = new Expr() { OP = Expr.OPs.Add, Left = new Expr() { Token = SegOffsets[current_seg] }, Right = new Expr() { IntResult = line_pos_in_seg } };
+							term_leaf.OP = Expr.OPs.Add;
+							term_leaf.Left = new Expr() { Token = SegOffsets[current_seg] };
+							term_leaf.Right = new Expr() { IntResult = line_pos_in_seg };
 						}
 						// if it's the start of segment macro
 						else if (val == StartOfSegMacro)
@@ -2205,54 +2408,34 @@ namespace CSX64
 							// must be in a segment
 							if (current_seg == AsmSegment.INVALID) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Attempt to take an address outside of a segment"); return false; }
 
-							temp = new Expr() { Token = SegOrigins[current_seg] };
+							term_leaf.Token = SegOrigins[current_seg];
 						}
 						// if it's the TIMES iter id macro
 						else if (val == TimesIterIdMacro)
 						{
-							temp = new Expr() { IntResult = (UInt64)times_i };
+							term_leaf.IntResult = (UInt64)times_i;
 						}
 						// otherwise it's a normal value/symbol
 						else
 						{
 							// create the hole for it
-							temp = new Expr() { Token = val };
+							term_leaf.Token = val;
 
 							// it either needs to be evaluatable or a valid label name
-							if (!temp.Evaluatable(file.Symbols) && !IsValidName(val, ref err)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to resolve token as a valid expression or symbol name: {val}\n-> {err}"); return false; }
-						}
-					}
-
-					// handle parsed unary ops (stack provides right-to-left evaluation)
-					while (unaryOps.Count > 0)
-					{
-						char uop = unaryOps.Pop();
-						switch (uop)
-						{
-							case '+': break; // unary plus does nothing
-							case '-': temp = new Expr() { OP = Expr.OPs.Neg, Left = temp }; break;
-							case '~': temp = new Expr() { OP = Expr.OPs.BitNot, Left = temp }; break;
-							case '!': temp = new Expr() { OP = Expr.OPs.LogNot, Left = temp }; break;
-							case '*': temp = new Expr() { OP = Expr.OPs.Float, Left = temp }; break;
-							case '/': temp = new Expr() { OP = Expr.OPs.Int, Left = temp }; break;
-
-							default: throw new NotImplementedException($"unary op \'{uop}\' not implemented");
+							if (!term_leaf.Evaluatable(file.Symbols) && !IsValidName(val, ref err)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to resolve token as a valid expression or symbol name: {val}\n-> {err}"); return false; }
 						}
 					}
 
 					// -- append subtree to main tree --
 
 					// if no tree yet, use this one
-					if (expr == null) expr = temp;
+					if (expr == null) expr = term_root;
 					// otherwise append to current (guaranteed to be defined by second pass)
 					else
 					{
 						// put it in the right (guaranteed by this algorithm to be empty)
-						stack.Peek().Right = temp;
+						stack.Peek().Right = term_root;
 					}
-
-					// flag as a valid binary pair (i.e. every binary op now has 2 operands)
-					binPair = true;
 
 					// -- get binary op -- //
 
@@ -2260,7 +2443,7 @@ namespace CSX64
 					for (; end < str_end; ++end)
 					{
 						if (TryGetOp(str, end, out op, out oplen)) break; // break when we find an op
-																		  // if we hit a non-white character, there are tokens with no binary ops between them - that's the end of the expression
+						// if we hit a non-white character, there are tokens with no binary ops between them - that's the end of the expression
 						else if (!char.IsWhiteSpace(str[end])) goto stop_parsing;
 					}
 					// if we didn't find any binary ops, we're done
@@ -2302,8 +2485,6 @@ namespace CSX64
 						stack.Push(expr = new Expr() { OP = op, Left = expr });
 					}
 
-					binPair = false; // flag as invalid binary pair
-
 					// update unpaired conditionals
 					if (op == Expr.OPs.Condition) ++unpaired_conditionals;
 					else if (op == Expr.OPs.Pair) --unpaired_conditionals;
@@ -2317,8 +2498,6 @@ namespace CSX64
 
 				stop_parsing:
 
-				// handle binary pair mismatch
-				if (!binPair) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expression contained a mismatched binary op"); return false; }
 				// make sure all conditionals were matched
 				if (unpaired_conditionals != 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expression contained {unpaired_conditionals} incomplete ternary {(unpaired_conditionals == 1 ? "conditional" : "conditionals")}"); return false; }
 
