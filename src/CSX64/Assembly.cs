@@ -1370,7 +1370,7 @@ namespace CSX64
 
         private const string CurrentLineMacro = "$";
         private const string StartOfSegMacro = "$$";
-		private const string TimesIterIdMacro = "$i";
+		private const string TimesIterIdMacro = "$I";
 
         private static readonly Dictionary<Expr.OPs, int> Precedence = new Dictionary<Expr.OPs, int>()
         {
@@ -1409,22 +1409,22 @@ namespace CSX64
 
 		private static readonly Dictionary<string, Expr.OPs> FunctionOperator_to_OP = new Dictionary<string, Expr.OPs>()
 		{
-			{ "INT", Expr.OPs.Int },
-			{ "FLOAT", Expr.OPs.Float },
+			{ "$INT", Expr.OPs.Int },
+			{ "$FLOAT", Expr.OPs.Float },
 
-			{ "FLOOR", Expr.OPs.Floor },
-			{ "CEIL", Expr.OPs.Ceil },
-			{ "ROUND", Expr.OPs.Round },
-			{ "TRUNC", Expr.OPs.Trunc },
+			{ "$FLOOR", Expr.OPs.Floor },
+			{ "$CEIL", Expr.OPs.Ceil },
+			{ "$ROUND", Expr.OPs.Round },
+			{ "$TRUNC", Expr.OPs.Trunc },
 
-			{ "REPR64", Expr.OPs.Repr64 },
-			{ "REPR32", Expr.OPs.Repr32 },
+			{ "$REPR64", Expr.OPs.Repr64 },
+			{ "$REPR32", Expr.OPs.Repr32 },
 
-			{ "FLOAT64", Expr.OPs.Float64 },
-			{ "FLOAT32", Expr.OPs.Float32 },
+			{ "$FLOAT64", Expr.OPs.Float64 },
+			{ "$FLOAT32", Expr.OPs.Float32 },
 
-			{ "PREC64", Expr.OPs.Prec64 },
-			{ "PREC32", Expr.OPs.Prec32 },
+			{ "$PREC64", Expr.OPs.Prec64 },
+			{ "$PREC32", Expr.OPs.Prec32 },
 		};
 
         private static readonly Dictionary<AsmSegment, string> SegOffsets = new Dictionary<AsmSegment, string>()
@@ -2273,8 +2273,8 @@ namespace CSX64
 				Stack<Expr> stack = new Stack<Expr>(); // the stack used to manage operator precedence rules
 													   // top of stack shall be refered to as current
 
-				Expr.OPs op = Expr.OPs.None; // extracted binary op (initialized so compiler doesn't complain)
-				int oplen = 0;               // length of operator found (in characters)
+				Expr.OPs bin_op = Expr.OPs.None; // extracted binary op (initialized so compiler doesn't complain)
+				int bin_op_len = 0;              // length of operator found (in characters) (initialized so compiler doesn't complain)
 
 				int unpaired_conditionals = 0; // number of unpaired conditional ops
 
@@ -2323,21 +2323,22 @@ namespace CSX64
 
 					bool numeric = char.IsDigit(str[pos]); // flag if this is a numeric literal
 
-					// move end to next logical separator (white space or binary op)
+					// move end to next logical separator (white space, open paren, or binary op - only at depth 0)
 					for (end = pos; end < str_end; ++end)
 					{
 						// if we're not in a quote
 						if (quote < 0)
 						{
 							// account for important characters
-							if (str[end] == '(') ++depth;
-							else if (str[end] == ')') --depth; // depth control
+							if (str[end] == '(' && (depth != 0 || end == pos)) ++depth;
+							else if (str[end] == ')')
+							{
+								if (depth > 0) --depth; // if depth > 0 drop down a level
+								else break; // otherwise this mark the end of the expression
+							}
 							else if (numeric && (str[end] == 'e' || str[end] == 'E') && end + 1 < str.Length && (str[end + 1] == '+' || str[end + 1] == '-')) ++end; // make sure an exponent sign won't be parsed as binary + or - by skipping it
 							else if (str[end] == '"' || str[end] == '\'' || str[end] == '`') quote = end; // quotes mark start of a string
-							else if (depth == 0 && (char.IsWhiteSpace(str[end]) || TryGetOp(str, end, out op, out oplen))) break; // break on white space or binary op
-
-							// can't ever have negative depth
-							if (depth < 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Mismatched parenthesis in expression"); return false; }
+							else if (depth == 0 && (char.IsWhiteSpace(str[end]) || str[end] == '(' || TryGetOp(str, end, out bin_op, out bin_op_len))) break; // break on white space, open paren, or binary op - only at depth 0
 						}
 						// otherwise we're in a quote
 						else
@@ -2355,7 +2356,7 @@ namespace CSX64
 
 					// -- convert to expression tree -- //
 
-					// if sub-expression
+					// if it's a sub-expression
 					if (str[pos] == '(')
 					{
 						// parse the inside into the term leaf
@@ -2365,32 +2366,11 @@ namespace CSX64
 						// if the sub expression didn't capture the entire parenthetical region then the interior was not a (single) expression
 						if (sub_aft != end - 1) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Interior of parenthesis is not an expression"); return false; }
 					}
-					// if it's a function call (uses the fact that the above case failed)
-					else if (str[end - 1] == ')')
+					// if it's a user-level assembler token
+					else if (str[pos] == '$')
 					{
-						// get the index of the first paren (we're guaranteed one exists because there's one at the end and it already passed the paren mismatch test)
-						int first_paren;
-						for (first_paren = pos; str[first_paren] != '('; ++first_paren) ;
-
-						// the string [pos, first_paren) represents the function name - extract it (uppercase since we're case invariant)
-						string fn_name = str.Substring(pos, first_paren - pos).ToUpper();
-
-						// the interior of the parenthesis (first_paren, end - 1) represents the function argument (expression) - extract it into tem's left branch
-						if (!TryExtractExpr(str, first_paren + 1, end - 1, out term_leaf.Left, out int fn_arg_aft)) { res = new AssembleResult(AssembleError.UsageError, $"list {line}: Failed to parse function-like-operator argument: {str.Substring(first_paren+1, (end-1)-(first_paren+1))}\n-> {res.ErrorMsg}"); return false; }
-						// make sure we consumed the entire parenthesis interior
-						if (fn_arg_aft != end - 1) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Interior of function-like-operator was not an expression"); return false; }
-
-						// get the op to apply to said argument - all we need to do is set it in term_leaf - everything else is already done
-						if (!FunctionOperator_to_OP.TryGetValue(fn_name, out term_leaf.OP)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Unknown function-like-operator: {fn_name}"); return false; }
-					}
-					// otherwise is value
-					else
-					{
-						// get the value to insert
-						string val = str.Substring(pos, end - pos);
-
-						// mutate it
-						if (!MutateName(ref val)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse expression\n-> {res.ErrorMsg}"); return false; }
+						// get the value to insert (uppercase because user-level assembler tokens are case insensitive)
+						string val = str.Substring(pos, end - pos).ToUpper();
 
 						// if it's the current line macro
 						if (val == CurrentLineMacro)
@@ -2415,15 +2395,36 @@ namespace CSX64
 						{
 							term_leaf.IntResult = (UInt64)times_i;
 						}
-						// otherwise it's a normal value/symbol
-						else
+						// if it's a function-like operator
+						else if (FunctionOperator_to_OP.TryGetValue(val, out term_leaf.OP))
 						{
-							// create the hole for it
-							term_leaf.Token = val;
+							// get the index of the first paren
+							for (; end < str_end && str[end] != '('; ++end) ;
+							if (end >= str_end) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected a call expression after function-like operator"); return false; }
 
-							// it either needs to be evaluatable or a valid label name
-							if (!term_leaf.Evaluatable(file.Symbols) && !IsValidName(val, ref err)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to resolve token as a valid expression or symbol name: {val}\n-> {err}"); return false; }
+							// extract the call expression (starting just past first paren (end)) - store it into leaf's left
+							if (!TryExtractExpr(str, end + 1, str_end, out term_leaf.Left, out end)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Failed to parse call expression\n-> {res.ErrorMsg}"); return false; }
+							// make sure it ended in a closing paren - also increment end by 1 to pass it for the rest of the parsing logic
+							if (end >= str_end || str[end] != ')') { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Unterminated call expression"); return false; }
+							++end;
 						}
+						// otherwise unrecognized
+						else { res = new AssembleResult(AssembleError.UnknownOp, $"line {line}: Unrecognized special token: {val}"); return false; }
+					}
+					// otherwise it's a value
+					else
+					{
+						// get the value to insert
+						string val = str.Substring(pos, end - pos);
+
+						// mutate it
+						if (!MutateName(ref val)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse expression\n-> {res.ErrorMsg}"); return false; }
+
+						// create the hole for it
+						term_leaf.Token = val;
+
+						// it either needs to be evaluatable or a valid label name
+						if (!term_leaf.Evaluatable(file.Symbols) && !IsValidName(val, ref err)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to resolve token as a valid imm or symbol name: {val}\n-> {err}"); return false; }
 					}
 
 					// -- append subtree to main tree --
@@ -2442,7 +2443,7 @@ namespace CSX64
 					// we may have stopped token parsing on white space, so wind up to find a binary op
 					for (; end < str_end; ++end)
 					{
-						if (TryGetOp(str, end, out op, out oplen)) break; // break when we find an op
+						if (TryGetOp(str, end, out bin_op, out bin_op_len)) break; // break when we find an op
 						// if we hit a non-white character, there are tokens with no binary ops between them - that's the end of the expression
 						else if (!char.IsWhiteSpace(str[end])) goto stop_parsing;
 					}
@@ -2452,7 +2453,7 @@ namespace CSX64
 					// -- process binary op -- //
 
 					// ternary conditional has special rules
-					if (op == Expr.OPs.Pair)
+					if (bin_op == Expr.OPs.Pair)
 					{
 						// seek out nearest conditional without a pair
 						for (; stack.Peek() != null && (stack.Peek().OP != Expr.OPs.Condition || stack.Peek().Right.OP == Expr.OPs.Pair); stack.Pop()) ;
@@ -2460,37 +2461,37 @@ namespace CSX64
 						if (stack.Peek() == null) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Expression contained a ternary conditional pair without a corresponding condition"); return false; }
 					}
 					// right-to-left operators
-					else if (op == Expr.OPs.Condition)
+					else if (bin_op == Expr.OPs.Condition)
 					{
 						// wind current up to correct precedence (right-to-left evaluation, so don't skip equal precedence)
-						for (; stack.Peek() != null && Precedence[stack.Peek().OP] < Precedence[op]; stack.Pop()) ;
+						for (; stack.Peek() != null && Precedence[stack.Peek().OP] < Precedence[bin_op]; stack.Pop()) ;
 					}
 					// left-to-right operators
 					else
 					{
 						// wind current up to correct precedence (left-to-right evaluation, so also skip equal precedence)
-						for (; stack.Peek() != null && Precedence[stack.Peek().OP] <= Precedence[op]; stack.Pop()) ;
+						for (; stack.Peek() != null && Precedence[stack.Peek().OP] <= Precedence[bin_op]; stack.Pop()) ;
 					}
 
 					// if we have a valid current
 					if (stack.Peek() != null)
 					{
 						// splice in the new operator, moving current's right sub-tree to left of new node
-						stack.Push(stack.Peek().Right = new Expr() { OP = op, Left = stack.Peek().Right });
+						stack.Push(stack.Peek().Right = new Expr() { OP = bin_op, Left = stack.Peek().Right });
 					}
 					// otherwise we'll have to move the root
 					else
 					{
 						// splice in the new operator, moving entire tree to left of new node
-						stack.Push(expr = new Expr() { OP = op, Left = expr });
+						stack.Push(expr = new Expr() { OP = bin_op, Left = expr });
 					}
 
 					// update unpaired conditionals
-					if (op == Expr.OPs.Condition) ++unpaired_conditionals;
-					else if (op == Expr.OPs.Pair) --unpaired_conditionals;
+					if (bin_op == Expr.OPs.Condition) ++unpaired_conditionals;
+					else if (bin_op == Expr.OPs.Pair) --unpaired_conditionals;
 
 					// pass last delimeter and skip white space (end + oplen points just after the binary op)
-					for (pos = end + oplen; pos < str_end && char.IsWhiteSpace(str[pos]); ++pos) ;
+					for (pos = end + bin_op_len; pos < str_end && char.IsWhiteSpace(str[pos]); ++pos) ;
 
 					// if pos is now out of bounds, there was a binary op with no second operand
 					if (pos >= str_end) { res = new AssembleResult(AssembleError.UsageError, $"Binary op encountered without a second operand"); return false; }
