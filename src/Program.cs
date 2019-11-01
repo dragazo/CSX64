@@ -129,6 +129,7 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 			Assembly.DefineSymbol("err_fpuaccessviolation", (UInt64)ErrorCode.FPUAccessViolation);
 			Assembly.DefineSymbol("err_alignmentviolation", (UInt64)ErrorCode.AlignmentViolation);
 			Assembly.DefineSymbol("err_unknownop", (UInt64)ErrorCode.UnknownOp);
+			Assembly.DefineSymbol("err_filepermissions", (UInt64)ErrorCode.FilePermissions);
 
 			// -- file open modes -- //
 
@@ -490,7 +491,7 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 				// if there was an error
 				if (computer.Error != ErrorCode.None)
 				{
-					Console.Error.WriteLine($"\n\nError Encountered: {computer.Error}");
+					Console.Error.WriteLine($"\n\nError Encountered: ({computer.Error}) {ErrorCodeToString.Get(computer.Error)}");
 					return ExecErrorReturnCode;
 				}
 				// otherwise no error
@@ -537,7 +538,7 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 					if (computer.Error != ErrorCode.None)
 					{
 						// print error message
-						Console.Error.WriteLine($"\n\nError Encountered: {computer.Error}");
+						Console.Error.WriteLine($"\n\nError Encountered: ({computer.Error}) {ErrorCodeToString.Get(computer.Error)}");
 						// return execution error code
 						return ExecErrorReturnCode;
 					}

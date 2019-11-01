@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -18,6 +19,36 @@ namespace CSX64
         FPUStackOverflow, FPUStackUnderflow, FPUError, FPUAccessViolation,
         AlignmentViolation, UnknownOp, FilePermissions,
     }
+	public class ErrorCodeToString
+	{
+		public static readonly Dictionary<ErrorCode, string> raw = new Dictionary<ErrorCode, string>()
+		{
+			{ErrorCode.None, ""},
+			{ErrorCode.OutOfBounds, "Out of Bounds"},
+			{ErrorCode.UnhandledSyscall, "Unhandled Syscall"},
+			{ErrorCode.UndefinedBehavior, "Undefined Behavior"},
+			{ErrorCode.ArithmeticError, "Arithmetic Error"},
+			{ErrorCode.Abort, "Abort"},
+			{ErrorCode.IOFailure, "IO Failure"},
+			{ErrorCode.FSDisabled, "FS Disabled"},
+			{ErrorCode.AccessViolation, "Access Violation"},
+			{ErrorCode.InsufficientFDs, "Insufficient FDs"},
+			{ErrorCode.FDNotInUse, "FD not in use"},
+			{ErrorCode.NotImplemented, "Not Implemented"},
+			{ErrorCode.StackOverflow, "Stack Overflow"},
+			{ErrorCode.FPUStackOverflow, "FPU Stack Overflow"},
+			{ErrorCode.FPUStackUnderflow, "FPU Stack Underflow"},
+			{ErrorCode.FPUError, "FPU Error"},
+			{ErrorCode.FPUAccessViolation, "FPU Access Violation"},
+			{ErrorCode.AlignmentViolation, "Alignment Violation"},
+			{ErrorCode.UnknownOp, "Unknown Operation"},
+			{ErrorCode.FilePermissions, "File Permissions Error"},
+		};
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static string Get(ErrorCode err) { return raw[err]; }
+	}
+
     public enum OPCode
     {
         // x86 instructions

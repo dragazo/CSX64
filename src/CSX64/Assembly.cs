@@ -57,6 +57,203 @@ namespace CSX64
         }
     }
 
+	/// <summary>
+	/// represents a collection of (shared) binary literals.
+	/// they are stored in the most compact way possible with maximum sharing.
+	/// </summary>
+	public class BinaryLiteralCollection
+	{
+		internal class BinaryLiteral
+		{
+			internal int top_level_index; // index in top_level_literals
+			internal int start;  // starting index of the binary value in the top level literal
+			internal int length; // length of the binary value (in bytes)
+		}
+
+		internal List<BinaryLiteral> literals = new List<BinaryLiteral>();
+		internal List<byte[]> top_level_literals = new List<byte[]>();
+
+		private const int npos = -1;
+
+		/// <summary>
+		/// returns the index in super where the entire contents of sub can be found.
+		/// if such an index is not found, returns npos
+		/// </summary>
+		/// <param name="super"></param>
+		/// <param name="sub"></param>
+		/// <returns></returns>
+		private static int find_subregion(byte[] super, byte[] sub)
+		{
+			// firstly, if super is smaller than sub, it's definitely not going to work
+			if (super.Length < sub.Length) return npos;
+
+			// for each possible starting position for this to work
+			for (int start = super.Length - sub.Length; start != npos; --start)
+			{
+				// if this subregion contains the same data, return the start position (success)
+				bool good = true;
+				for (int i = 0; i < sub.Length; ++i) if (super[i] != sub[i]) { good = false; break; }
+				if (good) return start;
+			}
+
+			// if we get here it wasn't found
+			return npos;
+		}
+
+		/// <summary>
+		/// inserts info into literals (if it doesn't already exist) and returns its index in the literals array
+		/// </summary>
+		/// <param name="info">info for the binary literal to insert</param>
+		internal int _insert(BinaryLiteral info)
+		{
+			// if this literal already existed verbatim, we don't need a duplicate entry for it in literals
+			for (int i = 0; i < literals.Count; ++i) if (literals[i] == info) return i;
+
+			// otherwise we need to insert it as a new literal
+			literals.Add(info);
+			return literals.Count - 1;
+		}
+
+		/// <summary>
+		/// adds a new binary literal to the collection - returns the index of the literal added
+		/// </summary>
+		/// <param name="value">the value to add</param>
+		public int Add(byte[] value)
+		{
+			// look for any top level literal that value is a subregion of
+			for (int i = 0; i < top_level_literals.Count; ++i)
+			{
+				// if we found one, we can just share it
+				int start = find_subregion(top_level_literals[i], value);
+				if (start != npos) return _insert(new BinaryLiteral() { top_level_index = i, start = start, length = value.Length });
+			}
+
+			// if that didn't work, look for any top level literal that is a subregion of value (i.e. the other way)
+			for (int i = 0; i < top_level_literals.Count; ++i)
+			{
+				// if we found one, we can replace this top level literal
+				int start = find_subregion(value, top_level_literals[i]);
+				if (start != npos)
+				{
+					// replace the top level literal with value and update the starting position of any literals that referenced the top level literal we just replaced
+					top_level_literals[i] = value;
+					foreach (var lit in literals) if (lit.top_level_index == i) lit.start += start;
+
+					// now we need to look through the top level literals again and see if any of them are contained in value (the new top level literal)
+					for (int j = 0; j < top_level_literals.Count;)
+					{
+						if (j != i)
+						{
+							// if top level literal j is contained in value, we can remove j
+							start = find_subregion(top_level_literals[i], top_level_literals[j]);
+							if (start != npos)
+							{
+								// remove j from the top level literal list via the move pop idiom
+								top_level_literals[j] = top_level_literals[top_level_literals.Count - 1];
+								top_level_literals.RemoveAt(top_level_literals.Count - 1);
+
+								// if i was the one we moved, repoint i to j (its new home)
+								if (i == top_level_literals.Count) i = j;
+
+								// update all the literals to reflect the change
+								foreach (var lit in literals)
+								{
+									// if it referenced the deleted top level literal, repoint it to value and apply the start offset
+									if (lit.top_level_index == j)
+									{
+										lit.top_level_index = i;
+										lit.start += start;
+									}
+									// if it referenced the moved top level literal (the one that we used for move pop idiom), repoint it to j
+									else if (lit.top_level_index == top_level_literals.Count)
+									{
+										lit.top_level_index = j;
+									}
+								}
+							}
+							else ++j;
+						}
+						else ++j;
+					}
+
+					// add the literal
+					return _insert(new BinaryLiteral() { top_level_index = i, start = 0, length = top_level_literals[i].Length });
+				}
+			}
+
+			// if that also didn't work then we just have to add value as a new top level literal
+			top_level_literals.Add(value);
+			return _insert(new BinaryLiteral() { top_level_index = top_level_literals.Count - 1, start = 0, length = top_level_literals[top_level_literals.Count - 1].Length });
+		}
+
+		/// <summary>
+		/// erases the contents of the collection
+		/// </summary>
+		public void Clear()
+		{
+			literals.Clear();
+			top_level_literals.Clear();
+		}
+
+		/// <summary>
+		/// writes the contents of this binary literal collection to the stream.
+		/// </summary>
+		public void WriteTo(BinaryWriter writer)
+		{
+			// write number of top level literals
+			writer.Write((UInt64)top_level_literals.Count);
+			// then write each of them (length-prefixed)
+			foreach (var i in top_level_literals)
+			{
+				writer.Write((UInt64)i.Length);
+				writer.Write(i);
+			}
+
+			// write number of literals
+			writer.Write((UInt64)literals.Count);
+			// then write each of them
+			foreach (var i in literals)
+			{
+				writer.Write((UInt64)i.top_level_index);
+				writer.Write((UInt64)i.start);
+				writer.Write((UInt64)i.length);
+			}
+		}
+		/// <summary>
+		/// discards the current contents of this collection and reads the contents in from the stream.
+		/// the contents must have been written via <see cref="WriteTo(BinaryWriter)"/>.
+		/// </summary>
+		public void ReadFrom(BinaryReader reader)
+		{
+			// discard current contents
+			Clear();
+
+			UInt64 temp, temp2;
+
+			// read top level literals
+			temp = reader.ReadUInt64();
+			top_level_literals.Capacity = (int)temp;
+			for (UInt64 i = 0; i < temp; ++i)
+			{
+				temp2 = reader.ReadUInt64();
+				byte[] v = new byte[temp2];
+				if (reader.Read(v, 0, v.Length) != v.Length) throw new FormatException("Object file had invalid string literal information");
+				top_level_literals.Add(v);
+			}
+
+			// read literals
+			temp = reader.ReadUInt64();
+			literals.Capacity = (int)temp;
+			for (UInt64 j = 0; j < temp; ++j)
+			{
+				var b = new BinaryLiteral();
+				b.top_level_index = (int)reader.ReadUInt64();
+				b.start = (int)reader.ReadUInt64();
+				b.length = (int)reader.ReadUInt64();
+			}
+		}
+	}
+
     /// <summary>
     /// Represents an assembled object file used to create an executable
     /// </summary>
@@ -123,6 +320,11 @@ namespace CSX64
         /// </summary>
         internal UInt32 BssLen = 0;
 
+		/// <summary>
+		/// the collection of binary literals defined in the file
+		/// </summary>
+		internal BinaryLiteralCollection Literals;
+
 		// -- state -- //
 
 		/// <summary>
@@ -159,6 +361,8 @@ namespace CSX64
 			Rodata.Clear();
 			Data.Clear();
 			BssLen = 0;
+
+			Literals.Clear();
 		}
 
 		// ---------------------------
@@ -235,6 +439,10 @@ namespace CSX64
 				writer.Write(Data.ToArray()); // ToArray() costs an O(n) copy, but still beats an equal number of function calls
 
 				writer.Write(BssLen);
+
+				// -- write binary literals -- //
+
+				Literals.WriteTo(writer);
 			}
         }
 		/// <summary>
@@ -340,6 +548,10 @@ namespace CSX64
 
 				// read the length of bss segment
 				BssLen = file.ReadUInt32();
+
+				// -- read binary literals -- //
+
+				Literals.ReadFrom(file);
 
 				// validate the object
 				IsClean = true;
@@ -1370,6 +1582,8 @@ namespace CSX64
 
         private const string CurrentLineMacro = "$";
         private const string StartOfSegMacro = "$$";
+		private const string StringLiteralMacro = "$STR";
+		private const string BinaryLiteralMacro = "$BIN";
 		private const string TimesIterIdMacro = "$I";
 
         private static readonly Dictionary<Expr.OPs, int> Precedence = new Dictionary<Expr.OPs, int>()
@@ -1441,6 +1655,7 @@ namespace CSX64
             [AsmSegment.DATA] = "#D",
             [AsmSegment.BSS] = "#B",
         };
+		private static readonly string BinaryLiteralSymbolPrefix = "#L";
 
         private static readonly HashSet<string> PtrdiffIDs = new HashSet<string>()
         {
@@ -1951,58 +2166,116 @@ namespace CSX64
 				return true;
 			}
 
+			public bool TryFindMatchingParen(string str, int str_begin, int str_end, out int match)
+			{
+				match = 0; // initialize out param so compiler won't complain
+
+				// assert usage conditions
+				if (str_begin >= str_end) throw new ArgumentException("TryFindMatchingParen(): string region cannot be empty");
+				if (str[str_begin] != '(') throw new ArgumentException("TryFindMatchingParen(): str_begin does not point to an open paren");
+
+				int pos = str_begin + 1; // skip the open paren since we already know about it
+				int quote = -1; // initially not in a quote
+				int depth = 1; // initially 1 because we're skipping the open paren
+
+				// wind through all the characters in the string
+				for (; pos<str_end; ++pos)
+				{
+					if (quote == -1)
+					{
+						if (str[pos] == '(') ++depth;
+						else if (str[pos] == ')')
+						{
+							// if we hit depth zero, this is the matching paren we were looking for
+							if (--depth == 0) { match = pos; return true; }
+				}
+						else if (str[pos] == '"' || str[pos] == '\'' || str[pos] == '`') quote = pos;
+					}
+					else if (str[pos] == str[quote]) quote = -1;
+				}
+
+				// if we get here we failed to find a matching closing paren
+				res = new AssembleResult(AssembleError.FormatError, "Failed to find a matching closing paren");
+				return false;
+			}
+
+			public bool TrySplitOnCommas(List<string> vec, string str, int str_begin, int str_end)
+			{
+				int pos, end = str_begin - 1; // -1 cancels out inital +1 inside loop for comma skip
+				int depth = 0; // parenthetical depth
+				int quote;
+
+				// parse the rest of the line as comma-separated tokens
+				while (true)
+				{
+					// skip leading white space (+1 skips the preceding comma)
+					for (pos = end + 1; pos<str_end && char.IsWhiteSpace(str[pos]); ++pos);
+					// when pos reaches end of token, we're done parsing
+					if (pos >= str_end) break;
+
+					// find the next terminator (comma-separated)
+					for (end = pos, quote = -1; end<str_end; ++end)
+					{
+						if (quote == -1)
+						{
+							if (str[end] == '(') ++depth;
+							else if (str[end] == ')')
+							{
+								// hitting negative depth is totally not allowed ever
+								if (depth-- == 0) { res = new AssembleResult(AssembleError.FormatError, "Unmatched parens in argument"); return false; }
+							}
+							else if (str[end] == '"' || str[end] == '\'' || str[end] == '`') quote = end;
+							else if (depth == 0 && str[end] == ',') break; // comma at depth 0 marks end of token
+						}
+						else if (str[end] == str[quote]) quote = -1;
+					}
+					// make sure we closed any quotations
+					if (quote != -1) { res = new AssembleResult(AssembleError.FormatError, "Unmatched quotation encountered in argument list"); return false; }
+					// make sure we closed any parens
+					if (depth != 0) { res = new AssembleResult(AssembleError.FormatError, "Unmatched parens in argument"); return false; }
+
+					// get the arg (remove leading/trailing white space - some logic requires them not be there e.g. address parser)
+					string arg = str.Substring(pos, end - pos).Trim();
+					// make sure arg isn't empty
+					if (arg.Length == 0) { res = new AssembleResult(AssembleError.FormatError, "Empty argument encountered"); return false; }
+					// add this token
+					vec.Add(arg);
+				}
+
+				// successfully parsed line
+				return true;
+			}
+
 			/// <summary>
 			/// Splits the raw line into its separate components. The raw line should not have a comment section.
 			/// </summary>
 			/// <param name="rawline">the raw line to parse</param>
 			public bool SplitLine(string rawline)
 			{
-				// (label:) (op (arg, arg, ...))
+				// (op (arg, arg, ...))
 
 				int pos = 0, end; // position in line parsing
-				int quote;        // index of openning quote in args
 
 				List<string> args = new List<string>();
 
 				// -- parse op -- //
 
 				// get the first white space delimited token
-				for (; pos < rawline.Length && char.IsWhiteSpace(rawline[pos]); ++pos) ;
-				for (end = pos; end < rawline.Length && !char.IsWhiteSpace(rawline[end]); ++end) ;
+				for (; pos < rawline.Length && char.IsWhiteSpace(rawline[pos]) ; ++pos);
+				for (end = pos; end < rawline.Length && !char.IsWhiteSpace(rawline[end]) ; ++end);
 
 				// if we got something, record as op, otherwise is empty string
-				op = pos < rawline.Length ? rawline.Substring(pos, end - pos) : string.Empty;
+				if (pos < rawline.Length) op = rawline.Substring(pos, end - pos);
+				else op = string.Empty;
 
 				// -- parse args -- //
 
-				// parse the rest of the line as comma-separated tokens
-				while (true)
-				{
-					// skip leading white space
-					for (pos = end + 1; pos < rawline.Length && char.IsWhiteSpace(rawline[pos]); ++pos) ;
-					// when pos reaches end of token, we're done parsing
-					if (pos >= rawline.Length) break;
+				// split the rest of the line as comma separated values and store in args
+				if (!TrySplitOnCommas(args, rawline, end, rawline.Length)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: {res.ErrorMsg}"); return false; }
 
-					// find the next terminator (comma-separated)
-					for (end = pos, quote = -1; end < rawline.Length; ++end)
-					{
-						if (rawline[end] == '"' || rawline[end] == '\'' || rawline[end] == '`') quote = quote < 0 ? end : rawline[end] == rawline[quote] ? -1 : quote;
-						else if (quote < 0 && rawline[end] == ',') break; // comma marks end of token
-					}
-					// make sure we closed any quotations
-					if (quote >= 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Unmatched quotation encountered in argument list"); return false; }
-
-					// get the arg (remove leading/trailing white space - some logic requires them not be there e.g. address parser)
-					string arg = rawline.Substring(pos, end - pos).Trim();
-					// make sure arg isn't empty
-					if (arg.Length == 0) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Empty operation argument encountered"); return false; }
-					// add this token
-					args.Add(arg);
-				}
-				// output tokens to assemble args
+				// discard args from last line
 				this.args = args.ToArray();
 
-				// successfully parsed line
 				return true;
 			}
 
@@ -2394,6 +2667,64 @@ namespace CSX64
 						else if (val == TimesIterIdMacro)
 						{
 							term_leaf.IntResult = (UInt64)times_i;
+						}
+						// if it's the string/binary literal macro
+						else if (val == StringLiteralMacro || val == BinaryLiteralMacro)
+						{
+							// get the index of the first paren
+							for (; end < str_end && str[end] != '('; ++end) ;
+							if (end >= str_end) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected a call expression after function-like operator"); return false; }
+
+							// find the matching (closing) paren and store to end
+							int _start = end;
+							if (!TryFindMatchingParen(str, end, str_end, out end)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse binary literal expression\n-> {res.ErrorMsg}"); return false; }
+							++end; // bump up end to be 1 past the closing paren (for logic outside of the loop)
+
+							// parse the parenthesis interior into an array of comma-separated arguments
+							List<string> bin_args = new List<string>();
+							if (!TrySplitOnCommas(bin_args, str, _start + 1, end - 1)) { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse binary literal expression\n-> {res.ErrorMsg}"); return false; }
+
+							// construct the binary literal
+							List<byte> literal_value = new List<byte>();
+							foreach (string arg in bin_args)
+							{
+								// if it's a string
+								if (TryExtractStringChars(arg, out string _str, ref err))
+								{
+									// dump into the literal (one byte each)
+									literal_value.Capacity = literal_value.Count + _str.Length;
+									foreach (char _ch in _str) literal_value.Add((byte)_ch);
+								}
+								// if it's a value (imm)
+								else if (TryParseImm(arg, out Expr _expr, out UInt64 _sizecode, out bool _explicit_size, out bool _strict))
+								{
+									// we only allow bytes here, so disallow any kind of explicit size control flags
+									if (_explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A size directive in this context is not allowed"); return false; }
+									if (_strict) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A STRICT specifier in this context is not allowed"); return false; }
+
+									// additionally, expressions used in binary/string literals are critical expressions
+									if (!_expr.Evaluate(file.Symbols, out UInt64 _val, out bool _floating, ref err)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expressions to binary literals are critical expressions\n-> {err}"); return false; }
+
+									// bounds check it since it's a compile time constant
+									if (_val > 0xff) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: (byte) expression to binary literal exceeded 255"); return false; }
+
+									literal_value.Add((byte)_val);
+								}
+								// otherwise we failed to parse it
+								else { res = new AssembleResult(AssembleError.FormatError, $"line {line}: Failed to parse operand as a string or imm: {arg}\n-> {res.ErrorMsg}"); return false; }
+							}
+
+							// we handled both string/binary cases here - if it was actually a string literal, append a terminator
+							if (val == StringLiteralMacro) literal_value.Add(0);
+
+							// binary literal is not allowed to be empty
+							if (literal_value.Count == 0) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Attempt to provision empty binary literal"); return false; }
+
+							// add resulting (non-empty) binary literal to the binary literals collection
+							int literal_index = file.Literals.Add(literal_value.ToArray());
+
+							// bind a reference to the binary literal in the expression node
+							term_leaf.Token = $"{BinaryLiteralSymbolPrefix}{literal_index:x}";
 						}
 						// if it's a function-like operator
 						else if (FunctionOperator_to_OP.TryGetValue(val, out term_leaf.OP))
@@ -3032,7 +3363,8 @@ namespace CSX64
 					// if it's already been evaluated or we know about it somehow, we're good
 					if (expr.IsEvaluated || file.Symbols.ContainsKey(expr.Token) || file.ExternalSymbols.Contains(expr.Token)
 						|| SegOffsets.ContainsValue(expr.Token) || SegOrigins.ContainsValue(expr.Token)
-						|| VerifyLegalExpressionIgnores.Contains(expr.Token))
+						|| VerifyLegalExpressionIgnores.Contains(expr.Token)
+						|| expr.Token.StartsWith(BinaryLiteralSymbolPrefix))
 						return true;
 					// otherwise we don't know what it is
 					else { res = new AssembleResult(AssembleError.UnknownSymbol, $"Unknown symbol: {expr.Token}"); return false; }
@@ -5433,7 +5765,7 @@ namespace CSX64
 							case "JNO": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 7, 14, 3)) return args.res; break;
 							case "JC": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 8, 14, 3)) return args.res; break;
 							case "JNC": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 9, 14, 3)) return args.res; break;
-
+								
 							case "JB": case "JNAE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 10, 14, 3)) return args.res; break;
 							case "JBE": case "JNA": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 11, 14, 3)) return args.res; break;
 							case "JA": case "JNBE": if (!args.TryProcessIMMRM(OPCode.Jcc, true, 12, 14, 3)) return args.res; break;
@@ -6225,6 +6557,12 @@ namespace CSX64
             // a table for relating included object files to their beginning positions in the resulting binary (text, rodata, data, bss) tuples
             var included = new Dictionary<ObjectFile, Tuple<UInt64, UInt64, UInt64, UInt64>>();
 
+			BinaryLiteralCollection total_literals = new BinaryLiteralCollection(); // destination to merge all binary literals throughout all included object files
+			Dictionary<ObjectFile, List<UInt64>> obj_to_total_literals_locations = new Dictionary<ObjectFile, List<UInt64>>(); // maps from an included object file to its literal index map in total_literals
+
+			UInt64 literals_size; // the total size of all (top level) literals merged together
+			UInt64[] rodata_top_level_literal_offsets; // offsets of each top level literal in the rodata segment
+
             // -- populate things -- //
 
             // populate global_to_obj with ALL global symbols
@@ -6307,7 +6645,81 @@ namespace CSX64
                     // otherwise it wasn't defined
                     else return new LinkResult(LinkError.MissingSymbol, $"No global symbol found to match external symbol \"{external}\"");
                 }
-            }
+
+				// merge top level binary literals for this include file and fix their aliasing literal ranges
+				KeyValuePair<int, int>[] literal_fix_map = new KeyValuePair<int, int>[obj.Literals.top_level_literals.Count];
+				for (int i = 0; i < obj.Literals.top_level_literals.Count; ++i)
+				{
+					// add the top level literal and get its literal index
+					int literal_pos = total_literals.Add(obj.Literals.top_level_literals[i]);
+					// extract all the info we need to adjust and merge the literal ranges for this object file
+					int referenced_top_level_index = total_literals.literals[literal_pos].top_level_index;
+					int start = total_literals.literals[literal_pos].start;
+
+					// add a fix entry for this top level literal
+					literal_fix_map[i] = new KeyValuePair<int, int>(referenced_top_level_index, start);
+				}
+				// update all the literals for this file
+				foreach (var lit in obj.Literals.literals)
+				{
+					var fix_info = literal_fix_map[lit.top_level_index];
+
+					lit.top_level_index = fix_info.Key;
+					lit.start += fix_info.Value;
+				}
+
+				// insert a new literal locations map (pre-sized) and alias it
+				List<UInt64> literal_locations = new List<UInt64>(obj.Literals.literals.Count);
+				obj_to_total_literals_locations.Add(obj, literal_locations);
+
+				// merge the (fixed) aliasing literal ranges
+				for (int i = 0; i < obj.Literals.literals.Count; ++i)
+				{
+					// insert the aliasing literal range (aliased top level already added and range info fixed)
+					// store the insertion index in the literal locations map for this object file
+					literal_locations[i] = (UInt64)total_literals._insert(obj.Literals.literals[i]);
+				}
+
+				// this object file's literals collection is now invalid - just clear it all out
+				obj.Literals.literals.Clear();
+				obj.Literals.top_level_literals.Clear();
+			}
+
+			// after merging, but before alignment, we need to handle all the provisioned binary literals.
+			// we'll just dump them all in the rodata segment (they're required to be read-only from a user perspective esp since they can alias)
+			literals_size = 0;
+			rodata_top_level_literal_offsets = new UInt64[total_literals.top_level_literals.Count];
+			for (int i = 0; i < total_literals.top_level_literals.Count; ++i)
+			{
+				// for each top level literal, compute its (future) offset in the rodata segment and while we're at it calculate the total size of all top level literals
+				rodata_top_level_literal_offsets[i] = (UInt64)rodata.Count + literals_size;
+				literals_size += (UInt64)total_literals.top_level_literals[i].Length;
+			}
+
+			// now that we know where all the literals should go, resize the rodata segment and copy them to their appropriate places
+			rodata.Capacity = rodata.Count + (int)literals_size;
+			for (int i = 0; i < total_literals.top_level_literals.Count; ++i)
+			{
+				rodata.AddRange(total_literals.top_level_literals[i]);
+			}
+
+			// and now go ahead and resolve all the missing binary literal symbols with relative address from the rodata origin
+			foreach (var entry in obj_to_total_literals_locations)
+		{
+				for (int i = 0; i < entry.Value.Count; ++i)
+				{
+					// alias the literal range in total_literals
+					BinaryLiteralCollection.BinaryLiteral lit = total_literals.literals[(int)entry.Value[i]];
+
+					// construct the expr to alias the correct location in the rodata segment
+					Expr expr = new Expr() { OP = Expr.OPs.Add,
+						Left = new Expr() { Token = SegOrigins[AsmSegment.RODATA] },
+						Right = new Expr() {IntResult= rodata_top_level_literal_offsets[lit.top_level_index] + (UInt64)lit.start } };
+
+					// inject the symbol definition into the object file's symbol table
+					entry.Key.Symbols.Add($"{BinaryLiteralSymbolPrefix}{i:x}", expr);
+				}
+			}
 
             // account for segment alignments
             text.Pad(AlignOffset((UInt64)(text.Count), rodataalign));
