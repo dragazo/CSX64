@@ -4191,35 +4191,27 @@ namespace CSX64
 
             private bool __TryProcessMOVxX_settings_byte(bool sign, UInt64 dest, UInt64 dest_sizecode, UInt64 src_sizecode)
             {
-                // 16, *
-                if (dest_sizecode == 1)
-                {
-                    // 16, 8
-                    if (src_sizecode == 0)
-                    {
-                        if (!TryAppendVal(1, (dest << 4) | (sign ? 1 : 0ul))) return false;
-                    }
-                    else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size combination is not supported"); return false; }
-                }
-                // 32/64, *
-                else if (dest_sizecode == 2 || dest_sizecode == 3)
-                {
-                    // 32/64, 8
-                    if (src_sizecode == 0)
-                    {
-                        if (!TryAppendVal(1, (dest << 4) | (dest_sizecode == 2 ? sign ? 4 : 2ul : sign ? 8 : 6ul))) return false;
-                    }
-                    // 32/64, 16
-                    else if (src_sizecode == 1)
-                    {
-                        if (!TryAppendVal(1, (dest << 4) | (dest_sizecode == 2 ? sign ? 5 : 3ul : sign ? 9 : 7ul))) return false;
-                    }
-                    else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size combination is not supported"); return false; }
-                }
-                else { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size combination is not supported"); return false; }
+				// switch through mode (using 4 bits for sizecodes in case either is a nonstandard size e.g. xmmword memory)
+				UInt64 mode;
+				switch ((sign ? 0x100 : 0ul) | (dest_sizecode << 4) | src_sizecode)
+				{
+					case 0x010: mode = 0; break;
+					case 0x110: mode = 1; break;
+					case 0x020: mode = 2; break;
+					case 0x021: mode = 3; break;
+					case 0x120: mode = 4; break;
+					case 0x121: mode = 5; break;
+					case 0x030: mode = 6; break;
+					case 0x031: mode = 7; break;
+					case 0x130: mode = 8; break;
+					case 0x131: mode = 9; break;
+					case 0x132: mode = 10; break;
 
-                return true;
-            }
+					default: res = new AssembleResult(AssembleError.UsageError, $"line {line}: Specified size combination is not supported"); return false;
+				}
+
+				return TryAppendByte((byte)((dest << 4) | mode));
+			}
             public bool TryProcessMOVxX(OPCode op, bool sign)
             {
                 if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 2 operands"); return false; }

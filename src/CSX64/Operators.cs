@@ -1684,22 +1684,23 @@ namespace CSX64
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
-        /*
+		/*
         [4: dest][4: mode]   [1: mem][1: sh][2:][4: src]
-            mode = 0: 16 <- 8  Zero
-            mode = 1: 16 <- 8  Sign
-            mode = 2: 32 <- 8  Zero
-            mode = 3: 32 <- 16 Zero
-            mode = 4: 32 <- 8  Sign
-            mode = 5: 32 <- 16 Sign
-            mode = 6: 64 <- 8  Zero
-            mode = 7: 64 <- 16 Zero
-            mode = 8: 64 <- 8  Sign
-            mode = 9: 64 <- 16 Sign
+            mode = 0:  16 <- 8  Zero
+			mode = 1:  16 <- 8  Sign
+			mode = 2:  32 <- 8  Zero
+			mode = 3:  32 <- 16 Zero
+			mode = 4:  32 <- 8  Sign
+			mode = 5:  32 <- 16 Sign
+			mode = 6:  64 <- 8  Zero
+			mode = 7:  64 <- 16 Zero
+			mode = 8:  64 <- 8  Sign
+			mode = 9:  64 <- 16 Sign
+			mode = 10: 64 <- 32 Sign
             else UND
             (sh marks that source is (ABCD)H)
         */
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ProcessMOVxX()
         {
             if (!GetMemAdv(1, out UInt64 s1) || !GetMemAdv(1, out UInt64 s2)) return false;
@@ -1725,9 +1726,12 @@ namespace CSX64
                         }
                         else src = CPURegisters[s2 & 15].x8;
                         break;
+
                     case 3: case 5: case 7: case 9: src = CPURegisters[s2 & 15].x16; break;
 
-                    default: Terminate(ErrorCode.UndefinedBehavior); return false;
+					case 10: src = src = CPURegisters[s2 & 15].x32; break;
+
+					default: Terminate(ErrorCode.UndefinedBehavior); return false;
                 }
             }
             // otherwise is memory value
@@ -1738,8 +1742,9 @@ namespace CSX64
                 {
                     case 0: case 1: case 2: case 4: case 6: case 8: if (!GetMemRaw(src, 1, out src)) return false; break;
                     case 3: case 5: case 7: case 9: if (!GetMemRaw(src, 2, out src)) return false; break;
+					case 10: if (!GetMemRaw(src, 4, out src)) return false; break;
 
-                    default: Terminate(ErrorCode.UndefinedBehavior); return false;
+					default: Terminate(ErrorCode.UndefinedBehavior); return false;
                 }
             }
 
@@ -1756,7 +1761,8 @@ namespace CSX64
                 case 6: case 7: CPURegisters[s1 >> 4].x64 = src; break;
                 case 8: CPURegisters[s1 >> 4].x64 = SignExtend(src, 0); break;
                 case 9: CPURegisters[s1 >> 4].x64 = SignExtend(src, 1); break;
-            }
+				case 10: CPURegisters[s1 >> 4].x64 = SignExtend(src, 2); break;
+			}
 
             return true;
         }
