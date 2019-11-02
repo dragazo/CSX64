@@ -75,6 +75,8 @@ Assemble, link, or execute CSX64 files.
       --rootdir <dir>       specify an explicit rootdir (contains _start.o and stdlib/*.o)
 
       --fs                  sets the file system flag during execution
+  -u, --unsafe              sets all unsafe flags during execution (those in this section)
+
   -t, --time                after execution display elapsed time
       --end                 remaining args are not options (added to arg list)
 
@@ -670,6 +672,7 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 		static bool _fs(cmdln_pack p) { p.fsf = true; return true; }
 		static bool _time(cmdln_pack p) { p.time = true; return true; }
 		static bool _end(cmdln_pack p) { p.accepting_options = false; return true; }
+		static bool _unsafe(cmdln_pack p) { p.fsf = true; return true; }
 
 		private delegate bool cmdln_pack_handler(cmdln_pack p);
 
@@ -688,6 +691,8 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 			["--rootdir"] = _rootdir,
 
 			["--fs"] = _fs,
+			["--unsafe"] = _unsafe,
+
 			["--time"] = _time,
 			["--end"] = _end,
 		};
@@ -704,6 +709,8 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 			['S'] = _multiscript,
 
 			['o'] = _out,
+
+			['u'] = _unsafe,
 
 			['t'] = _time,
 		};
