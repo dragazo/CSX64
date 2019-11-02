@@ -3605,6 +3605,9 @@ namespace CSX64
 			{
 				if (args.Length != 1) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 1 operand"); return false; }
 
+				// if a label is on the same line as a segment directive, it's ambiguous what segment it should belong to - just disallow this altogether
+				if (label_def != null) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Label has ambiguous segment ownership"); return false; }
+
 				// get the segment we're going to
 				switch (args[0].ToUpper())
 				{

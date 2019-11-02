@@ -78,7 +78,7 @@ Assemble, link, or execute CSX64 files.
   -u, --unsafe              sets all unsafe flags during execution (those in this section)
 
   -t, --time                after execution display elapsed time
-      --end                 remaining args are not options (added to arg list)
+      --                    remaining args are not csx64 options (added to arg list)
 
 Report bugs to: https://github.com/dragazo/CSX64/issues
 ";
@@ -694,13 +694,11 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 			["--unsafe"] = _unsafe,
 
 			["--time"] = _time,
-			["--end"] = _end,
+			["--"] = _end,
 		};
 		// maps (short) options to their parsing handlers
 		static readonly Dictionary<char, cmdln_pack_handler> short_names = new Dictionary<char, cmdln_pack_handler>()
 		{
-			['-'] = p => true, // no-op separator
-
 			['h'] = _help,
 
 			['a'] = _assemble,
