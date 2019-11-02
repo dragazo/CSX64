@@ -534,7 +534,7 @@ namespace CSX64
         private bool ProcessSETcc()
         {
             if (!GetMemAdv(1, out UInt64 ext)) return false;
-            if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 _dest, false, 0)) return false;
+            if (!FetchUnaryOpFormat(out UInt64 s, out UInt64 m, out UInt64 _dest, false)) return false;
 
             // get the flag
             bool flag;

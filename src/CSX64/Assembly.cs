@@ -5699,26 +5699,26 @@ namespace CSX64
 							case "CLAC": if (!args.TryProcessNoArgOp(OPCode.FlagManip, true, 7)) return args.res; break;
 							case "CMC": if (!args.TryProcessNoArgOp(OPCode.FlagManip, true, 8)) return args.res; break;
 
-							case "SETZ": case "SETE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 0, 1)) return args.res; break;
-							case "SETNZ": case "SETNE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 1, 1)) return args.res; break;
-							case "SETS": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 2, 1)) return args.res; break;
-							case "SETNS": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 3, 1)) return args.res; break;
-							case "SETP": case "SETPE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 4, 1)) return args.res; break;
-							case "SETNP": case "SETPO": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 5, 1)) return args.res; break;
-							case "SETO": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 6, 1)) return args.res; break;
-							case "SETNO": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 7, 1)) return args.res; break;
-							case "SETC": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 8, 1)) return args.res; break;
-							case "SETNC": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 9, 1)) return args.res; break;
+							case "SETZ": case "SETE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 0)) return args.res; break;
+							case "SETNZ": case "SETNE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 1)) return args.res; break;
+							case "SETS": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 2)) return args.res; break;
+							case "SETNS": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 3)) return args.res; break;
+							case "SETP": case "SETPE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 4)) return args.res; break;
+							case "SETNP": case "SETPO": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 5)) return args.res; break;
+							case "SETO": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 6)) return args.res; break;
+							case "SETNO": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 7)) return args.res; break;
+							case "SETC": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 8)) return args.res; break;
+							case "SETNC": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 9)) return args.res; break;
 
-							case "SETB": case "SETNAE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 10, 1)) return args.res; break;
-							case "SETBE": case "SETNA": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 11, 1)) return args.res; break;
-							case "SETA": case "SETNBE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 12, 1)) return args.res; break;
-							case "SETAE": case "SETNB": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 13, 1)) return args.res; break;
+							case "SETB": case "SETNAE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 10)) return args.res; break;
+							case "SETBE": case "SETNA": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 11)) return args.res; break;
+							case "SETA": case "SETNBE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 12)) return args.res; break;
+							case "SETAE": case "SETNB": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 13)) return args.res; break;
 
-							case "SETL": case "SETNGE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 14, 1)) return args.res; break;
-							case "SETLE": case "SETNG": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 15, 1)) return args.res; break;
-							case "SETG": case "SETNLE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 16, 1)) return args.res; break;
-							case "SETGE": case "SETNL": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 17, 1)) return args.res; break;
+							case "SETL": case "SETNGE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 14)) return args.res; break;
+							case "SETLE": case "SETNG": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 15)) return args.res; break;
+							case "SETG": case "SETNLE": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 16)) return args.res; break;
+							case "SETGE": case "SETNL": if (!args.TryProcessUnaryOp(OPCode.SETcc, true, 17)) return args.res; break;
 
 							case "MOV": if (!args.TryProcessBinaryOp(OPCode.MOV)) return args.res; break;
 
