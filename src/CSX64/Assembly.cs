@@ -3735,6 +3735,25 @@ namespace CSX64
 				return true;
 			}
 
+			public bool TryProcessDEBUG_mem()
+			{
+				if (args.Length != 2) { res = new AssembleResult(AssembleError.ArgCount, $"line {line}: Expected 2 args" ); return false; }
+
+				// write op code
+				if (!TryAppendByte((byte)OPCode.DEBUG) || !TryAppendByte(3)) return false;
+
+				if (!TryParseAddress(args[0], out UInt64 a, out UInt64 b, out Expr ptr_base, out UInt64 sizecode, out bool explicit_size)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected memory operand as first arg\n-> {res.ErrorMsg}"); return false; }
+
+				if (!TryParseImm(args[1], out Expr count, out sizecode, out explicit_size, out bool strict)) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: Expected imm as second arg\n-> {res.ErrorMsg}"); return false; }
+				if (explicit_size) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A size directive in this context is not allowed"); return false; }
+				if (strict) { res = new AssembleResult(AssembleError.UsageError, $"line {line}: A STRICT specifier in this context is not allowed"); return false; }
+
+				if (!TryAppendAddress(a, b, ptr_base)) return false;
+				if (!TryAppendExpr(8, count)) return false;
+
+				return true;
+			}
+
             // -- x86 op formats -- //
             
             public bool TryProcessTernaryOp(OPCode op, bool has_ext_op = false, byte ext_op = 0, UInt64 sizemask = 15)
@@ -6393,12 +6412,12 @@ namespace CSX64
 							case "CVTPD2PS": if (!args.TryProcessVPUCVT_packed_f2f(OPCode.VPU_CVT, false)) return args.res; break;
 							case "CVTPS2PD": if (!args.TryProcessVPUCVT_packed_f2f(OPCode.VPU_CVT, true)) return args.res; break;
 
-
 							// misc instructions
 
 							case "DEBUG_CPU": if (!args.TryProcessNoArgOp(OPCode.DEBUG, true, 0)) return args.res; break;
 							case "DEBUG_VPU": if (!args.TryProcessNoArgOp(OPCode.DEBUG, true, 1)) return args.res; break;
 							case "DEBUG_FULL": if (!args.TryProcessNoArgOp(OPCode.DEBUG, true, 2)) return args.res; break;
+							case "DEBUG_MEM": if (!args.TryProcessDEBUG_mem()) return args.res; break;
 
 							// disambiguation
 

@@ -4339,5 +4339,34 @@ namespace CSX64
                 default: Terminate(ErrorCode.UndefinedBehavior); return false;
             }
         }
-    }
+
+		// ----------------------------------------------------------------------------------
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public bool ProcessDEBUG()
+		{
+			UInt64 op, temp;
+			if (!GetMemAdv(1, out op)) return false;
+
+			switch (op)
+			{
+				case 0: Console.WriteLine(GetCPUDebugString()); break;
+				case 1: Console.WriteLine(GetVPUDebugString()); break;
+				case 2: Console.WriteLine(GetFullDebugString()); break;
+				case 3:
+					if (!GetAddressAdv(out op) || !GetMemAdv(8, out temp)) { Terminate(ErrorCode.UndefinedBehavior); return false; }
+
+					// if starting position is out of bounds, print 0 characters (don't no-op cause then user might think it's not working)
+					if (op >= MemorySize) temp = 0;
+					// otherwise if printing more than exists, print as many as possible instead
+					else if (temp > MemorySize || op + temp > MemorySize) temp = MemorySize - op;
+
+					Console.WriteLine(Memory.Dump((int)op, (int)temp));
+					break;
+
+				default: Terminate(ErrorCode.UndefinedBehavior); return false;
+			}
+			return true;
+		}
+	}
 }

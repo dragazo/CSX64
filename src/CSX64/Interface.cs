@@ -514,17 +514,7 @@ namespace CSX64
 
                     // misc instructions
 
-                    case OPCode.DEBUG: // all debugging features
-                        if (!GetMemAdv(1, out op)) break;
-                        switch (op)
-                        {
-                            case 0: Console.WriteLine(GetCPUDebugString()); break;
-                            case 1: Console.WriteLine(GetVPUDebugString()); break;
-                            case 2: Console.WriteLine(GetFullDebugString()); break;
-
-                            default: Terminate(ErrorCode.UndefinedBehavior); break;
-                        }
-                        break;
+                    case OPCode.DEBUG: ProcessDEBUG(); break;
 
                     // otherwise, unknown opcode
                     default: Terminate(ErrorCode.UnknownOp); break;
