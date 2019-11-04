@@ -250,6 +250,7 @@ namespace CSX64
 				b.top_level_index = (int)reader.ReadUInt64();
 				b.start = (int)reader.ReadUInt64();
 				b.length = (int)reader.ReadUInt64();
+				literals.Add(b);
 			}
 		}
 	}
@@ -323,7 +324,7 @@ namespace CSX64
 		/// <summary>
 		/// the collection of binary literals defined in the file
 		/// </summary>
-		internal BinaryLiteralCollection Literals;
+		internal BinaryLiteralCollection Literals = new BinaryLiteralCollection();
 
 		// -- state -- //
 
@@ -6521,7 +6522,7 @@ namespace CSX64
         /// <param name="objs">the object files to link. should all be clean. the first item in this array is the _start file</param>
         /// <param name="entry_point">the raw starting file</param>
         /// <exception cref="ArgumentException"></exception>
-        public static LinkResult Link(Executable exe, ObjectFile[] objs, string entry_point = "main")
+        public static LinkResult Link(Executable exe, KeyValuePair<string, ObjectFile>[] objs, string entry_point = "main")
         {
             // parsing locations for evaluation
             UInt64 _res;
@@ -6538,15 +6539,15 @@ namespace CSX64
             if (objs == null || objs.Length == 0) return new LinkResult(LinkError.EmptyResult, $"Got no object files");
 
             // make sure all object files are starting out clean
-            foreach (ObjectFile obj in objs) if (!obj.IsClean) throw new ArgumentException("Attempt to use dirty object file");
+            foreach (var obj in objs) if (!obj.Value.IsClean) throw new ArgumentException("Attempt to use dirty object file");
 
             // -- validate _start file -- //
 
             // _start file must declare an external named "_start"
-            if (!objs[0].ExternalSymbols.Contains("_start")) return new LinkResult(LinkError.FormatError, "_start file must declare an external named \"_start\"");
+            if (!objs[0].Value.ExternalSymbols.Contains("_start")) return new LinkResult(LinkError.FormatError, "_start file must declare an external named \"_start\"");
 
             // rename "_start" symbol in _start file to whatever the entry point is (makes _start dirty)
-            try { objs[0].IsClean = false; objs[0].RenameSymbol("_start", entry_point); }
+            try { objs[0].Value.IsClean = false; objs[0].Value.RenameSymbol("_start", entry_point); }
             catch (Exception ex) { return new LinkResult(LinkError.FormatError, ex.ToString()); }
 
             // -- define things -- //
@@ -6564,15 +6565,15 @@ namespace CSX64
             UInt64 bssalign = 1;
 
             // a table for relating global symbols to their object file
-            var global_to_obj = new Dictionary<string, ObjectFile>();
+            var global_to_obj = new Dictionary<string, KeyValuePair<string, ObjectFile>>();
 
             // the queue of object files that need to be added to the executable
-            var include_queue = new Queue<ObjectFile>();
+            var include_queue = new Queue<KeyValuePair<string, ObjectFile>>();
             // a table for relating included object files to their beginning positions in the resulting binary (text, rodata, data, bss) tuples
-            var included = new Dictionary<ObjectFile, Tuple<UInt64, UInt64, UInt64, UInt64>>();
+            var included = new Dictionary<KeyValuePair<string, ObjectFile>, Tuple<UInt64, UInt64, UInt64, UInt64>>();
 
 			BinaryLiteralCollection total_literals = new BinaryLiteralCollection(); // destination to merge all binary literals throughout all included object files
-			Dictionary<ObjectFile, List<UInt64>> obj_to_total_literals_locations = new Dictionary<ObjectFile, List<UInt64>>(); // maps from an included object file to its literal index map in total_literals
+			var obj_to_total_literals_locations = new Dictionary<KeyValuePair<string, ObjectFile>, UInt64[]>(); // maps from an included object file to its literal index map in total_literals
 
 			UInt64 literals_size; // the total size of all (top level) literals merged together
 			UInt64[] rodata_top_level_literal_offsets; // offsets of each top level literal in the rodata segment
@@ -6580,14 +6581,14 @@ namespace CSX64
             // -- populate things -- //
 
             // populate global_to_obj with ALL global symbols
-            foreach (ObjectFile obj in objs)
+            foreach (var obj in objs)
             {
-                foreach (string global in obj.GlobalSymbols)
+                foreach (string global in obj.Value.GlobalSymbols)
                 {
                     // make sure source actually defined this symbol (just in case of corrupted object file)
-                    if (!obj.Symbols.TryGetValue(global, out Expr value)) return new LinkResult(LinkError.MissingSymbol, $"Global symbol \"{global}\" was not defined");
+                    if (!obj.Value.Symbols.TryGetValue(global, out Expr value)) return new LinkResult(LinkError.MissingSymbol, $"{obj.Key}: Global symbol \"{global}\" was not defined");
                     // make sure it wasn't already defined
-                    if (global_to_obj.ContainsKey(global)) return new LinkResult(LinkError.SymbolRedefinition, $"Global symbol \"{global}\" was defined by multiple sources");
+                    if (global_to_obj.ContainsKey(global)) return new LinkResult(LinkError.SymbolRedefinition, $"{obj.Key}: Global symbol \"{global}\" was already defined by {global_to_obj[global].Key}");
 
                     // add to the table
                     global_to_obj.Add(global, obj);
@@ -6597,11 +6598,11 @@ namespace CSX64
             // -- verify things -- //
 
             // make sure no one defined over reserved symbol names
-            foreach (ObjectFile obj in objs)
+            foreach (var obj in objs)
             {
                 // only the verify ignores are a problem (because we'll be defining those)
                 foreach (string reserved in VerifyLegalExpressionIgnores)
-                    if (obj.Symbols.ContainsKey(reserved)) return new LinkResult(LinkError.SymbolRedefinition, $"Object file defined symbol with name \"{reserved}\" (reserved)");
+                    if (obj.Value.Symbols.ContainsKey(reserved)) return new LinkResult(LinkError.SymbolRedefinition, $"{obj.Key}: defined symbol with name \"{reserved}\" (reserved)");
             }
 
             // start the merge process with the _start file
@@ -6612,8 +6613,10 @@ namespace CSX64
             // while there are still things in queue
             while (include_queue.Count > 0)
             {
-                // get the object file we need to incorporate
-                ObjectFile obj = include_queue.Dequeue();
+				// get the object file we need to incorporate
+				var item = include_queue.Dequeue();
+				ObjectFile obj = item.Value;
+
                 // all included files are dirty
                 obj.IsClean = false;
 
@@ -6630,7 +6633,7 @@ namespace CSX64
                 bssalign = Math.Max(bssalign, obj.BSSAlign);
 
                 // add it to the set of included files
-                included.Add(obj, new Tuple<UInt64, UInt64, UInt64, UInt64>((UInt64)text.Count, (UInt64)rodata.Count, (UInt64)data.Count, bsslen));
+                included.Add(item, new Tuple<UInt64, UInt64, UInt64, UInt64>((UInt64)text.Count, (UInt64)rodata.Count, (UInt64)data.Count, bsslen));
                 
                 // offset holes to be relative to the start of their total segment (not relative to resulting file)
                 foreach (HoleData hole in obj.TextHoles) hole.Address += (UInt32)text.Count;
@@ -6647,7 +6650,7 @@ namespace CSX64
                 foreach (string external in obj.ExternalSymbols)
                 {
                     // if this is a global symbol somewhere
-                    if (global_to_obj.TryGetValue(external, out ObjectFile global_source))
+                    if (global_to_obj.TryGetValue(external, out var global_source))
                     {
                         // if the source isn't already included and it isn't already in queue to be included
                         if (!included.ContainsKey(global_source) && !include_queue.Contains(global_source))
@@ -6657,7 +6660,7 @@ namespace CSX64
                         }
                     }
                     // otherwise it wasn't defined
-                    else return new LinkResult(LinkError.MissingSymbol, $"No global symbol found to match external symbol \"{external}\"");
+                    else return new LinkResult(LinkError.MissingSymbol, $"{item.Key}: No global symbol found to match external symbol \"{external}\"");
                 }
 
 				// merge top level binary literals for this include file and fix their aliasing literal ranges
@@ -6683,8 +6686,8 @@ namespace CSX64
 				}
 
 				// insert a new literal locations map (pre-sized) and alias it
-				List<UInt64> literal_locations = new List<UInt64>(obj.Literals.literals.Count);
-				obj_to_total_literals_locations.Add(obj, literal_locations);
+				UInt64[] literal_locations = new UInt64[obj.Literals.literals.Count];
+				obj_to_total_literals_locations.Add(item, literal_locations);
 
 				// merge the (fixed) aliasing literal ranges
 				for (int i = 0; i < obj.Literals.literals.Count; ++i)
@@ -6698,7 +6701,7 @@ namespace CSX64
 				obj.Literals.literals.Clear();
 				obj.Literals.top_level_literals.Clear();
 			}
-
+			
 			// after merging, but before alignment, we need to handle all the provisioned binary literals.
 			// we'll just dump them all in the rodata segment (they're required to be read-only from a user perspective esp since they can alias)
 			literals_size = 0;
@@ -6719,8 +6722,8 @@ namespace CSX64
 
 			// and now go ahead and resolve all the missing binary literal symbols with relative address from the rodata origin
 			foreach (var entry in obj_to_total_literals_locations)
-		{
-				for (int i = 0; i < entry.Value.Count; ++i)
+			{
+				for (int i = 0; i < entry.Value.Length; ++i)
 				{
 					// alias the literal range in total_literals
 					BinaryLiteralCollection.BinaryLiteral lit = total_literals.literals[(int)entry.Value[i]];
@@ -6728,10 +6731,10 @@ namespace CSX64
 					// construct the expr to alias the correct location in the rodata segment
 					Expr expr = new Expr() { OP = Expr.OPs.Add,
 						Left = new Expr() { Token = SegOrigins[AsmSegment.RODATA] },
-						Right = new Expr() {IntResult= rodata_top_level_literal_offsets[lit.top_level_index] + (UInt64)lit.start } };
+						Right = new Expr() {IntResult = rodata_top_level_literal_offsets[lit.top_level_index] + (UInt64)lit.start } };
 
 					// inject the symbol definition into the object file's symbol table
-					entry.Key.Symbols.Add($"{BinaryLiteralSymbolPrefix}{i:x}", expr);
+					entry.Key.Value.Symbols.Add($"{BinaryLiteralSymbolPrefix}{i:x}", expr);
 				}
 			}
 
@@ -6745,7 +6748,7 @@ namespace CSX64
             foreach (var entry in included)
             {
                 // alias the object file
-                ObjectFile obj = entry.Key;
+                ObjectFile obj = entry.Key.Value;
 
                 // define the segment origins
                 obj.Symbols.Add(SegOrigins[AsmSegment.TEXT], new Expr() { IntResult = 0 });
@@ -6767,20 +6770,27 @@ namespace CSX64
                 {
                     // if it can't be evaluated internally, it's an error (i.e. cannot define a global in terms of another file's globals)
                     if (!obj.Symbols[global].Evaluate(obj.Symbols, out _res, out _floating, ref _err))
-                        return new LinkResult(LinkError.MissingSymbol, $"Global symbol \"{global}\" could not be evaluated internally");
-                }
-
-                // for each external symbol
-                foreach (string external in obj.ExternalSymbols)
-                {
-                    // add externals to local scope //
-
-                    // if obj already has a symbol of the same name
-                    if (obj.Symbols.ContainsKey(external)) return new LinkResult(LinkError.SymbolRedefinition, $"Object file defined external symbol \"{external}\"");
-                    // otherwise define it as a local in obj
-                    else obj.Symbols.Add(external, global_to_obj[external].Symbols[external]);
+                        return new LinkResult(LinkError.MissingSymbol, $"{entry.Key}: Global symbol \"{global}\" could not be evaluated internally");
                 }
             }
+
+			// this needs to be done after the previous loop to ensure globals have been evaluated before copying them 
+			foreach (var entry in included)
+			{
+				// alias the object file
+				ObjectFile obj = entry.Key.Value;
+
+				// for each external symbol
+				foreach (string external in obj.ExternalSymbols)
+				{
+					// add externals to local scope //
+
+					// if obj already has a symbol of the same name
+					if (obj.Symbols.ContainsKey(external)) return new LinkResult(LinkError.SymbolRedefinition, $"{entry.Key}: defined external symbol \"{external}\"");
+					// otherwise define it as a local in obj
+					else obj.Symbols.Add(external, global_to_obj[external].Value.Symbols[external]);
+				}
+			}
 
             // -- patch things -- //
 
@@ -6788,12 +6798,12 @@ namespace CSX64
             foreach (var entry in included)
             {
                 // alias object file
-                ObjectFile obj = entry.Key;
+                ObjectFile obj = entry.Key.Value;
 
-                // patch all the holes
-                if (!_FixAllHoles(obj.Symbols, obj.TextHoles, text, ref res)) return res;
-                if (!_FixAllHoles(obj.Symbols, obj.RodataHoles, rodata, ref res)) return res;
-                if (!_FixAllHoles(obj.Symbols, obj.DataHoles, data, ref res)) return res;
+				// patch all the holes
+				if (!_FixAllHoles(obj.Symbols, obj.TextHoles, text, ref res)) return new LinkResult(res.Error, $"{entry.Key.Key}:\n{res.ErrorMsg}");
+                if (!_FixAllHoles(obj.Symbols, obj.RodataHoles, rodata, ref res)) return new LinkResult(res.Error, $"{entry.Key.Key}:\n{res.ErrorMsg}");
+                if (!_FixAllHoles(obj.Symbols, obj.DataHoles, data, ref res)) return new LinkResult(res.Error, $"{entry.Key.Key}:\n{res.ErrorMsg}");
             }
 
 			// -- finalize things -- //

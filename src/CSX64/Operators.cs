@@ -4350,9 +4350,9 @@ namespace CSX64
 
 			switch (op)
 			{
-				case 0: Console.WriteLine(GetCPUDebugString()); break;
-				case 1: Console.WriteLine(GetVPUDebugString()); break;
-				case 2: Console.WriteLine(GetFullDebugString()); break;
+				case 0: Console.WriteLine(); Console.WriteLine(GetCPUDebugString()); break;
+				case 1: Console.WriteLine(); Console.WriteLine(GetVPUDebugString()); break;
+				case 2: Console.WriteLine(); Console.WriteLine(GetCPUDebugString()); Console.WriteLine(); Console.WriteLine(GetVPUDebugString()); break;
 				case 3:
 					if (!GetAddressAdv(out op) || !GetMemAdv(8, out temp)) { Terminate(ErrorCode.UndefinedBehavior); return false; }
 
@@ -4361,7 +4361,8 @@ namespace CSX64
 					// otherwise if printing more than exists, print as many as possible instead
 					else if (temp > MemorySize || op + temp > MemorySize) temp = MemorySize - op;
 
-					Console.WriteLine(Memory.Dump((int)op, (int)temp));
+					Console.WriteLine();
+					Console.WriteLine(Memory.Dump(op, temp));
 					break;
 
 				default: Terminate(ErrorCode.UndefinedBehavior); return false;

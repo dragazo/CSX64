@@ -74,62 +74,77 @@ namespace CSX64
 
         private bool Sys_Open()
         {
-            // make sure we're allowed to do this
-            if (!FSF) { Terminate(ErrorCode.FSDisabled); return false; }
+			// make sure we're allowed to do this
+			if (!FSF) { Terminate(ErrorCode.FSDisabled); return false; }
 
             // get an available file descriptor
             int fd_index = FindAvailableFD();
-            if (fd_index < 0) { RAX = ~(UInt64)0; return true; }
+			if (fd_index < 0) { RAX = ~(UInt64)0; return true; }
 
             // get path
             if (!GetCString(RBX, out string path)) return false;
 
             int raw_flags = (int)RCX; // flags provided by user
-            FileAccess file_access = 0; // file access for c#
-            FileMode file_mode = 0;     // file mode for c#
+            FileAccess file_access;   // file access for c#
+            FileMode file_mode;       // file mode for c#
 
             // alias permissions flags for convenience
-            bool can_read = (raw_flags & (int)OpenFlags.read) != 0;
-            bool can_write = (raw_flags & (int)OpenFlags.write) != 0;
+            bool read = (raw_flags & (int)OpenFlags.read) != 0;
+            bool write = (raw_flags & (int)OpenFlags.write) != 0;
+			bool create = (raw_flags & (int)OpenFlags.create) != 0;
+			bool temp = (raw_flags & (int)OpenFlags.temp) != 0;
+			bool trunc = (raw_flags & (int)OpenFlags.trunc) != 0;
+			bool append = (raw_flags & (int)OpenFlags.append) != 0;
 
-            // process raw flags
-            if (can_read) file_access |= FileAccess.Read;
-            if (can_write) file_access |= FileAccess.Write;
+			// temp files not currently supported (no platform-independent way to pull it off)
+			if (temp) { RAX = ~(UInt64)0; return true; }
 
-            if ((raw_flags & (int)OpenFlags.trunc) != 0) file_mode |= FileMode.Truncate;
+			// process raw flags - i know this could be shortened, but it's far more readable this way
+			if (read && write)
+			{
+				file_access = FileAccess.ReadWrite;
 
-            if ((raw_flags & (int)OpenFlags.append) != 0) file_mode |= FileMode.Append;
+				if (create && trunc) file_mode = FileMode.Create;
+				else if (create) file_mode = FileMode.OpenOrCreate;
+				else if (trunc) file_mode = FileMode.Truncate;
+				else file_mode = FileMode.Open;
 
-            // handle creation mode flags
-            if ((raw_flags & (int)OpenFlags.temp) != 0)
-            {
-                // get the temp name (std::tmpnam is deprecated so we'll do something less fancy)
-                string tmp_path;
+				// does opening in append mode for read/write even make sense? no c# option to do it, anyway
+				if (append) { RAX = ~(UInt64)0; return true; }
+			}
+			else if (read)
+			{
+				file_access = FileAccess.Read;
 
-                // get a tmp file path
-                do
-                {
-                    tmp_path = $"{path}/{Rand.NextUInt64():x16}.tmp";
-                }
-                // repeat while that already exists
-                while (File.Exists(tmp_path));
+				if (create && trunc) file_mode = FileMode.Create;
+				else if (create) file_mode = FileMode.OpenOrCreate;
+				else if (trunc) file_mode = FileMode.Truncate;
+				else file_mode = FileMode.Open;
 
-                // update path and create it
-                path = tmp_path;
-                using (FileStream _f = File.Create(path)) { }
-            }
-            else if ((raw_flags & (int)OpenFlags.create) != 0) file_mode |= FileMode.OpenOrCreate;
+				if (append) { RAX = ~(UInt64)0; return true; }
+			}
+			else if (write)
+			{
+				file_access = FileAccess.Write;
+
+				if (append) file_mode = FileMode.Append;
+				else if (create && trunc) file_mode = FileMode.Create;
+				else if (create) file_mode = FileMode.OpenOrCreate;
+				else if (trunc) file_mode = FileMode.Truncate;
+				else file_mode = FileMode.Open;
+			}
+			else { RAX = ~(UInt64)0; return true; }
             
             // open the file
             FileStream f = null;
             try { f = new FileStream(path, file_mode, file_access); }
-            catch (Exception) { RAX = ~(UInt64)0; return true; }
+			catch (Exception) { RAX = ~(UInt64)0; return true; }
 
             // store in the file descriptor
-            FileDescriptors[fd_index] = new BasicFileWrapper(f, true, false, can_read, can_write, true);
+            FileDescriptors[fd_index] = new BasicFileWrapper(f, true, false, read, write, true);
             RAX = (UInt64)fd_index;
 
-            return true;
+			return true;
         }
         private bool Sys_Close()
         {
@@ -213,13 +228,21 @@ namespace CSX64
             // get the path
             if (!GetCString(RBX, out string path)) return false;
 
-            // attempt the unlink operation - using delete, but it must not be a directory - success = 0, failure = -1
-            try { if (!Directory.Exists(path)) File.Delete(path); RAX = 0; }
-            catch (Exception) { RAX = ~(UInt64)0; }
+			// attempt the unlink operation - using delete, but it must not be a directory - success = 0, failure = -1
+			try
+			{
+				if (!Directory.Exists(path) & File.Exists(path))
+				{
+					File.Delete(path); // extra exists() check is because this returns void and doesn't throw if file doesn't exist
+					RAX = 0;
+				}
+				else RAX = ~(UInt64)0;
+			}
+			catch (Exception) { RAX = ~(UInt64)0; }
 
             return true;
         }
-
+		
         private bool Sys_Mkdir()
         {
             // make sure we're allowed to do this

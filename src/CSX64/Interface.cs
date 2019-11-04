@@ -563,17 +563,10 @@ namespace CSX64
 
                 for (int j = 7; j >= 0; --j) b.Append($"{ZMMRegisters[i].int64(j):x16} ");
 
-                b.Append('\n');
+                if (i != ZMMRegisters.Length - 1) b.Append('\n');
             }
 
             return b.ToString();
-        }
-        /// <summary>
-        /// Creates a string containing both <see cref="GetCPUDebugString"/> and <see cref="GetVPUDebugString"/>
-        /// </summary>
-        public string GetFullDebugString()
-        {
-            return GetCPUDebugString() + "\n" + GetVPUDebugString();
         }
     }
 }

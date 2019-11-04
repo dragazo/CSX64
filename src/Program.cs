@@ -291,7 +291,7 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 		/// </summary>
 		/// <param name="objs">the resulting list of object files (new entries appended to the end)</param>
 		/// <param name="path">the directory to load</param>
-		private static int LoadObjectFileDir(this List<ObjectFile> objs, string path)
+		private static int LoadObjectFileDir(this List<KeyValuePair<string, ObjectFile>> objs, string path)
 		{
 			if (!Directory.Exists(path)) { Console.Error.WriteLine($"no directory found: {path}"); return (int)AsmLnkErrorExt.DirectoryNotFound; }
 
@@ -301,7 +301,7 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 				ObjectFile obj = new ObjectFile();
 				int ret = LoadObjectFile(file, obj);
 				if (ret != 0) return ret;
-				objs.Add(obj);
+				objs.Add(new KeyValuePair<string, ObjectFile>(file, obj));
 			}
 
 			return 0;
@@ -387,7 +387,7 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 		/// </summary>
 		/// <param name="objs">the destination for storing loaded stdlib object files (appended to end)</param>
 		/// <param name="rootdir">the root directory to use for core file lookup - null for default</param>
-		private static int LoadStdlibObjs(List<ObjectFile> objs, string rootdir)
+		private static int LoadStdlibObjs(List<KeyValuePair<string, ObjectFile>> objs, string rootdir)
 		{
 			// get exe directory - default to provided root dir if present
 			string dir = rootdir ?? ExeDir;
@@ -398,7 +398,7 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 			ObjectFile _start = new ObjectFile();
 			int ret = LoadObjectFile(dir + "/_start.o", _start);
 			if (ret != 0) return ret;
-			objs.Add(_start);
+			objs.Add(new KeyValuePair<string, ObjectFile>(dir + "/_start.o", _start));
 
 			// load the stdlib files
 			return LoadObjectFileDir(objs, dir + "/stdlib");
@@ -413,7 +413,7 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 		/// <param name="rootdir">the root directory to use for core file lookup - null for default</param>
 		private static int Link(Executable dest, List<string> files, string entry_point, string rootdir)
 		{
-			var objs = new List<ObjectFile>();
+			var objs = new List<KeyValuePair<string, ObjectFile>>();
 
 			// load the stdlib files
 			int ret = LoadStdlibObjs(objs, rootdir);
@@ -426,7 +426,7 @@ Report bugs to: https://github.com/dragazo/CSX64/issues
 				ObjectFile obj = new ObjectFile();
 				ret = file.EndsWith(".o") ? LoadObjectFile(file, obj) : Assemble(file, obj);
 				if (ret != 0) return ret;
-				objs.Add(obj);
+				objs.Add(new KeyValuePair<string, ObjectFile>(file, obj));
 			}
 
 			// link the resulting object files into an executable
@@ -753,7 +753,7 @@ so most of it won't work on this system!
 				if (!dat.parse(args)) return 0;
 
 				// ------------------------------------- //
-
+				
 				// perform the action
 				switch (dat.action)
 				{
@@ -837,7 +837,7 @@ so most of it won't work on this system!
 						}
 
 					case ProgramAction.Link:
-
+						
 						{
 							if (dat.pathspec.Count == 0) { Console.Error.WriteLine("Linker expected 1+ files to link"); return 0; }
 

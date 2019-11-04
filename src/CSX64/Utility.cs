@@ -341,8 +341,10 @@ namespace CSX64
             StringBuilder b = new StringBuilder();
 
             // process all the rows
-            foreach (string[] row in rows)
+            for (int _row = 0; _row < rows.Length; ++_row)
             {
+				string[] row = rows[_row];
+
                 // null allows for easy empty rows
                 if (row != null)
                 {
@@ -357,7 +359,7 @@ namespace CSX64
                 }
 
                 // next line
-                b.Append('\n');
+                if (_row != rows.Length - 1) b.Append('\n');
             }
 
             return b.ToString();
@@ -473,35 +475,45 @@ namespace CSX64
         /// <param name="data">the data to dump</param>
         /// <param name="start">the index at which to begin dumping</param>
         /// <param name="count">the number of bytes to write</param>
-        public static string Dump(this byte[] data, int start, int count)
+        public static string Dump(this byte[] data, UInt64 start, UInt64 count)
         {
             StringBuilder dump = new StringBuilder();
 
+			char[] str = new char[17]; // create a 16 character dump string
+			str[16] = '\n';            // each string dump is at the end of a line
+
+			int len = 0; // current length of str
+
             // make a header
-            dump.Append("           ");
-            for (int i = 0; i < 16; ++i) dump.Append($" {i:x} ");
+            dump.Append("                  0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f\n");
+			dump.Append($"{start & ~(UInt64)15:x16} ");
 
-            // if it's not starting on a new row
-            if (start % 16 != 0)
-            {
-                // we need to write a line header
-                dump.Append($"\n{start - start % 16:x8} - ");
+			// tack on white space to skip any characters we're missing in the first row
+			for (UInt64 i = start & (UInt64)15; i > 0; --i)
+			{
+				dump.Append("   ");
+				str[len++] = ' '; // for any skipped byte, set its string char to space
+			}
 
-                // and tack on some white space
-                for (int i = 0; i < start % 16; ++i) dump.Append("   ");
-            }
+			// write the data
+			for (UInt64 i = 0; i < count; ++i)
+			{
+				// if we just finished a row, write the string dump and the next hex dump address
+				if (len == 16)
+				{
+					dump.Append(str);
+					dump.Append($"{start + i:x16} ");
+					len = 0;
+				}
 
-            // write the data
-            for (int i = 0; i < count; ++i)
-            {
-                // start of new row gets a line header
-                if ((start + i) % 16 == 0) dump.Append($"\n{start + i:x8} - ");
+				byte ch = data[start + i]; // get the character to print
+				dump.Append($"{ch:x2} ");  // print it to the hex dump
+				str[len++] = char.IsControl((char)ch) ? '.' : (char)ch; // if the character is printable, use it for the string dump, otherwise use '.'
+			}
 
-                dump.Append($"{data[start + i]:x2} ");
-            }
-
-            // end with a new line
-            dump.Append('\n');
+			// finish off the last row
+			for (int i = 16 - len; i > 0; --i) dump.Append("   ");
+			dump.Append(str, 0, len);
 
             return dump.ToString();
         }
@@ -510,12 +522,12 @@ namespace CSX64
         /// </summary>
         /// <param name="data">the data to dump</param>
         /// <param name="start">the index at which to begin dumping</param>
-        public static string Dump(this byte[] data, int start) => data.Dump(start, data.Length - start);
+        public static string Dump(this byte[] data, UInt64 start) => data.Dump(start, (UInt64)data.Length - start);
         /// <summary>
         /// returns a binary dump representation of the data
         /// </summary>
         /// <param name="data">the data to dump</param>
-        public static string Dump(this byte[] data) => data.Dump(0, data.Length);
+        public static string Dump(this byte[] data) => data.Dump(0, (UInt64)data.Length);
 
         // -- serialization utilities -- //
 
